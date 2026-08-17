@@ -1,0 +1,50 @@
+:root {
+  --color-blue: #005184;
+  --color-green: #88b787;
+  --color-cyan: #43afcd;
+  --color-teal: #55b09d;
+  --color-ink: #212121;
+  --color-ink-soft: #4a5560;
+  --color-ink-mute: #6b7680;
+  --color-off: #f4f7f9;
+  --color-mist: #eaf1f4;
+  --color-line: #dce6eb;
+  --gradient-brand: linear-gradient(120deg, #009bdd, #75a02f);
+  --font-display: "Fraunces", serif;
+  --font-body: "Open Sans", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-off);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3,
+.display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Petal motif "breathe" keyframe — ported from kognoz-social-studio-v3.jsx
+   line 1897, where it's injected via a <style> tag in the App shell. Global
+   CSS is the equivalent (and simpler) place for it in Next.js. */
+@keyframes kzBreathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
