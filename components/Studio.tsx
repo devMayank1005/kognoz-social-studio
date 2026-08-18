@@ -158,12 +158,17 @@ export default function Studio() {
 
   // Collapsible sidebar state (persisted across sessions)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem("studio-sidebar-collapsed");
       if (saved === "true") setSidebarCollapsed(true);
     } catch {}
+
+    const handleResize = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   const toggleSidebar = () => {
@@ -220,13 +225,17 @@ export default function Studio() {
   const fmt = FORMATS[format];
   const baseW = fmt.w;
   const baseH = fmt.h;
-  const previewW = baseW > 2000
+  const isMobile = winW < 768;
+  const maxAvailW = Math.max(260, isMobile ? winW - 32 : sidebarCollapsed ? winW - 48 : winW - 440);
+  const idealW = baseW > 2000
     ? (sidebarCollapsed ? 1080 : 780)
     : baseW > baseH
     ? (sidebarCollapsed ? 860 : 620)
     : baseH > 1500
     ? (sidebarCollapsed ? 440 : 330)
     : (sidebarCollapsed ? 540 : 400);
+
+  const previewW = Math.min(idealW, maxAvailW);
   const previewScale = previewW / baseW;
 
   type DeckItem = { kind: SlideKind } & Partial<CoercedSlide>;
@@ -521,39 +530,43 @@ export default function Studio() {
       {/* ---------------- CONTROLS SIDEBAR (Fully Collapsible) ---------------- */}
       <div
         style={{
-          width: sidebarCollapsed ? 0 : 400,
-          minWidth: sidebarCollapsed ? 0 : 400,
-          maxWidth: sidebarCollapsed ? 0 : 400,
+          width: sidebarCollapsed ? 0 : isMobile ? "100vw" : 400,
+          minWidth: sidebarCollapsed ? 0 : isMobile ? "100vw" : 400,
+          maxWidth: sidebarCollapsed ? 0 : isMobile ? "100vw" : 400,
           flexShrink: 0,
           background: C.white,
           borderRight: sidebarCollapsed ? "none" : `1px solid ${C.line}`,
           overflowY: sidebarCollapsed ? "hidden" : "auto",
           overflowX: "hidden",
-          padding: sidebarCollapsed ? 0 : "26px 24px",
+          padding: sidebarCollapsed ? 0 : isMobile ? "20px 18px" : "26px 24px",
           opacity: sidebarCollapsed ? 0 : 1,
           pointerEvents: sidebarCollapsed ? "none" : "auto",
           transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease, opacity 0.2s ease",
           display: "flex",
           flexDirection: "column",
-          position: "relative",
-          zIndex: 20
+          position: isMobile ? "fixed" : "relative",
+          top: 0,
+          left: 0,
+          height: isMobile ? "100vh" : "auto",
+          zIndex: 50,
+          boxSizing: "border-box"
         }}
       >
-        <div style={{ width: 352, minWidth: 352, display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <Logo h={36} />
+        <div style={{ width: "100%", maxWidth: 352, display: "flex", flexDirection: "column", margin: isMobile ? "0 auto" : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <Logo h={32} />
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {session?.user && (
                 <span
                   title={session.user.email || ""}
                   style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: C.inkSoft,
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    color: C.blue,
                     background: C.mist,
-                    padding: "4px 8px",
+                    padding: "4px 9px",
                     borderRadius: 12,
-                    maxWidth: 100,
+                    maxWidth: 120,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap"
@@ -562,14 +575,14 @@ export default function Studio() {
                   {session.user.name || session.user.email?.split("@")[0]}
                 </span>
               )}
-              {/* Complete Minimize Button */}
+              {/* Complete Minimize / Close Button */}
               <button
                 type="button"
                 onClick={toggleSidebar}
-                title="Minimize sidebar completely"
+                title="Minimize sidebar"
                 style={{
                   height: 28,
-                  padding: "0 9px",
+                  padding: "0 10px",
                   borderRadius: 6,
                   border: `1px solid ${C.line}`,
                   background: C.mist,
@@ -577,14 +590,14 @@ export default function Studio() {
                   fontSize: 11.5,
                   fontWeight: 700,
                   cursor: "pointer",
-                  display: "flex",
+                  display: "inline-flex",
                   alignItems: "center",
                   gap: 5,
                   transition: "all 0.15s ease"
                 }}
               >
                 <span>◀</span>
-                <span>Minimize</span>
+                <span>{isMobile ? "Close" : "Minimize"}</span>
               </button>
               {session?.user && (
                 <button
@@ -845,63 +858,69 @@ export default function Studio() {
       </div>
 
       {/* ---------------- PREVIEW CANVAS ---------------- */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", background: "#E6ECF0", padding: sidebarCollapsed ? "24px 24px 40px" : "56px 24px 40px", position: "relative", overflowY: "auto", overflowX: "auto", transition: "padding 0.28s ease" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", background: "#E6ECF0", padding: sidebarCollapsed ? (isMobile ? "14px 12px 40px" : "24px 24px 40px") : (isMobile ? "18px 12px 40px" : "56px 24px 40px"), position: "relative", overflowY: "auto", overflowX: "hidden", transition: "padding 0.28s ease", width: "100%", boxSizing: "border-box" }}>
         {/* Floating Top Navbar when Sidebar is Minimized */}
         {sidebarCollapsed && (
           <div
             style={{
               display: "flex",
+              flexDirection: "row",
               alignItems: "center",
               justifyContent: "space-between",
+              gap: isMobile ? 8 : 14,
               width: "100%",
               maxWidth: previewW,
-              background: "rgba(255, 255, 255, 0.94)",
+              background: "rgba(255, 255, 255, 0.95)",
               backdropFilter: "blur(14px)",
               border: `1px solid ${C.line}`,
               borderRadius: 14,
-              padding: "10px 18px",
-              marginBottom: 24,
-              boxShadow: "0 8px 24px rgba(0, 30, 60, 0.08)",
+              padding: isMobile ? "8px 10px" : "10px 18px",
+              marginBottom: isMobile ? 16 : 24,
+              boxShadow: "0 6px 20px rgba(0, 30, 60, 0.08)",
               flexShrink: 0,
-              transition: "all 0.28s ease"
+              transition: "all 0.28s ease",
+              boxSizing: "border-box",
+              overflow: "hidden"
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 12, minWidth: 0, flexShrink: 1 }}>
               <button
                 type="button"
                 onClick={toggleSidebar}
                 style={{
                   fontFamily: font,
-                  fontSize: 12.5,
+                  fontSize: isMobile ? 11.5 : 12.5,
                   fontWeight: 700,
                   color: "#ffffff",
                   background: C.blue,
                   border: "none",
                   borderRadius: 8,
-                  padding: "7px 14px",
+                  padding: isMobile ? "6px 10px" : "7px 14px",
                   cursor: "pointer",
-                  display: "flex",
+                  display: "inline-flex",
                   alignItems: "center",
-                  gap: 7,
-                  boxShadow: "0 2px 8px rgba(0, 81, 132, 0.25)"
+                  gap: 5,
+                  boxShadow: "0 2px 8px rgba(0, 81, 132, 0.25)",
+                  flexShrink: 0
                 }}
               >
                 <span>☰</span>
-                <span>Open Studio Controls</span>
+                <span>{isMobile ? "Controls" : "Open Studio Controls"}</span>
               </button>
-              <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
+
+              <span style={{ fontSize: isMobile ? 11 : 13, fontWeight: 700, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {format} · <span style={{ color: PILLARS[pillar] || C.blue }}>{pillar}</span>
               </span>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              {topic && (
+            <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 10, flexShrink: 0 }}>
+              {!isMobile && topic && (
                 <span
                   title={topic}
                   style={{
                     fontSize: 12,
                     color: C.inkMute,
-                    maxWidth: 260,
+                    maxWidth: 220,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap"
@@ -914,44 +933,46 @@ export default function Studio() {
                 type="button"
                 onClick={() => generate()}
                 disabled={loading || !topic.trim()}
+                title="Regenerate with Claude"
                 style={{
                   fontFamily: font,
-                  fontSize: 12,
+                  fontSize: isMobile ? 11 : 12,
                   fontWeight: 700,
                   color: "#fff",
                   background: GRAD,
                   border: "none",
                   borderRadius: 8,
-                  padding: "7px 16px",
+                  padding: isMobile ? "6px 10px" : "7px 16px",
                   cursor: loading || !topic.trim() ? "default" : "pointer",
                   opacity: loading || !topic.trim() ? 0.6 : 1,
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 6
+                  gap: 4
                 }}
               >
                 <span>⚡</span>
-                <span>{loading ? "Generating…" : "Regenerate"}</span>
+                <span>{isMobile ? (loading ? "…" : "Regen") : loading ? "Generating…" : "Regenerate"}</span>
               </button>
               <a
                 href="/calendar"
+                title="Content Calendar"
                 style={{
                   fontFamily: font,
-                  fontSize: 12,
+                  fontSize: isMobile ? 11 : 12,
                   fontWeight: 700,
                   color: C.blue,
                   background: C.mist,
                   border: `1px solid ${C.line}`,
                   borderRadius: 8,
-                  padding: "7px 12px",
+                  padding: isMobile ? "6px 9px" : "7px 12px",
                   textDecoration: "none",
-                  display: "flex",
+                  display: "inline-flex",
                   alignItems: "center",
-                  gap: 5
+                  gap: 4
                 }}
               >
                 <span>📅</span>
-                <span>Calendar</span>
+                {!isMobile && <span>Calendar</span>}
               </a>
             </div>
           </div>
