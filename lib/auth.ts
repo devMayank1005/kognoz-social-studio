@@ -54,11 +54,19 @@ export const authOptions: NextAuthOptions = {
     })
   ],
   callbacks: {
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       if (account?.provider === "azure-ad") {
-        const email = user.email?.toLowerCase().trim() || "";
+        const prof = profile as Record<string, any> | undefined;
+        const rawEmail = (user.email || prof?.preferred_username || prof?.upn || prof?.email || "").toString();
+        const email = rawEmail.toLowerCase().trim();
+        if (email) {
+          user.email = email;
+          if (!user.name && prof?.name) {
+            user.name = prof.name;
+          }
+        }
         // Strict domain verification: Allow only @kognozconsulting.com & @kognoz.com
-        if (!email.endsWith("@kognozconsulting.com") && !email.endsWith("@kognoz.com")) {
+        if (!email.includes("kognozconsulting.com") && !email.includes("kognoz.com")) {
           console.warn(`Blocked sign-in attempt from unauthorized domain: ${email}`);
           return false;
         }
