@@ -221,12 +221,12 @@ export default function Studio() {
   const baseW = fmt.w;
   const baseH = fmt.h;
   const previewW = baseW > 2000
-    ? (sidebarCollapsed ? 960 : 780)
+    ? (sidebarCollapsed ? 1080 : 780)
     : baseW > baseH
-    ? (sidebarCollapsed ? 760 : 620)
+    ? (sidebarCollapsed ? 860 : 620)
     : baseH > 1500
-    ? (sidebarCollapsed ? 390 : 330)
-    : (sidebarCollapsed ? 480 : 400);
+    ? (sidebarCollapsed ? 440 : 330)
+    : (sidebarCollapsed ? 540 : 400);
   const previewScale = previewW / baseW;
 
   type DeckItem = { kind: SlideKind } & Partial<CoercedSlide>;
@@ -518,213 +518,94 @@ export default function Studio() {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.off, fontFamily: font, color: C.ink, overflowX: "hidden" }}>
-      {/* ---------------- CONTROLS SIDEBAR ---------------- */}
+      {/* ---------------- CONTROLS SIDEBAR (Fully Collapsible) ---------------- */}
       <div
         style={{
-          width: sidebarCollapsed ? 64 : 400,
-          minWidth: sidebarCollapsed ? 64 : 400,
+          width: sidebarCollapsed ? 0 : 400,
+          minWidth: sidebarCollapsed ? 0 : 400,
+          maxWidth: sidebarCollapsed ? 0 : 400,
           flexShrink: 0,
           background: C.white,
-          borderRight: `1px solid ${C.line}`,
+          borderRight: sidebarCollapsed ? "none" : `1px solid ${C.line}`,
           overflowY: sidebarCollapsed ? "hidden" : "auto",
           overflowX: "hidden",
-          padding: sidebarCollapsed ? "20px 8px" : "26px 24px",
-          transition: "width 0.28s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.28s cubic-bezier(0.4, 0, 0.2, 1), padding 0.28s ease",
+          padding: sidebarCollapsed ? 0 : "26px 24px",
+          opacity: sidebarCollapsed ? 0 : 1,
+          pointerEvents: sidebarCollapsed ? "none" : "auto",
+          transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease, opacity 0.2s ease",
           display: "flex",
           flexDirection: "column",
           position: "relative",
           zIndex: 20
         }}
       >
-        {sidebarCollapsed ? (
-          /* COLLAPSED MINI SIDEBAR */
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, width: "100%" }}>
-            <div style={{ cursor: "pointer" }} onClick={toggleSidebar} title="Expand Studio Controls">
-              <Logo h={28} />
-            </div>
-
-            <button
-              type="button"
-              onClick={toggleSidebar}
-              title="Expand sidebar for controls"
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 8,
-                border: `1.5px solid ${C.blue}`,
-                background: C.mist,
-                color: C.blue,
-                fontSize: 14,
-                fontWeight: 700,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                transition: "all 0.15s ease"
-              }}
-            >
-              ▶
-            </button>
-
-            <div style={{ width: 28, height: 1, background: C.line, margin: "2px 0" }} />
-
-            <button
-              type="button"
-              onClick={toggleSidebar}
-              title={`Format: ${format} (Click to open)`}
-              style={{
-                width: 42,
-                height: 42,
-                borderRadius: 8,
-                border: `1px solid ${C.line}`,
-                background: C.white,
-                color: C.ink,
-                cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 2
-              }}
-            >
-              <span style={{ fontSize: 13 }}>🎨</span>
-              <span style={{ fontSize: 8.5, fontWeight: 700, color: C.inkMute }}>{format.slice(0, 4)}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={toggleSidebar}
-              title={`Pillar: ${pillar} (Click to open)`}
-              style={{
-                width: 42,
-                height: 42,
-                borderRadius: 8,
-                border: `1px solid ${C.line}`,
-                background: C.white,
-                cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 3
-              }}
-            >
-              <span style={{ width: 10, height: 10, borderRadius: "50%", background: PILLARS[pillar] || C.blue }} />
-              <span style={{ fontSize: 8.5, fontWeight: 700, color: C.inkMute }}>Pillar</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => generate()}
-              disabled={loading || !topic.trim()}
-              title={topic ? "Generate with Claude" : "Expand to enter topic"}
-              style={{
-                width: 42,
-                height: 42,
-                borderRadius: 8,
-                border: "none",
-                background: GRAD,
-                color: "#fff",
-                fontSize: 15,
-                fontWeight: 700,
-                cursor: loading || !topic.trim() ? "default" : "pointer",
-                opacity: loading || !topic.trim() ? 0.6 : 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center"
-              }}
-            >
-              ⚡
-            </button>
-
-            <a
-              href="/calendar"
-              title="Content Calendar"
-              style={{
-                width: 42,
-                height: 42,
-                borderRadius: 8,
-                border: `1px solid ${C.line}`,
-                background: C.mist,
-                color: C.blue,
-                fontSize: 16,
-                textDecoration: "none",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center"
-              }}
-            >
-              📅
-            </a>
-          </div>
-        ) : (
-          /* EXPANDED FULL CONTROLS */
-          <div style={{ width: "100%", display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <Logo h={36} />
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {session?.user && (
-                  <span
-                    title={session.user.email || ""}
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: C.inkSoft,
-                      background: C.mist,
-                      padding: "4px 8px",
-                      borderRadius: 12,
-                      maxWidth: 100,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap"
-                    }}
-                  >
-                    {session.user.name || session.user.email?.split("@")[0]}
-                  </span>
-                )}
-                {/* Minimize Toggle Button */}
-                <button
-                  type="button"
-                  onClick={toggleSidebar}
-                  title="Minimize sidebar to focus on canvas"
+        <div style={{ width: 352, minWidth: 352, display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <Logo h={36} />
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {session?.user && (
+                <span
+                  title={session.user.email || ""}
                   style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 6,
-                    border: `1px solid ${C.line}`,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: C.inkSoft,
                     background: C.mist,
-                    color: C.blue,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    transition: "all 0.15s ease"
+                    padding: "4px 8px",
+                    borderRadius: 12,
+                    maxWidth: 100,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap"
                   }}
                 >
-                  ◀
+                  {session.user.name || session.user.email?.split("@")[0]}
+                </span>
+              )}
+              {/* Complete Minimize Button */}
+              <button
+                type="button"
+                onClick={toggleSidebar}
+                title="Minimize sidebar completely"
+                style={{
+                  height: 28,
+                  padding: "0 9px",
+                  borderRadius: 6,
+                  border: `1px solid ${C.line}`,
+                  background: C.mist,
+                  color: C.blue,
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <span>◀</span>
+                <span>Minimize</span>
+              </button>
+              {session?.user && (
+                <button
+                  type="button"
+                  onClick={() => signOut({ callbackUrl: "/login" })}
+                  style={{
+                    border: `1px solid ${C.line}`,
+                    background: "transparent",
+                    color: C.inkMute,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    borderRadius: 6,
+                    padding: "3px 7px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Exit
                 </button>
-                {session?.user && (
-                  <button
-                    type="button"
-                    onClick={() => signOut({ callbackUrl: "/login" })}
-                    style={{
-                      border: `1px solid ${C.line}`,
-                      background: "transparent",
-                      color: C.inkMute,
-                      fontSize: 11,
-                      fontWeight: 600,
-                      borderRadius: 6,
-                      padding: "3px 7px",
-                      cursor: "pointer"
-                    }}
-                  >
-                    Exit
-                  </button>
-                )}
-              </div>
+              )}
             </div>
+          </div>
         <div style={{ fontFamily: font, fontSize: 13, color: C.inkMute, lineHeight: 1.5, marginBottom: 14 }}>Type a topic. Kognoz-voiced content and on-brand design, generated together.</div>
         <a href="/calendar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", borderRadius: 10, background: C.mist, cursor: "pointer", marginBottom: 22, border: `1px solid ${C.line}`, textDecoration: "none" }}>
           <div style={{ fontFamily: font, fontSize: 13, fontWeight: 700, color: C.blue }}>Content Calendar</div>
@@ -960,13 +841,12 @@ export default function Studio() {
 
         <span style={label}>Closing / CTA</span>
         <textarea value={cta} onChange={(e) => setCta(e.target.value)} rows={2} style={{ ...inputStyle, fontFamily: displayFont, fontSize: 15 }} />
-          </div>
-        )}
+        </div>
       </div>
 
       {/* ---------------- PREVIEW CANVAS ---------------- */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", background: "#E6ECF0", padding: sidebarCollapsed ? "28px 24px 40px" : "56px 24px 40px", position: "relative", overflowY: "auto", overflowX: "auto", transition: "padding 0.28s ease" }}>
-        {/* Floating Mini Navbar when Sidebar is Minimized */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", background: "#E6ECF0", padding: sidebarCollapsed ? "24px 24px 40px" : "56px 24px 40px", position: "relative", overflowY: "auto", overflowX: "auto", transition: "padding 0.28s ease" }}>
+        {/* Floating Top Navbar when Sidebar is Minimized */}
         {sidebarCollapsed && (
           <div
             style={{
@@ -975,40 +855,41 @@ export default function Studio() {
               justifyContent: "space-between",
               width: "100%",
               maxWidth: previewW,
-              background: "rgba(255, 255, 255, 0.92)",
-              backdropFilter: "blur(12px)",
+              background: "rgba(255, 255, 255, 0.94)",
+              backdropFilter: "blur(14px)",
               border: `1px solid ${C.line}`,
-              borderRadius: 12,
-              padding: "9px 16px",
-              marginBottom: 20,
-              boxShadow: "0 6px 20px rgba(0, 30, 60, 0.08)",
+              borderRadius: 14,
+              padding: "10px 18px",
+              marginBottom: 24,
+              boxShadow: "0 8px 24px rgba(0, 30, 60, 0.08)",
               flexShrink: 0,
               transition: "all 0.28s ease"
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <button
                 type="button"
                 onClick={toggleSidebar}
                 style={{
                   fontFamily: font,
-                  fontSize: 12,
+                  fontSize: 12.5,
                   fontWeight: 700,
-                  color: C.blue,
-                  background: C.mist,
-                  border: `1px solid ${C.line}`,
-                  borderRadius: 6,
-                  padding: "6px 11px",
+                  color: "#ffffff",
+                  background: C.blue,
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "7px 14px",
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
-                  gap: 6
+                  gap: 7,
+                  boxShadow: "0 2px 8px rgba(0, 81, 132, 0.25)"
                 }}
               >
-                <span>▶</span>
+                <span>☰</span>
                 <span>Open Studio Controls</span>
               </button>
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
                 {format} · <span style={{ color: PILLARS[pillar] || C.blue }}>{pillar}</span>
               </span>
             </div>
@@ -1020,7 +901,7 @@ export default function Studio() {
                   style={{
                     fontSize: 12,
                     color: C.inkMute,
-                    maxWidth: 240,
+                    maxWidth: 260,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap"
@@ -1040,14 +921,38 @@ export default function Studio() {
                   color: "#fff",
                   background: GRAD,
                   border: "none",
-                  borderRadius: 6,
-                  padding: "6px 14px",
+                  borderRadius: 8,
+                  padding: "7px 16px",
                   cursor: loading || !topic.trim() ? "default" : "pointer",
-                  opacity: loading || !topic.trim() ? 0.6 : 1
+                  opacity: loading || !topic.trim() ? 0.6 : 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6
                 }}
               >
-                {loading ? "Generating…" : "⚡ Regenerate"}
+                <span>⚡</span>
+                <span>{loading ? "Generating…" : "Regenerate"}</span>
               </button>
+              <a
+                href="/calendar"
+                style={{
+                  fontFamily: font,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: C.blue,
+                  background: C.mist,
+                  border: `1px solid ${C.line}`,
+                  borderRadius: 8,
+                  padding: "7px 12px",
+                  textDecoration: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5
+                }}
+              >
+                <span>📅</span>
+                <span>Calendar</span>
+              </a>
             </div>
           </div>
         )}
