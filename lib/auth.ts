@@ -1,17 +1,25 @@
 import type { NextAuthOptions } from "next-auth";
+import AzureADProvider from "next-auth/providers/azure-ad";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { getSupabaseServerClient } from "@/lib/supabase";
 
-// Auth: a single admin account via env vars for now (no Supabase needed yet),
-// with the Supabase `users` table as a fallback once real teammates are
-// added later. The password lives in Vercel's env vars, not in this file —
-// a value once committed to git stays in history forever even if deleted
-// later, so env vars are the safer place for it even for a "just for now" setup.
+// Auth: Microsoft 365 (Entra ID) Single Sign-On for @kognozconsulting.com
+// with fallback to Supabase `users` table via CredentialsProvider.
 
 export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "kognoz-social-studio-secure-auth-secret-key-2026",
   session: { strategy: "jwt" },
   providers: [
+    ...(process.env.AZURE_AD_CLIENT_ID
+      ? [
+          AzureADProvider({
+            clientId: process.env.AZURE_AD_CLIENT_ID,
+            clientSecret: process.env.AZURE_AD_CLIENT_SECRET || "",
+            tenantId: process.env.AZURE_AD_TENANT_ID || "2dbb05c9-b19f-4164-bc87-9a3f87e7d02e"
+          })
+        ]
+      : []),
     CredentialsProvider({
       name: "Credentials",
       credentials: {
@@ -20,34 +28,63 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
+
         const email = credentials.email.toLowerCase().trim();
+        const password = credentials.password;
 
-        // 1. Single admin account via env vars (set in Vercel, not in code).
-        const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase().trim();
-        const adminPassword = process.env.ADMIN_PASSWORD;
-        if (adminEmail && adminPassword && email === adminEmail && credentials.password === adminPassword) {
-          return { id: adminEmail, email: adminEmail, name: "Admin" };
-        }
-
-        // 2. Supabase `users` table — for when real teammates are added later.
-        if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) return null;
+        // Authenticate against the Supabase `users` table
         try {
-          const supabase = getSupabaseServerClient();
-          const { data: user, error } = await supabase
-            .from("users")
-            .select("email, name, password_hash")
-            .eq("email", email)
-            .single();
-          if (error || !user) return null; // no row = not allowed, same error either way (no email enumeration)
-          const valid = await bcrypt.compare(credentials.password, user.password_hash);
-          if (!valid) return null;
-          return { id: user.email, email: user.email, name: user.name };
-        } catch {
-          return null; // Supabase not reachable/configured yet — fail closed, not a crash
+          if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+            const supabase = getSupabaseServerClient();
+            const { data: user, error } = await supabase
+              .from("users")
+              .select("email, name, password_hash")
+              .eq("email", email)
+              .maybeSingle();
+
+            if (!error && user?.password_hash) {
+              const valid = await bcrypt.compare(password, user.password_hash);
+              if (valid) {
+                return { id: user.email, email: user.email, name: user.name || user.email.split("@")[0] };
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Supabase auth lookup error:", e);
         }
+
+        return null; // Invalid credentials
       }
     })
   ],
+  callbacks: {
+    async signIn({ user, account }) {
+      if (account?.provider === "azure-ad") {
+        const email = user.email?.toLowerCase().trim() || "";
+        // Strict domain verification: Allow only @kognozconsulting.com & @kognoz.com
+        if (!email.endsWith("@kognozconsulting.com") && !email.endsWith("@kognoz.com")) {
+          console.warn(`Blocked sign-in attempt from unauthorized domain: ${email}`);
+          return false;
+        }
+      }
+      return true;
+    },
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.email = user.email;
+        token.name = user.name;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (token && session.user) {
+        session.user.name = token.name as string;
+        session.user.email = token.email as string;
+      }
+      return session;
+    }
+  },
   pages: {
     signIn: "/login",
     error: "/login"

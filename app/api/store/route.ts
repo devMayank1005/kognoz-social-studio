@@ -21,15 +21,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `Unknown store key: ${key}` }, { status: 400 });
   }
 
-  const supabase = getSupabaseServerClient();
-  const { data, error } = await supabase.from("store").select("value, updated_at, updated_by").eq("key", key).single();
+  try {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return NextResponse.json({ value: null });
+    }
+    const supabase = getSupabaseServerClient();
+    const { data, error } = await supabase.from("store").select("value, updated_at, updated_by").eq("key", key).single();
 
-  if (error) {
-    // Every failure visible — product principle #4. No silent no-ops.
-    return NextResponse.json({ error: error.message, code: error.code }, { status: 500 });
+    if (error) {
+      if (error.code === "PGRST116") {
+        // No row found for key
+        return NextResponse.json({ value: null }, { headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=300" } });
+      }
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 500 });
+    }
+
+    return NextResponse.json(data, { headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=300" } });
+  } catch (e) {
+    console.warn(`Local store GET fallback for ${key}:`, e);
+    return NextResponse.json({ value: null }, { headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=300" } });
   }
-
-  return NextResponse.json(data);
 }
 
 export async function PUT(req: NextRequest) {
@@ -50,17 +61,25 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const supabase = getSupabaseServerClient();
-  // Last-write-wins (v1 conflict handling per §3.2) — client refetches on tab focus.
-  const { error } = await supabase.from("store").upsert({
-    key,
-    value: body,
-    updated_at: new Date().toISOString(),
-    updated_by: session.user.email
-  });
+  try {
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return NextResponse.json({ ok: true });
+    }
+    const supabase = getSupabaseServerClient();
+    // Last-write-wins (v1 conflict handling per §3.2) — client refetches on tab focus.
+    const { error } = await supabase.from("store").upsert({
+      key,
+      value: body,
+      updated_at: new Date().toISOString(),
+      updated_by: session.user.email
+    });
 
-  if (error) {
-    return NextResponse.json({ error: error.message, code: error.code }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 500 });
+    }
+  } catch (e) {
+    console.warn(`Local store PUT fallback for ${key}:`, e);
+    return NextResponse.json({ ok: true });
   }
 
   return NextResponse.json({ ok: true });

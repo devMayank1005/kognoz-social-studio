@@ -12,10 +12,60 @@
 import { buildPdfFromJpegs } from "./pdfBuilder";
 import { getEmbeddableFontFaceCssSafe } from "./exportFonts";
 
-export function buildSlideSvg(elId: string, baseW: number, baseH: number, fontFaceCss: string): string | null {
+export async function buildSlideSvg(elId: string, baseW: number, baseH: number, fontFaceCss: string): Promise<string | null> {
   const node = document.getElementById(elId);
   if (!node) return null;
-  const html = node.outerHTML
+
+  const clone = node.cloneNode(true) as HTMLElement;
+
+  // Process all images to ensure they are inline base64 data URLs to prevent canvas cross-origin taint
+  const liveImgs = Array.from(node.querySelectorAll("img"));
+  const cloneImgs = Array.from(clone.querySelectorAll("img"));
+
+  for (let i = 0; i < cloneImgs.length; i++) {
+    const cloneImg = cloneImgs[i];
+    const liveImg = liveImgs[i];
+    const src = cloneImg.getAttribute("src") || "";
+
+    if (src.startsWith("data:")) continue;
+
+    // If loaded in live DOM, draw to temporary canvas to get data URL
+    if (liveImg && liveImg.complete && liveImg.naturalWidth > 0) {
+      try {
+        const c = document.createElement("canvas");
+        c.width = liveImg.naturalWidth;
+        c.height = liveImg.naturalHeight;
+        const ctx = c.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(liveImg, 0, 0);
+          const dataUrl = c.toDataURL("image/png");
+          cloneImg.setAttribute("src", dataUrl);
+          continue;
+        }
+      } catch (e) {
+        console.warn("Could not canvas-convert live image:", e);
+      }
+    }
+
+    // Fallback: fetch and convert to base64 data URL
+    try {
+      const res = await fetch(src);
+      if (res.ok) {
+        const blob = await res.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        cloneImg.setAttribute("src", dataUrl);
+      }
+    } catch (e) {
+      console.warn("Could not fetch and inline image:", src, e);
+    }
+  }
+
+  const html = clone.outerHTML
     .replace(/<input[^>]*>/g, "")
     .replace(/<img([^>]*?)\s*\/?>/g, "<img$1/>")
     .replace(/<br\s*>/g, "<br/>")
@@ -40,7 +90,7 @@ export async function loadSlideImage(
   baseH: number
 ): Promise<{ img: HTMLImageElement; url: string | null } | null> {
   const fontFaceCss = await getEmbeddableFontFaceCssSafe();
-  const svgStr = buildSlideSvg(elId, baseW, baseH, fontFaceCss);
+  const svgStr = await buildSlideSvg(elId, baseW, baseH, fontFaceCss);
   if (!svgStr) return null;
 
   // Diagnose malformed XML on-device instead of failing blind.
@@ -52,23 +102,18 @@ export async function loadSlideImage(
     if (e instanceof Error && e.message.startsWith("XML:")) throw e;
   }
 
-  // Path 1: blob URL (fastest). Path 2: base64 data URL (works where CSP
-  // blocks blob: images, which some embedded webviews do).
-  let img: HTMLImageElement | null = null;
-  let url: string | null = null;
+  // Use base64 data URL to keep the SVG 100% self-contained and untainted
+  const b64 = btoa(unescape(encodeURIComponent(svgStr)));
+  const dataUrl = "data:image/svg+xml;base64," + b64;
+  let img: HTMLImageElement;
   try {
-    url = URL.createObjectURL(new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" }));
-    img = await loadImageFrom(url);
+    img = await loadImageFrom(dataUrl);
   } catch {
-    if (url) {
-      URL.revokeObjectURL(url);
-      url = null;
-    }
-    const b64 = btoa(unescape(encodeURIComponent(svgStr)));
-    img = await loadImageFrom("data:image/svg+xml;base64," + b64).catch(() => {
-      throw new Error("SVG load blocked on both blob and data URLs");
-    });
+    // Fallback if base64 direct load fails
+    const blobUrl = URL.createObjectURL(new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" }));
+    img = await loadImageFrom(blobUrl);
   }
+
   if (img.decode) {
     try {
       await img.decode();
@@ -77,7 +122,7 @@ export async function loadSlideImage(
     }
   }
   await new Promise((r) => setTimeout(r, 150));
-  return { img, url };
+  return { img, url: null };
 }
 
 export async function slideCanvas(elId: string, baseW: number, baseH: number, scl: number): Promise<HTMLCanvasElement | null> {
@@ -87,13 +132,9 @@ export async function slideCanvas(elId: string, baseW: number, baseH: number, sc
   canvas.width = Math.round(baseW * scl);
   canvas.height = Math.round(baseH * scl);
   const ctx = canvas.getContext("2d")!;
-  ctx.drawImage(loaded.img, 0, 0, canvas.width, canvas.height);
-  await new Promise((r) => setTimeout(r, 100));
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(loaded.img, 0, 0, canvas.width, canvas.height);
-  ctx.getImageData(0, 0, 1, 1); // taint check — throws SecurityError if the canvas got tainted
-  if (loaded.url) URL.revokeObjectURL(loaded.url);
   return canvas;
 }
 
@@ -155,7 +196,6 @@ export async function exportStrip(elIds: string[], baseW: number, baseH: number)
     if (!sc) continue;
     ctx.drawImage(sc, 0, i * Math.round(baseH * SCL));
   }
-  ctx.getImageData(0, 0, 1, 1);
   const blob = await new Promise<Blob>((res, rej) => canvas.toBlob((bl) => (bl ? res(bl) : rej(new Error("empty blob"))), "image/png"));
   saveBlobAs(blob, "kognoz-deck-full.png");
 }
@@ -176,12 +216,9 @@ export async function exportPNG(opts: ExportPngOpts): Promise<void> {
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(img, offsetX, 0);
-    await new Promise((r) => setTimeout(r, 120));
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, w, h);
     ctx.drawImage(img, offsetX, 0);
-    ctx.getImageData(0, 0, 1, 1);
     return await new Promise<Blob>((res, rej) => canvas.toBlob((bl) => (bl ? res(bl) : rej(new Error("empty blob"))), "image/png"));
   };
 
@@ -189,32 +226,19 @@ export async function exportPNG(opts: ExportPngOpts): Promise<void> {
   try {
     loaded = await loadSlideImage(elId, baseW, baseH);
     if (!loaded) return;
-    let lastErr: unknown = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        if (frames) {
-          const fw = baseW / frames;
-          for (let k = 0; k < frames; k++) {
-            const blob = await rasterize(loaded.img, fw, baseH, -k * fw);
-            saveBlobAs(blob, `${filenameBase}-frame-${k + 1}.png`);
-            onFrameSaved?.(k);
-            await new Promise((r) => setTimeout(r, 800));
-          }
-        } else {
-          const blob = await rasterize(loaded.img, baseW, baseH, 0);
-          saveBlobAs(blob, `${filenameBase}.png`);
-        }
-        lastErr = null;
-        break;
-      } catch (e) {
-        lastErr = e;
-        await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+    if (frames) {
+      const fw = baseW / frames;
+      for (let k = 0; k < frames; k++) {
+        const blob = await rasterize(loaded.img, fw, baseH, -k * fw);
+        saveBlobAs(blob, `${filenameBase}-frame-${k + 1}.png`);
+        onFrameSaved?.(k);
+        await new Promise((r) => setTimeout(r, 600));
       }
+    } else {
+      const blob = await rasterize(loaded.img, baseW, baseH, 0);
+      saveBlobAs(blob, `${filenameBase}.png`);
     }
-    if (loaded.url) URL.revokeObjectURL(loaded.url);
-    if (lastErr) throw lastErr;
   } catch (e) {
-    if (loaded && loaded.url) URL.revokeObjectURL(loaded.url);
     throw e;
   }
 }

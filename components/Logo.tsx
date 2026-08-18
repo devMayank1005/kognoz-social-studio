@@ -4,11 +4,10 @@
 // 3.6:1 confirmed against the actual assets (PRD §3.4).
 "use client";
 
-const LOGO_COLOR = "/brand/kognoz-logo-full-color.png";
-const LOGO_WHITE = "/brand/kognoz-logo-white.png";
-// jsx's LOGO_FULL_WHITE was an alias for LOGO_WHITE (same asset) — kept as
-// the same file here too, so `full` and `white` render identically, exactly
-// as in the reference implementation.
+import { LOGO_COLOR_DATA, LOGO_WHITE_DATA } from "@/lib/brandLogos";
+
+const LOGO_COLOR = LOGO_COLOR_DATA;
+const LOGO_WHITE = LOGO_WHITE_DATA;
 const LOGO_FULL_WHITE = LOGO_WHITE;
 
 export function Logo({

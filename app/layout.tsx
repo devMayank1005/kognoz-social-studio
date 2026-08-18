@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
+import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Kognoz Social Studio",
-  description: "AI-powered content production for the Kognoz LinkedIn presence."
+  description: "AI-powered content production for the Kognoz LinkedIn presence.",
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/favicon.ico"
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -16,11 +22,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600&family=Open+Sans:wght@400;600&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600&family=Open+Sans:wght@400;600;700&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

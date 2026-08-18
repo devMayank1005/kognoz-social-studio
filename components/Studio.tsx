@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
 import { FORMATS, type FormatId } from "@/lib/formats";
 import { PILLARS } from "@/lib/pillars";
@@ -68,16 +69,37 @@ const DEFAULT_SLIDES: CoercedSlide[] = [
 ];
 
 async function storeGet<T>(key: string): Promise<T | null> {
+  // 1. Instant local cache read (0ms latency)
+  if (typeof window !== "undefined") {
+    try {
+      const local = localStorage.getItem(key);
+      if (local) return JSON.parse(local) as T;
+    } catch {}
+  }
+  // 2. Background server fetch
   try {
     const res = await fetch(`/api/store?key=${key}`);
     if (!res.ok) return null;
     const data = await res.json();
+    if (data?.value && typeof window !== "undefined") {
+      try {
+        localStorage.setItem(key, JSON.stringify(data.value));
+      } catch {}
+    }
     return (data?.value as T) ?? null;
   } catch {
     return null;
   }
 }
+
 async function storeSet(key: string, value: unknown): Promise<void> {
+  // 1. Instant local persistence
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {}
+  }
+  // 2. Async server sync (non-blocking)
   try {
     await fetch(`/api/store?key=${key}`, {
       method: "PUT",
@@ -90,6 +112,7 @@ async function storeSet(key: string, value: unknown): Promise<void> {
 }
 
 export default function Studio() {
+  const { data: session } = useSession();
   const searchParams = useSearchParams();
 
   const [format, setFormat] = useState<FormatId>("Carousel");
@@ -471,8 +494,45 @@ export default function Studio() {
     <div style={{ display: "flex", minHeight: "100vh", background: C.off, fontFamily: font, color: C.ink }}>
       {/* ---------------- CONTROLS ---------------- */}
       <div style={{ width: 400, flexShrink: 0, background: C.white, borderRight: `1px solid ${C.line}`, overflowY: "auto", padding: "26px 24px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
           <Logo h={36} />
+          {session?.user && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                title={session.user.email || ""}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: C.inkSoft,
+                  background: C.mist,
+                  padding: "4px 8px",
+                  borderRadius: 12,
+                  maxWidth: 120,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                {session.user.name || session.user.email?.split("@")[0]}
+              </span>
+              <button
+                type="button"
+                onClick={() => signOut({ callbackUrl: "/login" })}
+                style={{
+                  border: `1px solid ${C.line}`,
+                  background: "transparent",
+                  color: C.inkMute,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  borderRadius: 6,
+                  padding: "3px 7px",
+                  cursor: "pointer"
+                }}
+              >
+                Exit
+              </button>
+            </div>
+          )}
         </div>
         <div style={{ fontFamily: font, fontSize: 13, color: C.inkMute, lineHeight: 1.5, marginBottom: 14 }}>Type a topic. Kognoz-voiced content and on-brand design, generated together.</div>
         <a href="/calendar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", borderRadius: 10, background: C.mist, cursor: "pointer", marginBottom: 22, border: `1px solid ${C.line}`, textDecoration: "none" }}>
@@ -707,23 +767,6 @@ export default function Studio() {
         <span style={label}>Cover headline · mark one word *like this* for the gradient</span>
         <textarea value={cover} onChange={(e) => setCover(e.target.value)} rows={2} style={{ ...inputStyle, marginBottom: 18, fontFamily: displayFont, fontSize: 15 }} />
 
-        <span style={label}>Slides</span>
-        {slides.map((s, i) => (
-          <div key={i} style={{ border: `1px solid ${C.line}`, borderRadius: 10, padding: 12, marginBottom: 10, background: C.off }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ fontFamily: font, fontSize: 11, fontWeight: 700, color: accent, letterSpacing: "0.06em" }}>SLIDE {String(i + 1).padStart(2, "0")}</span>
-              <span onClick={() => rmSlide(i)} style={{ fontFamily: font, fontSize: 11, color: C.inkMute, cursor: "pointer", fontWeight: 600 }}>
-                Remove
-              </span>
-            </div>
-            <input value={s.title} onChange={(e) => updSlide(i, "title", e.target.value)} placeholder="Slide title" style={{ ...inputStyle, marginBottom: 7, fontFamily: displayFont, fontWeight: 600 }} />
-            <textarea value={s.body} onChange={(e) => updSlide(i, "body", e.target.value)} rows={3} placeholder="One idea for this slide" style={inputStyle} />
-          </div>
-        ))}
-        <div onClick={addSlide} style={{ fontFamily: font, fontSize: 12.5, fontWeight: 700, color: C.blue, cursor: "pointer", padding: "6px 0", marginBottom: 18 }}>
-          + Add slide
-        </div>
-
         <span style={label}>Closing / CTA</span>
         <textarea value={cta} onChange={(e) => setCta(e.target.value)} rows={2} style={{ ...inputStyle, fontFamily: displayFont, fontSize: 15 }} />
       </div>
@@ -775,6 +818,125 @@ export default function Studio() {
           </div>
           <div onClick={() => setCurrent((c) => Math.min(deck.length - 1, c + 1))} style={{ cursor: "pointer", width: 40, height: 40, borderRadius: "50%", background: current === deck.length - 1 ? C.line : C.white, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 10px rgba(0,40,70,.1)", fontSize: 18, color: C.ink }}>
             ›
+          </div>
+        </div>
+
+        {/* Horizontal Slide Deck Cards in Center */}
+        <div style={{ width: "100%", maxWidth: 840, marginTop: 20, padding: "16px 20px", background: C.white, borderRadius: 14, boxShadow: "0 4px 20px rgba(0,40,70,0.08)", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <span style={{ ...label, marginBottom: 0, fontSize: 13 }}>Deck Cards (Cover · Slides · Closing)</span>
+            <div onClick={addSlide} style={{ fontFamily: font, fontSize: 12.5, fontWeight: 700, color: C.blue, cursor: "pointer", background: C.mist, padding: "5px 12px", borderRadius: 6 }}>
+              + Add slide
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
+            {/* COVER CARD */}
+            {(() => {
+              const isCoverSelected = (cur.kind === "cover");
+              return (
+                <div
+                  onClick={() => setCurrent(0)}
+                  style={{
+                    border: isCoverSelected ? `2px solid ${C.blue}` : `1px solid ${C.line}`,
+                    borderRadius: 10,
+                    padding: 12,
+                    background: isCoverSelected ? "#F4F8FC" : C.off,
+                    minWidth: 260,
+                    flexShrink: 0,
+                    transition: "all 0.15s ease",
+                    cursor: "pointer"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontFamily: font, fontSize: 11, fontWeight: 700, color: C.blue, letterSpacing: "0.06em" }}>COVER HEADLINE</span>
+                  </div>
+                  <textarea
+                    value={cover}
+                    onChange={(e) => setCover(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    rows={4}
+                    placeholder="Cover headline · mark one word *like this*"
+                    style={{ ...inputStyle, fontFamily: displayFont, fontSize: 14, background: C.white }}
+                  />
+                </div>
+              );
+            })()}
+
+            {/* CONTENT SLIDES CARDS */}
+            {slides.map((s, i) => {
+              const isSelected = (cur.kind === "content" && current === i + 1);
+              return (
+                <div 
+                  key={i} 
+                  onClick={() => setCurrent(i + 1)}
+                  style={{ 
+                    border: isSelected ? `2px solid ${C.blue}` : `1px solid ${C.line}`, 
+                    borderRadius: 10, 
+                    padding: 12, 
+                    background: isSelected ? "#F4F8FC" : C.off, 
+                    minWidth: 260, 
+                    flexShrink: 0,
+                    transition: "all 0.15s ease",
+                    cursor: "pointer"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontFamily: font, fontSize: 11, fontWeight: 700, color: accent, letterSpacing: "0.06em" }}>SLIDE {String(i + 1).padStart(2, "0")}</span>
+                    <span onClick={(e) => { e.stopPropagation(); rmSlide(i); }} style={{ fontFamily: font, fontSize: 11, color: C.inkMute, cursor: "pointer", fontWeight: 600 }}>
+                      Remove
+                    </span>
+                  </div>
+                  <input 
+                    value={s.title} 
+                    onChange={(e) => updSlide(i, "title", e.target.value)} 
+                    onClick={(e) => e.stopPropagation()} 
+                    placeholder="Slide title" 
+                    style={{ ...inputStyle, marginBottom: 7, fontFamily: displayFont, fontWeight: 600, background: C.white }} 
+                  />
+                  <textarea 
+                    value={s.body} 
+                    onChange={(e) => updSlide(i, "body", e.target.value)} 
+                    onClick={(e) => e.stopPropagation()} 
+                    rows={3} 
+                    placeholder="One idea for this slide" 
+                    style={{ ...inputStyle, background: C.white }} 
+                  />
+                </div>
+              );
+            })}
+
+            {/* CLOSING / CTA CARD */}
+            {(() => {
+              const isCtaSelected = (cur.kind === "end");
+              const ctaIdx = deck.length - 1;
+              return (
+                <div
+                  onClick={() => setCurrent(ctaIdx)}
+                  style={{
+                    border: isCtaSelected ? `2px solid ${C.blue}` : `1px solid ${C.line}`,
+                    borderRadius: 10,
+                    padding: 12,
+                    background: isCtaSelected ? "#F4F8FC" : C.off,
+                    minWidth: 260,
+                    flexShrink: 0,
+                    transition: "all 0.15s ease",
+                    cursor: "pointer"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontFamily: font, fontSize: 11, fontWeight: 700, color: C.teal, letterSpacing: "0.06em" }}>CLOSING / CTA</span>
+                  </div>
+                  <textarea
+                    value={cta}
+                    onChange={(e) => setCta(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    rows={4}
+                    placeholder="Closing message or call to action"
+                    style={{ ...inputStyle, fontFamily: displayFont, fontSize: 14, background: C.white }}
+                  />
+                </div>
+              );
+            })()}
           </div>
         </div>
 

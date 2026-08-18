@@ -176,7 +176,7 @@ export interface SlideProps {
   photoOn?: boolean;
 }
 
-export function Slide({
+export const Slide = React.memo(function Slide({
   kind,
   data,
   accent,
@@ -951,4 +951,4 @@ export function Slide({
       <Foot right={CONTENT_R} />
     </div>
   );
-}
+});
