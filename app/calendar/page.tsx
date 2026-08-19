@@ -2,41 +2,56 @@
 
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
-import CalendarView from "@/components/CalendarView";
+import CalendarView from "@/components/calendar/CalendarView";
 import { Logo } from "@/components/Logo";
-import { C } from "@/lib/tokens";
+import { C, FONT } from "@/lib/tokens";
 
 export default function CalendarPage() {
   const { data: session } = useSession();
 
   return (
-    <main style={{ padding: "32px 48px", maxWidth: 960, margin: "0 auto" }}>
+    <main
+      style={{
+        padding: "24px 32px 48px",
+        maxWidth: 1380,
+        margin: "0 auto",
+        fontFamily: FONT,
+        minHeight: "100vh",
+        boxSizing: "border-box"
+      }}
+    >
       <header
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: 32,
+          marginBottom: 24,
           paddingBottom: 16,
-          borderBottom: `1px solid ${C.line}`
+          borderBottom: `1px solid ${C.line}`,
+          flexWrap: "wrap",
+          gap: 12
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-          <Logo h={36} />
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <Logo h={34} />
           <Link
             href="/"
             style={{
-              fontFamily: "'Open Sans', sans-serif",
-              fontSize: 13,
-              fontWeight: 600,
+              fontFamily: FONT,
+              fontSize: 12.5,
+              fontWeight: 700,
               color: C.blue,
               textDecoration: "none",
               background: C.mist,
-              padding: "6px 12px",
-              borderRadius: 8
+              padding: "7px 14px",
+              borderRadius: 8,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6
             }}
           >
-            ← Back to Studio
+            <span>←</span>
+            <span>Back to Studio</span>
           </Link>
         </div>
 
@@ -44,12 +59,12 @@ export default function CalendarPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span
               style={{
-                fontFamily: "'Open Sans', sans-serif",
+                fontFamily: FONT,
                 fontSize: 12,
-                fontWeight: 600,
-                color: C.inkSoft,
+                fontWeight: 700,
+                color: C.blue,
                 background: C.mist,
-                padding: "5px 10px",
+                padding: "5px 12px",
                 borderRadius: 14
               }}
             >
@@ -58,7 +73,7 @@ export default function CalendarPage() {
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}
               style={{
-                fontFamily: "'Open Sans', sans-serif",
+                fontFamily: FONT,
                 border: `1px solid ${C.line}`,
                 background: "#fff",
                 color: C.inkMute,
@@ -75,9 +90,6 @@ export default function CalendarPage() {
         )}
       </header>
 
-      <h1 className="display" style={{ fontSize: 28, margin: "0 0 8px 0" }}>
-        Content Calendar
-      </h1>
       <CalendarView />
     </main>
   );

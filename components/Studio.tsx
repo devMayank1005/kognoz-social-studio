@@ -245,13 +245,18 @@ export default function Studio() {
   const total = slides.length;
   const cur = deck[Math.min(current, deck.length - 1)];
 
-  async function markDrafted(itemN: number) {
-    // Calendar Create-> sets the item to Drafted on successful generation
-    // (PRD §11). Round-trips through /api/store since Studio doesn't hold
-    // calendar state directly.
-    const plan = await storeGet<{ items: { n: number; status: string }[] }>("kognoz-calendar");
+  async function markDrafted(itemN: number | string) {
+    // Calendar Create-> sets the item to Draft on successful generation
+    // Round-trips through /api/store since Studio doesn't hold calendar state directly.
+    const plan = await storeGet<{ items: { id?: string; n?: number; status: string }[] }>("kognoz-calendar");
     if (!plan || !Array.isArray(plan.items)) return;
-    const next = { ...plan, items: plan.items.map((it) => (it.n === itemN ? { ...it, status: "Drafted" } : it)) };
+    const next = {
+      ...plan,
+      items: plan.items.map((it) => {
+        const matches = it.id === String(itemN) || (typeof it.n === "number" && it.n === Number(itemN));
+        return matches ? { ...it, status: "Draft" } : it;
+      })
+    };
     await storeSet("kognoz-calendar", next);
   }
 
