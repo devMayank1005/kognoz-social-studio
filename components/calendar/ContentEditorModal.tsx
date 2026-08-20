@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import { C, FONT, DISPLAY_FONT, GRAD } from "@/lib/tokens";
 import { STUDIO_FORMATS } from "@/lib/formats";
 import { buildCaptionPrompt } from "@/lib/promptBuilders";
@@ -12,6 +13,7 @@ import {
   STATUS_CONFIG,
   STATUS_ORDER,
   ALL_CONTENT_TYPES,
+  getAuthorInfo,
   type ContentItem,
   type ContentStatus
 } from "./types";
@@ -34,6 +36,7 @@ export function ContentEditorModal({
   onSave,
   onDelete
 }: ContentEditorModalProps) {
+  const { data: session } = useSession();
   const isEditing = !!item;
 
   const [title, setTitle] = useState("");
@@ -113,6 +116,9 @@ export function ContentEditorModal({
     const finalTopic = topic.trim() || title.trim() || "Untitled Post";
     const finalTitle = title.trim() || finalTopic;
 
+    const currentAuthorName = item?.authorName || session?.user?.name || session?.user?.email?.split("@")[0] || "Mayank";
+    const currentAuthorEmail = item?.authorEmail || session?.user?.email || "";
+
     const savedItem: ContentItem = {
       id: item?.id || generateContentId(),
       n: item?.n,
@@ -125,6 +131,8 @@ export function ContentEditorModal({
       time: time || "10:00",
       status,
       pillar,
+      authorName: currentAuthorName,
+      authorEmail: currentAuthorEmail,
       set: item?.set,
       style: item?.style,
       createdAt: item?.createdAt || new Date().toISOString(),
@@ -148,6 +156,11 @@ export function ContentEditorModal({
     if (item?.style) p.set("style", item.style);
     return `/?${p.toString()}`;
   }
+
+  const activeAuthor = getAuthorInfo(
+    item?.authorName || session?.user?.name,
+    item?.authorEmail || session?.user?.email
+  );
 
   const labelStyle: React.CSSProperties = {
     fontFamily: FONT,
@@ -209,9 +222,42 @@ export function ContentEditorModal({
         {/* Modal Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.line}`, paddingBottom: 14 }}>
           <div>
-            <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: 20, color: C.ink, margin: 0 }}>
-              {isEditing ? "Edit Content Post" : "Create New Content"}
-            </h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h2 style={{ fontFamily: DISPLAY_FONT, fontSize: 20, color: C.ink, margin: 0 }}>
+                {isEditing ? "Edit Content Post" : "Create New Content"}
+              </h2>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  background: activeAuthor.bg,
+                  color: activeAuthor.color,
+                  padding: "2px 8px",
+                  borderRadius: 12,
+                  fontSize: 11,
+                  fontWeight: 700
+                }}
+              >
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: activeAuthor.color,
+                    color: "#fff",
+                    fontSize: 8.5,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: 800
+                  }}
+                >
+                  {activeAuthor.initial}
+                </span>
+                {activeAuthor.displayName}
+              </span>
+            </div>
             <p style={{ fontFamily: FONT, fontSize: 12.5, color: C.inkMute, margin: "3px 0 0 0" }}>
               Schedule, draft, and generate AI-assisted content for your channels.
             </p>

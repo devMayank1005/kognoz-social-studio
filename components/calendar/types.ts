@@ -29,6 +29,8 @@ export interface ContentItem {
   time?: string; // e.g. "09:00", "13:30"
   status: ContentStatus;
   pillar: string;
+  authorName?: string; // e.g. "Mayank", "Lokesh", "Yashwant"
+  authorEmail?: string;
   tags?: string[];
   set?: DesignSetId;
   style?: IdeaStyle;
@@ -41,6 +43,28 @@ export interface DynamicCalendarStore {
   month?: number;
   items: ContentItem[];
   updatedAt?: string;
+}
+
+export const AUTHOR_COLORS: Record<string, { bg: string; color: string }> = {
+  M: { bg: "#EBF3FA", color: "#005184" }, // Mayank
+  L: { bg: "#EEF7F5", color: "#00838F" }, // Lokesh
+  Y: { bg: "#FEF6EC", color: "#B86B14" }, // Yashwant
+  H: { bg: "#EDF7ED", color: "#2E7D32" }, // Harpreet
+  K: { bg: "#F3E8FF", color: "#7E22CE" }, // Kognoz
+};
+
+export function getAuthorInfo(name?: string, email?: string): { initial: string; displayName: string; bg: string; color: string } {
+  const rawName = name || email?.split("@")[0] || "User";
+  // Clean first name (e.g. "Mayank Tripathi" -> "Mayank")
+  const firstName = rawName.split(" ")[0].trim();
+  const initial = (firstName[0] || "U").toUpperCase();
+  const palette = AUTHOR_COLORS[initial] || { bg: "#EAF1F4", color: "#005184" };
+  return {
+    initial,
+    displayName: firstName,
+    bg: palette.bg,
+    color: palette.color
+  };
 }
 
 export const PLATFORMS: { id: ContentPlatform; label: string; color: string; bg: string }[] = [

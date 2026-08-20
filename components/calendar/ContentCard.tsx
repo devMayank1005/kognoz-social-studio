@@ -8,6 +8,7 @@ import {
   STATUS_NEXT,
   PLATFORMS,
   PILLAR_COLORS,
+  getAuthorInfo,
   type ContentItem,
   type ContentStatus
 } from "./types";
@@ -28,6 +29,7 @@ export function ContentCard({ item, onEdit, onStatusChange, compact = false }: C
     bg: C.mist
   };
   const pillarCol = PILLAR_COLORS[item.pillar] || C.blue;
+  const author = getAuthorInfo(item.authorName, item.authorEmail || item.platform);
 
   function createStudioHref(): string {
     const p = new URLSearchParams({
@@ -164,25 +166,48 @@ export function ContentCard({ item, onEdit, onStatusChange, compact = false }: C
           </span>
         </div>
 
-        {isStudioFmt && (
-          <a
-            href={createStudioHref()}
-            onClick={(e) => e.stopPropagation()}
+        {/* Author badge & Studio Link */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+          <span
+            title={`Added by ${author.displayName}`}
             style={{
-              fontSize: 10.5,
-              fontWeight: 700,
-              color: C.blue,
-              textDecoration: "none",
-              background: C.mist,
-              padding: "1.5px 5px",
-              borderRadius: 4,
+              width: 16,
+              height: 16,
+              borderRadius: "50%",
+              background: author.bg,
+              color: author.color,
+              fontSize: 9,
+              fontWeight: 800,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: `1px solid ${author.color}40`,
               flexShrink: 0
             }}
-            title="Open in Studio to generate slides"
           >
-            Studio →
-          </a>
-        )}
+            {author.initial}
+          </span>
+
+          {isStudioFmt && (
+            <a
+              href={createStudioHref()}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                color: C.blue,
+                textDecoration: "none",
+                background: C.mist,
+                padding: "1.5px 5px",
+                borderRadius: 4,
+                flexShrink: 0
+              }}
+              title="Open in Studio to generate slides"
+            >
+              Studio →
+            </a>
+          )}
+        </div>
       </div>
     </div>
   );

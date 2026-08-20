@@ -8,6 +8,7 @@ import {
   STATUS_NEXT,
   PLATFORMS,
   PILLAR_COLORS,
+  getAuthorInfo,
   type ContentItem,
   type ContentStatus
 } from "./types";
@@ -154,6 +155,7 @@ export function CalendarListView({
               };
               const pillarCol = PILLAR_COLORS[it.pillar] || C.blue;
               const isStudioFmt = (STUDIO_FORMATS as readonly string[]).includes(it.contentType);
+              const author = getAuthorInfo(it.authorName, it.authorEmail || it.platform);
 
               function createStudioHref(): string {
                 const p = new URLSearchParams({
@@ -252,6 +254,27 @@ export function CalendarListView({
                         Studio →
                       </a>
                     )}
+
+                    {/* Author Initial Badge */}
+                    <span
+                      title={`Added by ${author.displayName}`}
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: "50%",
+                        background: author.bg,
+                        color: author.color,
+                        fontSize: 10.5,
+                        fontWeight: 800,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        border: `1px solid ${author.color}40`,
+                        flexShrink: 0
+                      }}
+                    >
+                      {author.initial}
+                    </span>
 
                     {/* Edit Button */}
                     <button

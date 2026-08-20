@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useSession } from "next-auth/react";
 import { C, FONT } from "@/lib/tokens";
 import { PLATFORMS, type ContentItem } from "./types";
 import { generateContentId, getTodayKey } from "./calendarUtils";
@@ -12,6 +13,7 @@ interface QuickAddBarProps {
 }
 
 export function QuickAddBar({ currentDateKey, onAddQuick, onOpenFullModal }: QuickAddBarProps) {
+  const { data: session } = useSession();
   const [topic, setTopic] = useState("");
   const [platform, setPlatform] = useState("LinkedIn");
   const [contentType, setContentType] = useState("Carousel");
@@ -19,6 +21,9 @@ export function QuickAddBar({ currentDateKey, onAddQuick, onOpenFullModal }: Qui
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!topic.trim()) return;
+
+    const authorName = session?.user?.name || session?.user?.email?.split("@")[0] || "Mayank";
+    const authorEmail = session?.user?.email || "";
 
     const newItem: ContentItem = {
       id: generateContentId(),
@@ -30,6 +35,8 @@ export function QuickAddBar({ currentDateKey, onAddQuick, onOpenFullModal }: Qui
       time: "10:00",
       status: "Planned",
       pillar: "Behavioral Signal",
+      authorName,
+      authorEmail,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
