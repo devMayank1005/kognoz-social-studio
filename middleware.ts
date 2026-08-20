@@ -5,6 +5,22 @@ import { getToken } from "next-auth/jwt";
 const SECRET = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "kognoz-social-studio-secure-auth-secret-key-2026";
 
 export async function middleware(req: NextRequest) {
+  const host = req.headers.get("host") || "";
+
+  // Redirect Vercel preview/deployment subdomains to canonical production domain
+  // to ensure Microsoft OAuth cookies and callbacks match on the first click.
+  if (
+    host.endsWith(".vercel.app") &&
+    host !== "kognoz-social-studio.vercel.app" &&
+    !host.startsWith("localhost") &&
+    !host.startsWith("127.0.0.1")
+  ) {
+    const canonicalUrl = req.nextUrl.clone();
+    canonicalUrl.host = "kognoz-social-studio.vercel.app";
+    canonicalUrl.protocol = "https:";
+    return NextResponse.redirect(canonicalUrl, 307);
+  }
+
   const { pathname } = req.nextUrl;
 
   // Allow public assets, login, and auth endpoints
