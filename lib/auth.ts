@@ -7,8 +7,13 @@ import { getSupabaseServerClient } from "@/lib/supabase";
 // Auth: Microsoft 365 (Entra ID) Single Sign-On for @kognozconsulting.com
 // with fallback to Supabase `users` table via CredentialsProvider.
 
+const secret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
+if (!secret && process.env.NODE_ENV === "production") {
+  throw new Error("NEXTAUTH_SECRET (or AUTH_SECRET) is not configured in production");
+}
+
 export const authOptions: NextAuthOptions = {
-  secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "kognoz-social-studio-secure-auth-secret-key-2026",
+  secret,
   session: { strategy: "jwt" },
   providers: [
     AzureADProvider({
