@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const SECRET = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
+const SECRET = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "kognoz-social-studio-secure-auth-secret-key-2026";
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

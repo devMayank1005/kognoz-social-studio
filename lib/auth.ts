@@ -8,11 +8,11 @@ import { getSupabaseServerClient } from "@/lib/supabase";
 // with fallback to Supabase `users` table via CredentialsProvider.
 
 export const authOptions: NextAuthOptions = {
-  secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET,
+  secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "kognoz-social-studio-secure-auth-secret-key-2026",
   session: { strategy: "jwt" },
   providers: [
     AzureADProvider({
-      clientId: process.env.AZURE_AD_CLIENT_ID || "",
+      clientId: process.env.AZURE_AD_CLIENT_ID || "3421373a-9203-4376-a6be-f7ce26ed85e8",
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET || "",
       tenantId: process.env.AZURE_AD_TENANT_ID || "2dbb05c9-b19f-4164-bc87-9a3f87e7d02e"
     }),
