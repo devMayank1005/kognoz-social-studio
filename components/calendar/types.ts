@@ -53,8 +53,8 @@ export const AUTHOR_COLORS: Record<string, { bg: string; color: string }> = {
   K: { bg: "#F3E8FF", color: "#7E22CE" }, // Kognoz
 };
 
-export function getAuthorInfo(name?: string, email?: string): { initial: string; displayName: string; bg: string; color: string } {
-  const rawName = name || email?.split("@")[0] || "User";
+export function getAuthorInfo(name?: string | null, email?: string | null): { initial: string; displayName: string; bg: string; color: string } {
+  const rawName = name || (email ? email.split("@")[0] : "User") || "User";
   // Clean first name (e.g. "Mayank Tripathi" -> "Mayank")
   const firstName = rawName.split(" ")[0].trim();
   const initial = (firstName[0] || "U").toUpperCase();
