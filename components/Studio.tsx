@@ -13,7 +13,7 @@
 //     ported in this pass — flagged in README as the one remaining gap.
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
@@ -33,7 +33,8 @@ import {
   buildModifyPrompt,
   buildDesignNotePrompt,
   type IdeaStyle,
-  type StyleExample
+  type StyleExample,
+  groundingDefault
 } from "@/lib/promptBuilders";
 import { callClaudeJSON, callClaudeText, FAST_MODEL } from "@/lib/claudeClient";
 import { exportPdf, exportPanorama, exportStrip, exportPNG, saveBlobAs } from "@/lib/exportPipeline";
@@ -132,6 +133,14 @@ export default function Studio() {
   const [imgOn, setImgOn] = useState<Record<number, boolean>>({});
   const [ideaStyle, setIdeaStyle] = useState<IdeaStyle>("signals");
 
+  // Web-search grounding is opt-in and visible. It tracks the format/pillar
+  // default until the user overrides it, because a grounded generation costs
+  // several times a plain one ($10/1000 searches plus every result billed as
+  // input tokens) and that should never be an invisible consequence of a
+  // format choice.
+  const [grounded, setGrounded] = useState(false);
+  const groundedTouched = useRef(false);
+
   const [design, setDesignLocal] = useState<Required<SlideDesign>>(DEFAULT_DESIGN);
   const [housePrefs, setHousePrefsLocal] = useState("");
   const [styleMem, setStyleMem] = useState<StyleExample[]>([]);
@@ -145,6 +154,28 @@ export default function Studio() {
   const [article, setArticle] = useState("");
   const [artBusy, setArtBusy] = useState(false);
   const [artInstr, setArtInstr] = useState("");
+
+  // Every AI action here REPLACES what you wrote, and replacing React state wipes the
+  // browser's native Cmd+Z stack — so without a snapshot the only way back to your own
+  // words is paying for another generation. `undoLabel` names what would be restored.
+  type DeckSnapshot = { eyebrow: string; cover: string; slides: CoercedSlide[]; cta: string; label: string };
+  const [deckUndo, setDeckUndo] = useState<DeckSnapshot | null>(null);
+  const [articleUndo, setArticleUndo] = useState<{ text: string; label: string } | null>(null);
+
+  const snapshotDeck = (label: string) => setDeckUndo({ eyebrow, cover, slides, cta, label });
+  const restoreDeck = () => {
+    if (!deckUndo) return;
+    setEyebrow(deckUndo.eyebrow);
+    setCover(deckUndo.cover);
+    setSlides(deckUndo.slides);
+    setCta(deckUndo.cta);
+    setDeckUndo(null);
+  };
+
+  // A regenerate used to silently delete the article and verify pass the user had
+  // already paid for, forcing them to buy both again. Keep them, flag them stale.
+  const [staleArticle, setStaleArticle] = useState(false);
+  const [staleVerify, setStaleVerify] = useState(false);
 
   const [verifying, setVerifying] = useState(false);
   const [verifyRes, setVerifyRes] = useState<VerifyCheck[] | null>(null);
@@ -245,6 +276,26 @@ export default function Studio() {
   const total = slides.length;
   const cur = deck[Math.min(current, deck.length - 1)];
 
+  useEffect(() => {
+    if (!groundedTouched.current) setGrounded(groundingDefault(format, pillar));
+  }, [format, pillar]);
+
+  // Cmd/Ctrl+Z restores the last thing an AI action replaced. Inside a text field the
+  // browser's own undo is the right behaviour, so leave those alone.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.shiftKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
+      if (el?.isContentEditable) return;
+      if (!deckUndo) return;
+      e.preventDefault();
+      restoreDeck();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deckUndo, restoreDeck]);
+
   async function markDrafted(itemN: number | string) {
     // Calendar Create-> sets the item to Draft on successful generation
     // Round-trips through /api/store since Studio doesn't hold calendar state directly.
@@ -260,10 +311,21 @@ export default function Studio() {
     await storeSet("kognoz-calendar", next);
   }
 
-  async function generate(tTopic?: string, tPillar?: string, tFormat?: FormatId, itemN?: number | null, fresh?: boolean) {
+  async function generate(
+    tTopic?: string,
+    tPillar?: string,
+    tFormat?: FormatId,
+    itemN?: number | null,
+    fresh?: boolean,
+    tGrounded?: boolean
+  ) {
     const gTopic = typeof tTopic === "string" ? tTopic : topic;
     const gPillar = typeof tPillar === "string" && tPillar ? tPillar : pillar;
     const gFormat = typeof tFormat === "string" && tFormat ? tFormat : format;
+    // Explicit param wins: on the autorun path the `grounded` state set moments ago
+    // has not committed yet, and reading it from the closure would silently ground
+    // (or fail to ground) against the user's actual choice.
+    const gGrounded = typeof tGrounded === "boolean" ? tGrounded : grounded;
     if (!gTopic.trim() || loading || modLoading) return;
     setLoading(true);
     setError("");
@@ -275,7 +337,8 @@ export default function Studio() {
         ideaStyle,
         housePrefs,
         styleMem,
-        fresh
+        fresh,
+        grounded: gGrounded
       });
       const parsed = coerceContent(await callClaudeJSON("generate", prompt, { useSearch }));
       if (gFormat === "Idea Deck") parsed.slides = applyIdeaDeckKickers(parsed.slides, ideaStyle);
@@ -288,13 +351,14 @@ export default function Studio() {
       setImages({});
       setScales({});
       setImgOn({});
-      setArticle("");
-      setVerifyRes(null);
-      setVerifyFixed(null);
+      snapshotDeck("previous deck");
+      setStaleArticle(Boolean(article));
+      setStaleVerify(Boolean(verifyRes || verifyFixed));
       setCurrent(0);
       if (itemN != null) markDrafted(itemN);
-    } catch {
-      setError("Couldn't generate this time — you can edit the content by hand below, or try again.");
+    } catch (e) {
+      const why = e instanceof Error && e.message ? ` (${e.message})` : "";
+      setError(`Couldn't generate this time${why} — you can edit the content by hand below, or try again.`);
     } finally {
       setLoading(false);
     }
@@ -307,7 +371,7 @@ export default function Studio() {
     setModTxt("");
     setError("");
     setCurrent(0);
-    generate(topic, pillar, format, null, true);
+    generate(topic, pillar, format, null, true, grounded);
   };
 
   async function modifyContent() {
@@ -317,6 +381,7 @@ export default function Studio() {
     try {
       const prompt = buildModifyPrompt({ eyebrow, cover, slides, cta, instruction: modTxt, housePrefs });
       const parsed = coerceContent(await callClaudeJSON("revise", prompt, { model: FAST_MODEL }));
+      snapshotDeck("revision");
       setEyebrow(parsed.eyebrow || eyebrow);
       setCover(parsed.cover || cover);
       setSlides(parsed.slides);
@@ -330,13 +395,15 @@ export default function Studio() {
   }
 
   async function writeArticle(instruction?: string) {
-    if (artBusy || !topic.trim()) return;
+    if (artBusy || loading || !topic.trim()) return;
     setArtBusy(true);
     setError("");
     try {
       const prompt = buildArticlePrompt({ topic, pillar, instruction, currentArticle: article });
       const text = await callClaudeText("article", prompt, { model: instruction && instruction.trim() ? FAST_MODEL : undefined, maxTokens: 2600 });
+      setArticleUndo(article ? { text: article, label: instruction?.trim() ? "revision" : "rewrite" } : null);
       setArticle(text.trim());
+      setStaleArticle(false);
       setArtInstr("");
     } catch (e) {
       setError(`Article writing failed (${e instanceof Error ? e.message : e}). Try once more; tell me this message if it repeats.`);
@@ -356,6 +423,7 @@ export default function Studio() {
       if (parsed && parsed.fixed) {
         setVerifyRes(parsed.checks || []);
         setVerifyFixed(parsed.fixed);
+        setStaleVerify(false);
       } else {
         throw new Error("no verdicts returned");
       }
@@ -368,6 +436,7 @@ export default function Studio() {
   function applyVerified() {
     if (!verifyFixed) return;
     const parsed = coerceContent(verifyFixed);
+    snapshotDeck("fact-check fixes");
     setEyebrow(parsed.eyebrow || eyebrow);
     setCover(parsed.cover || cover);
     setSlides(parsed.slides && parsed.slides.length ? parsed.slides : slides);
@@ -377,7 +446,7 @@ export default function Studio() {
   }
 
   async function applyDesignNote() {
-    if (!designNote.trim() || designBusy) return;
+    if (!designNote.trim() || designBusy || loading) return;
     setDesignBusy(true);
     setError("");
     try {
@@ -502,7 +571,21 @@ export default function Studio() {
   }
 
   // -------------------- Calendar Create-> wiring --------------------
-  // PRD §11: "Create -> loads Studio with the item's format+style+set, auto-generates."
+  // PRD §11 originally read "Create -> loads Studio with the item's format+style+set,
+  // auto-generates." Generating straight off a URL turned out to be the single largest
+  // source of unintended spend in the app: three calendar affordances build these links
+  // (one opens in a new tab), and every click, browser reload, or tab-restore bought a
+  // full Sonnet generation nobody asked for. Next 14's App Router also enables Strict
+  // Mode by default, so in dev each one fired TWICE.
+  //
+  // So: landing on the link now PRIMES the studio (format, style, set, pillar, topic all
+  // filled in) and waits for a click. Auto-run survives only behind an explicit
+  // `autorun=1`, latched to fire at most once per mount and stripped from the URL so a
+  // reload cannot re-trigger it.
+  const autoRanRef = useRef(false);
+  const [primedItem, setPrimedItem] = useState<number | null>(null);
+  const [primedFromCalendar, setPrimedFromCalendar] = useState(false);
+
   useEffect(() => {
     const qTopic = searchParams.get("topic");
     const qFormat = searchParams.get("format") as FormatId | null;
@@ -510,18 +593,48 @@ export default function Studio() {
     const qSet = searchParams.get("set") as DesignSetId | null;
     const qStyle = searchParams.get("style") as IdeaStyle | null;
     const qN = searchParams.get("n");
-    if (!qTopic || !qFormat) return;
-    setFormat(qFormat);
+    const qAutorun = searchParams.get("autorun") === "1";
+    // A calendar slot that has never been filled in links here with an empty topic
+    // (`topic=&n=new`). Previously that bailed out entirely and you landed on a blank
+    // Studio, losing the format and pillar you had picked. Carry over whatever the
+    // link does have; only the topic is required to actually generate.
+    if (!qTopic && !qFormat) return;
+    if (autoRanRef.current) return;
+    autoRanRef.current = true;
+
+    if (qFormat) setFormat(qFormat);
     if (qStyle) setIdeaStyle(qStyle);
     if (qSet) saveDesign({ ...design, set: qSet });
+    const resolvedPillar = qPillar && PILLARS[qPillar] ? qPillar : pillar;
     if (qPillar && PILLARS[qPillar]) {
       setPillar(qPillar);
       setEyebrow(qPillar);
     }
-    setTopic(qTopic);
+    if (qTopic) setTopic(qTopic);
+    setPrimedFromCalendar(Boolean(qTopic));
     setCurrent(0);
-    generate(qTopic, qPillar && PILLARS[qPillar] ? qPillar : pillar, qFormat, qN ? Number(qN) : null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on the query params present at mount
+    // `n=new` is an unsaved slot, not a calendar row to mark as drafted.
+    const parsedN = qN && qN !== "new" ? Number(qN) : NaN;
+    setPrimedItem(Number.isFinite(parsedN) ? parsedN : null);
+    if (!groundedTouched.current && qFormat) setGrounded(groundingDefault(qFormat, resolvedPillar));
+
+    // Both a topic and a format are needed to generate anything. Without them we
+    // prime whatever the link carried and wait for the user to press Generate.
+    if (qAutorun && qTopic && qFormat) {
+      // Consume the flag before generating so a reload lands primed, not billed.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("autorun");
+      window.history.replaceState({}, "", url.toString());
+      generate(
+        qTopic,
+        resolvedPillar,
+        qFormat,
+        Number.isFinite(parsedN) ? parsedN : null,
+        false,
+        groundingDefault(qFormat, resolvedPillar)
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- latched; runs once on the query params present at mount
   }, [searchParams]);
 
   // -------------------- style helpers (ported verbatim) --------------------
@@ -676,14 +789,61 @@ export default function Studio() {
           }
           style={{ ...inputStyle, marginBottom: 10 }}
         />
-        <button onClick={() => generate()} disabled={loading} style={btn(true)}>
-          {loading ? "Writing & designing…" : "Generate with Claude"}
+        <label
+          style={{
+            display: "flex", alignItems: "flex-start", gap: 9, marginBottom: 10, cursor: "pointer",
+            border: `1px solid ${grounded ? C.line : "transparent"}`, borderRadius: 8,
+            padding: grounded ? "9px 10px" : "0 0 2px", background: grounded ? C.off : "transparent"
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={grounded}
+            onChange={(e) => { groundedTouched.current = true; setGrounded(e.target.checked); }}
+            style={{ marginTop: 2, accentColor: C.ink, cursor: "pointer" }}
+          />
+          <span style={{ fontFamily: font, fontSize: 12, color: C.inkSoft, lineHeight: 1.45 }}>
+            Ground with web search
+            <span style={{ color: C.inkMute }}>
+              {" "}· verifies statistics live, up to 3 searches. Costs several times a plain
+              generation, so leave it off unless the piece leans on external numbers.
+            </span>
+          </span>
+        </label>
+        <button
+          onClick={() => generate(undefined, undefined, undefined, primedItem)}
+          disabled={loading}
+          style={btn(true)}
+        >
+          {loading ? "Writing & designing…" : grounded ? "Generate with Claude · grounded" : "Generate with Claude"}
         </button>
+        {primedFromCalendar && !loading && (
+          <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginTop: 8, lineHeight: 1.5 }}>
+            Loaded from the calendar and ready. Nothing has been generated yet — press Generate when the brief looks right.
+          </div>
+        )}
         {error && <div style={{ fontFamily: font, fontSize: 12, color: "#B4442E", marginTop: 10, lineHeight: 1.5 }}>{error}</div>}
 
         {format === "Article Cover" && (
           <div style={{ marginTop: 14, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, background: C.off }}>
             <span style={label}>The article itself · the cover is the billboard, this is the asset</span>
+            {articleUndo && (
+              <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginBottom: 8, lineHeight: 1.5 }}>
+                Claude replaced your article.{" "}
+                <button
+                  type="button"
+                  onClick={() => { setArticle(articleUndo.text); setArticleUndo(null); }}
+                  style={{ fontFamily: font, fontSize: 11.5, fontWeight: 700, color: C.blue, background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                >
+                  Undo the {articleUndo.label}
+                </button>
+              </div>
+            )}
+            {staleArticle && (
+              <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginBottom: 8, lineHeight: 1.5 }}>
+                Written for the previous version of this deck. Still yours to edit — rewrite only if it no longer fits.
+              </div>
+            )}
             <button onClick={() => writeArticle()} disabled={artBusy || !topic.trim()} style={{ ...btn(true), opacity: artBusy || !topic.trim() ? 0.6 : 1, marginBottom: 10 }}>
               {artBusy ? "Writing the article…" : article ? "Rewrite from scratch" : "Write the full article"}
             </button>
@@ -727,6 +887,11 @@ export default function Studio() {
           <button onClick={verifyFacts} disabled={verifying || loading} style={{ ...btn(true), opacity: verifying || loading ? 0.6 : 1, marginBottom: verifyRes ? 10 : 0 }}>
             {verifying ? "Searching & checking…" : "Verify facts"}
           </button>
+          {staleVerify && verifyRes && (
+            <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginBottom: 8, lineHeight: 1.5 }}>
+              Checked against the previous version of this deck. Re-verify only if the claims changed.
+            </div>
+          )}
           {verifyRes && (
             <>
               {verifyRes.map((c, i) => (
@@ -754,6 +919,19 @@ export default function Studio() {
 
         <div style={{ marginTop: 14 }}>
           <span style={label}>Iterate on content · design elements have their own panel below</span>
+          {deckUndo && (
+            <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginBottom: 8, lineHeight: 1.5 }}>
+              Claude replaced your text.{" "}
+              <button
+                type="button"
+                onClick={restoreDeck}
+                style={{ fontFamily: font, fontSize: 11.5, fontWeight: 700, color: C.blue, background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+              >
+                Undo the {deckUndo.label}
+              </button>{" "}
+              (Cmd/Ctrl+Z)
+            </div>
+          )}
           <textarea value={modTxt} onChange={(e) => setModTxt(e.target.value)} rows={2} placeholder="Tell Claude what to change: sharper hook, add a real number, aim it at CEOs, warmer close, shorter slides…" style={{ ...inputStyle, marginBottom: 8 }} />
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={modifyContent} disabled={modLoading || !modTxt.trim()} style={{ ...btn(false), flex: 1, opacity: modLoading || !modTxt.trim() ? 0.55 : 1, cursor: modLoading || !modTxt.trim() ? "default" : "pointer" }}>

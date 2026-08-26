@@ -29,7 +29,9 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/login") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/brand") ||
-    pathname === "/favicon.ico"
+    pathname === "/favicon.ico" ||
+    pathname === "/icon.png" ||
+    pathname === "/apple-icon.png"
   ) {
     return NextResponse.next();
   }
@@ -82,8 +84,8 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - brand (public brand assets)
-     * - favicon.ico (favicon file)
+     * - favicon.ico, icon.png, apple-icon.png (App Router icon conventions)
      */
-    "/((?!api/auth|login|_next/static|_next/image|brand|favicon.ico).*)"
+    "/((?!api/auth|login|_next/static|_next/image|brand|favicon.ico|icon.png|apple-icon.png).*)"
   ]
 };

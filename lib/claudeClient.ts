@@ -9,11 +9,29 @@
 // deploy. The key lives in Vercel's server env only (see .env.example) and
 // is never sent to, or readable from, the browser. This file never touches
 // it — every call here is a same-origin fetch to our own Next.js route.
+//
+// RETRY POLICY (this is a spend control, not just error handling). Every retry
+// here is a second billable Anthropic call, so each one has to earn its place:
+//
+//   4xx (bad request, 401, 429 rate limit)  -> never retry. A 400 fails
+//        identically the second time, and retrying a 429 makes it worse.
+//   network error / 5xx / 529 overloaded    -> retry once, backing off and
+//        respecting Retry-After. These produce no output, so nothing was billed.
+//   200 but stop_reason "max_tokens"        -> the reply was truncated mid-JSON.
+//        Retrying at the SAME cap is guaranteed to truncate again: two paid calls,
+//        zero usable output. Retry once with more room instead.
+//   200, complete, but unparseable          -> the one case a corrective retry
+//        actually fixes. Retry once asking for bare JSON.
+//
+// The old code used a bare `catch {}` around everything, so a 429 from our own
+// limiter or an Anthropic 529 silently doubled the bill.
 "use client";
 
 export type ClaudeTask = "generate" | "revise" | "caption" | "article" | "verify" | "designNote";
 
-export const FAST_MODEL = "claude-haiku-4-5-20251001";
+export const FAST_MODEL = "claude-haiku-4-5";
+
+const REQUEST_TIMEOUT_MS = 90_000;
 
 interface CallOpts {
   model?: string;
@@ -21,53 +39,128 @@ interface CallOpts {
   useSearch?: boolean;
 }
 
-async function callProxy(task: ClaudeTask, prompt: string, opts: CallOpts = {}): Promise<string> {
-  const res = await fetch("/api/claude", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ task, prompt, model: opts.model, maxTokens: opts.maxTokens, useSearch: opts.useSearch })
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-  const content = (data.content || []) as { type: string; text?: string }[];
-  return content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text || "")
-    .join("");
+interface ProxyResult {
+  text: string;
+  stopReason: string | null;
 }
 
-// Tolerant JSON extraction + one corrective retry — same contract as the
-// reference implementation's callClaudeJSON.
-export async function callClaudeJSON(task: ClaudeTask, prompt: string, opts: CallOpts = {}): Promise<any> {
-  const extract = (text: string) => {
-    const a = text.indexOf("{");
-    const b = text.lastIndexOf("}");
-    if (a === -1 || b <= a) throw new Error("no json");
-    return JSON.parse(text.slice(a, b + 1));
-  };
+export class ClaudeError extends Error {
+  status: number | null;
+  retryAfterMs: number | null;
+  constructor(message: string, status: number | null = null, retryAfterMs: number | null = null) {
+    super(message);
+    this.name = "ClaudeError";
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+  /** 4xx: deterministic. A second identical call would fail identically. */
+  get isClientError() {
+    return this.status !== null && this.status >= 400 && this.status < 500;
+  }
+  /** Network failure or 5xx: transient, and nothing was billed. Worth one retry. */
+  get isTransient() {
+    return this.status === null || this.status >= 500;
+  }
+}
+
+async function callProxy(task: ClaudeTask, prompt: string, opts: CallOpts = {}): Promise<ProxyResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
   try {
-    return extract(await callProxy(task, prompt, opts));
+    res = await fetch("/api/claude", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task, prompt, model: opts.model, maxTokens: opts.maxTokens, useSearch: opts.useSearch }),
+      signal: controller.signal
+    });
+  } catch (e) {
+    throw new ClaudeError(e instanceof Error && e.name === "AbortError" ? "request timed out" : "network error");
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const header = res.headers.get("retry-after");
+    const retryAfterMs = header && !Number.isNaN(Number(header)) ? Number(header) * 1000 : null;
+    throw new ClaudeError(data?.error || `HTTP ${res.status}`, res.status, retryAfterMs);
+  }
+
+  const content = (data?.content || []) as { type: string; text?: string }[];
+  return {
+    text: content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text || "")
+      .join(""),
+    stopReason: data?.stop_reason ?? null
+  };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * One transport-level retry, for failures that cost nothing and may succeed on a
+ * second try. 4xx never gets here.
+ */
+async function callProxyResilient(task: ClaudeTask, prompt: string, opts: CallOpts): Promise<ProxyResult> {
+  try {
+    return await callProxy(task, prompt, opts);
+  } catch (e) {
+    if (e instanceof ClaudeError && e.isClientError) throw e;
+    if (!(e instanceof ClaudeError) || !e.isTransient) throw e;
+    await sleep(e.retryAfterMs ?? 1200);
+    return await callProxy(task, prompt, opts);
+  }
+}
+
+const extractJson = (text: string) => {
+  const a = text.indexOf("{");
+  const b = text.lastIndexOf("}");
+  if (a === -1 || b <= a) throw new Error("no json");
+  return JSON.parse(text.slice(a, b + 1));
+};
+
+export async function callClaudeJSON(task: ClaudeTask, prompt: string, opts: CallOpts = {}): Promise<any> {
+  const first = await callProxyResilient(task, prompt, opts);
+  try {
+    return extractJson(first.text);
   } catch {
-    const fixed = await callProxy(
+    // Truncated: the model ran out of room mid-object. Give it more room rather
+    // than buying the identical truncation a second time.
+    if (first.stopReason === "max_tokens") {
+      const roomier = { ...opts, maxTokens: Math.round((opts.maxTokens ?? 2000) * 1.75) };
+      const retry = await callProxyResilient(task, prompt, roomier);
+      try {
+        return extractJson(retry.text);
+      } catch {
+        throw new ClaudeError(
+          "the model's reply was cut off before it finished. Try a shorter topic or fewer slides."
+        );
+      }
+    }
+    // Complete but malformed — the only case a corrective nudge actually fixes.
+    const fixed = await callProxyResilient(
       task,
       prompt + "\n\nIMPORTANT: your previous reply was not valid JSON. Return ONLY the JSON object, nothing else.",
       opts
     );
-    return extract(fixed);
+    return extractJson(fixed.text);
   }
 }
 
-// Network-level retry (single backoff) — same contract as callClaudeText.
 export async function callClaudeText(task: ClaudeTask, prompt: string, opts: CallOpts = {}): Promise<string> {
-  const ask = async () => {
-    const text = (await callProxy(task, prompt, opts)).trim();
-    if (!text) throw new Error("empty reply from the model");
-    return text;
-  };
-  try {
-    return await ask();
-  } catch {
-    await new Promise((r) => setTimeout(r, 700));
-    return await ask();
+  const { text, stopReason } = await callProxyResilient(task, prompt, opts);
+  const trimmed = text.trim();
+  if (!trimmed) {
+    // An empty 200 is not a transport failure; re-asking the same question the
+    // same way is unlikely to help and always costs. Surface it instead.
+    throw new ClaudeError("the model returned an empty reply");
   }
+  if (stopReason === "max_tokens") {
+    // Usable, just cut short. Return it — throwing away paid output to buy it
+    // again would be the expensive choice.
+    console.warn(`[claude] ${task} hit the output cap; returning the partial reply`);
+  }
+  return trimmed;
 }

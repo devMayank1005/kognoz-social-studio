@@ -52,6 +52,10 @@ export function ContentEditorModal({
   // AI Generation state
   const [aiInstruction, setAiInstruction] = useState("");
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  // Replacing a textarea's value from React wipes the browser's native undo stack,
+  // so Cmd+Z cannot bring back what the AI overwrote. Without this the only way
+  // back to your own words is paying for another generation.
+  const [undoContent, setUndoContent] = useState<string | null>(null);
   const [aiError, setAiError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -67,6 +71,7 @@ export function ContentEditorModal({
         setStatus(item.status || "Planned");
         setPillar(item.pillar || "Behavioral Signal");
         setContent(item.content || "");
+        setUndoContent(null);
       } else {
         setTitle("");
         setTopic("");
@@ -77,6 +82,7 @@ export function ContentEditorModal({
         setStatus("Planned");
         setPillar("Behavioral Signal");
         setContent("");
+        setUndoContent(null);
       }
       setAiInstruction("");
       setAiError("");
@@ -87,6 +93,9 @@ export function ContentEditorModal({
   if (!isOpen) return null;
 
   async function handleGenerateAI() {
+    // Backstop for the disabled attribute: without this an in-flight request can be
+    // fired again by a keyboard activation or a double event, buying a second caption.
+    if (isGeneratingAI) return;
     const promptTopic = topic.trim() || title.trim();
     if (!promptTopic) {
       setAiError("Please provide a Title or Topic before generating.");
@@ -102,7 +111,13 @@ export function ContentEditorModal({
         currentCopy: content,
         instruction: aiInstruction.trim() || undefined
       });
-      const generated = await callClaudeText("caption", prompt, aiInstruction.trim() ? { model: FAST_MODEL } : undefined);
+      // Haiku for any REWRITE (half the price of sonnet), sonnet only for a caption
+      // written from nothing. This previously keyed off whether an instruction was
+      // typed, so "Rewrite with AI" with an empty instruction box silently paid
+      // sonnet rates to reword copy that already existed.
+      const isRewrite = Boolean(content.trim()) || Boolean(aiInstruction.trim());
+      const generated = await callClaudeText("caption", prompt, isRewrite ? { model: FAST_MODEL } : undefined);
+      setUndoContent(content);
       setContent(generated.trim());
     } catch (e) {
       setAiError(e instanceof Error ? e.message : "AI caption generation failed");
@@ -426,14 +441,38 @@ export function ContentEditorModal({
           <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, padding: 14, background: "#FAFCFD" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <span style={{ ...labelStyle, marginBottom: 0 }}>Caption / Post Copy</span>
-              <span style={{ fontSize: 11, color: C.inkMute }}>
-                {content.split(/\s+/).filter(Boolean).length} words
-              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {undoContent !== null && (
+                  <button
+                    type="button"
+                    onClick={() => { setContent(undoContent); setUndoContent(null); }}
+                    title="Restore the text the AI replaced (Cmd/Ctrl+Z)"
+                    style={{
+                      fontSize: 11, fontWeight: 700, color: C.blue, background: "none",
+                      border: "none", padding: 0, cursor: "pointer", textDecoration: "underline"
+                    }}
+                  >
+                    Undo AI rewrite
+                  </button>
+                )}
+                <span style={{ fontSize: 11, color: C.inkMute }}>
+                  {content.split(/\s+/).filter(Boolean).length} words
+                </span>
+              </div>
             </div>
 
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
+              onKeyDown={(e) => {
+                // Only intercept when there is an AI overwrite to undo; otherwise
+                // let the browser handle normal typing undo as usual.
+                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey && undoContent !== null) {
+                  e.preventDefault();
+                  setContent(undoContent);
+                  setUndoContent(null);
+                }
+              }}
               rows={5}
               placeholder="Write your post copy here or click 'Generate with Claude' below…"
               style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5, marginBottom: 10 }}

@@ -27,10 +27,25 @@ export interface GenerateOpts {
   housePrefs?: string;
   styleMem?: StyleExample[];
   fresh?: boolean;
+  /**
+   * Explicit opt-in/out for web-search grounding. Grounding costs several times a
+   * plain generation ($10/1000 searches plus every result billed as input tokens),
+   * so it must be a visible choice rather than an invisible consequence of picking
+   * a format. Omitted -> falls back to `groundingDefault`.
+   */
+  grounded?: boolean;
+}
+
+/**
+ * Formats and pillars where grounding is usually the right call. This is only the
+ * DEFAULT state of the toggle now, not a silent trigger.
+ */
+export function groundingDefault(format: FormatId, pillar: string): boolean {
+  return format === "Stat Card" || format === "Montage" || pillar === "Market Intelligence";
 }
 
 export function buildGeneratePrompt(opts: GenerateOpts): { prompt: string; useSearch: boolean } {
-  const { topic: gTopic, pillar: gPillar, format: gFormat, ideaStyle = "signals", housePrefs = "", styleMem = [], fresh } = opts;
+  const { topic: gTopic, pillar: gPillar, format: gFormat, ideaStyle = "signals", housePrefs = "", styleMem = [], fresh, grounded } = opts;
 
   const prefBlock = housePrefs.trim()
     ? `\nSTANDING TEAM PREFERENCES, learned from earlier edits. Apply proactively:\n${housePrefs.trim()}\n`
@@ -81,11 +96,11 @@ ${prefBlock}${memBlock}${freshBlock}
 ${buildFormatBlock(gFormat, gTopic, gPillar, ideaStyle)}`;
 
   const LINE_RULE = `\nLINE STRUCTURE, ALL FORMATS: when a body carries distinct statements, separate each with a real line break (\\n inside the JSON string): the claim on its own line, a capability line on its own line, "Source: <title, year>" on its own line. Never run distinct statements into one sentence.`;
-  const needsGrounding = gFormat === "Stat Card" || gFormat === "Montage" || gPillar === "Market Intelligence";
+  const needsGrounding = typeof grounded === "boolean" ? grounded : groundingDefault(gFormat, gPillar);
   const groundedPrompt = needsGrounding
     ? prompt +
       LINE_RULE +
-      `\n\nGROUNDING, NON-NEGOTIABLE: use the web_search tool to verify any statistic BEFORE stating it. State only numbers you can actually see in search results, and cite them as "Source: <the actual publication and year you found>". If you cannot verify a number, write the insight without a number and with no source line. Never cite a report from memory; a wrong source printed on a slide costs the firm its credibility.`
+      `\n\nGROUNDING, NON-NEGOTIABLE: use the web_search tool to verify any statistic BEFORE stating it. State only numbers you can actually see in search results, and cite them as "Source: <the actual publication and year you found>". If you cannot verify a number, write the insight without a number and with no source line. Never cite a report from memory; a wrong source printed on a slide costs the firm its credibility.\nSEARCH BUDGET: you have at most 2 searches. Spend them on the load-bearing numbers, the ones a reader would challenge. Write the rest of the piece from the brief, without numbers, rather than spending a search to decorate a slide.`
     : prompt +
       LINE_RULE +
       `\n\nSOURCES: do not attach named external reports or statistics from memory. The firm's own proof numbers may be stated as Kognoz's. Any external figure must appear without a source line (the team verifies separately with the Verify facts button).`;
@@ -222,11 +237,13 @@ Return ONLY the article markdown, nothing else.`;
 // ---------------------------------------------------------------------------
 export function buildVerifyPrompt(content: { eyebrow: string; cover: string; slides: CoercedSlide[]; cta: string }): string {
   const current = JSON.stringify(content);
-  return `You are the fact-checker for Kognoz, a consulting firm. Check EVERY numeric claim, statistic, named report, and source line in this social content against the live web using the web_search tool. A wrong or invented source printed on a slide costs the firm its credibility.
+  return `You are the fact-checker for Kognoz, a consulting firm. Check the numeric claims, statistics, named reports, and source lines in this social content against the live web using the web_search tool. A wrong or invented source printed on a slide costs the firm its credibility.
 
 CONTENT: ${current}
 
-For each factual claim: search, then judge. Return ONLY JSON:
+SEARCH BUDGET: you have at most 2 searches, so triage before you spend them. Rank the claims by how much damage a wrong one would do — a named external report or a precise statistic outranks a round directional number — and search the top ones. Batch related claims into a single query where one search can settle several. A claim you did not have budget to check is "unverifiable", not "verified"; say so in its note. Kognoz's own proof numbers (650,000+ jobs, 50,000+ assessments, 200+ enterprises, 12 countries) are canon and never need a search.
+
+For each factual claim: search where budget allows, then judge. Return ONLY JSON:
 {"checks": [{"where": "cover" | "slide N" | "cta", "claim": "the claim as written", "verdict": "verified" | "wrong" | "unverifiable", "note": "what the search actually shows, one sentence", "realSource": "actual publication title and year" | null}],
 "fixed": {"eyebrow": "...", "cover": "...", "slides": [{"title": "...", "body": "..."}], "cta": "..."}}
 Rules for "fixed": keep everything that checked out word for word; correct wrong numbers to what you found and cite the real source on its own line as "Source: <title, year>"; where a claim is unverifiable, rewrite the line to carry the insight without the number and remove its source line. Same slide count.`;

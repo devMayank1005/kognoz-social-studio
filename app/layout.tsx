@@ -5,11 +5,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Kognoz Social Studio",
   description: "AI-powered content production for the Kognoz LinkedIn presence.",
-  icons: {
-    icon: "/favicon.ico",
-    shortcut: "/favicon.ico",
-    apple: "/favicon.ico"
-  }
+  // Icons come from the App Router file conventions — app/favicon.ico (16/32/48),
+  // app/icon.png (512), app/apple-icon.png (180). An explicit `icons` block here
+  // would override those and drop the content hash Next appends for cache-busting.
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
