@@ -7,7 +7,7 @@
 
 import React, { useRef } from "react";
 import { C, GRAD, GRAD_DARK, FONT, DISPLAY_FONT, GLASS_DARKBG, GLASS_LIGHTBG } from "@/lib/tokens";
-import { DESIGN_SETS, isDarkRegister, type DesignSetId } from "@/lib/designSets";
+import { DESIGN_SETS, isDarkSurface, surfaceFor, type DesignSetId, type SurfaceId } from "@/lib/designSets";
 import { plainWords, type CoercedSlide } from "@/lib/coerce";
 import { Logo } from "./Logo";
 
@@ -226,7 +226,46 @@ export const Slide = React.memo(function Slide({
         ? CONTENT_ORDER[(idx + seed) % CONTENT_ORDER.length]
         : dset.contents[(idx + seed) % dset.contents.length]
       : 0;
-  const cardGlass = isDarkRegister(dz.set, seed);
+  // One surface per design set, so all six sets look different on the single-asset
+  // formats instead of collapsing into "light" and "dark". Concrete values live
+  // here with the renderer; lib/designSets only names them.
+  const surfaceId = surfaceFor(dz.set, seed);
+  const onDark = isDarkSurface(surfaceId);
+  const SURFACES: Record<SurfaceId, {
+    page: string; panel: React.CSSProperties; heading: string; body: string; label: string; rule: string; petal: number;
+  }> = {
+    paper: {
+      page: C.off,
+      panel: { background: C.white, border: `1px solid ${C.line}` },
+      heading: C.ink, body: C.inkSoft, label: C.inkMute, rule: C.line, petal: 0.5
+    },
+    ivory: {
+      page: C.white,
+      panel: { background: C.mist, border: "none" },
+      heading: C.ink, body: C.inkSoft, label: C.inkMute, rule: C.mist, petal: 0.34
+    },
+    boardroom: {
+      page: GRAD_DARK,
+      panel: { ...GLASS_DARKBG },
+      heading: "#fff", body: "rgba(255,255,255,0.85)", label: "rgba(255,255,255,0.55)", rule: "rgba(255,255,255,0.14)", petal: 0.42
+    },
+    glass: {
+      page: GRAD_DARK,
+      panel: { background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.28)", backdropFilter: "blur(8px)" },
+      heading: "#fff", body: "rgba(255,255,255,0.92)", label: "rgba(255,255,255,0.7)", rule: "rgba(255,255,255,0.24)", petal: 0.6
+    },
+    bloom: {
+      page: C.mist,
+      panel: { background: C.white, border: "none", boxShadow: "0 18px 44px rgba(0,40,70,0.07)" },
+      heading: C.ink, body: C.inkSoft, label: C.inkMute, rule: "transparent", petal: 0.7
+    },
+    press: {
+      page: C.off,
+      panel: { background: C.white, border: "none", borderTop: `6px solid ${C.ink}` },
+      heading: C.ink, body: C.inkSoft, label: C.ink, rule: C.ink, petal: 0.22
+    }
+  };
+  const S = SURFACES[surfaceId];
   // GRAD_DARK is built from C.blue, so an accent of blue is invisible on a dark
   // register — label and background are the same colour. The lighter tones read
   // fine as-is. Mirrors what <Eyebrow dark> already does at the top of this file.
@@ -269,42 +308,26 @@ export const Slide = React.memo(function Slide({
 
   /* ==================== IDEA DECK (Deepstash-style stash cards) ==================== */
   if (ideaMode && kind === "cover") {
-    // Dark register. The stash of cards is the whole idea here, so the stack keeps
-    // its geometry and only the palette moves.
-    if (cardGlass) {
-      return (
-        <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-          {dz.petals && <Petal w={620} o={0.5} style={{ position: "absolute", top: -170, right: -180 }} />}
-          <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
-            <Eyebrow dark />
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-              <div style={{ position: "absolute", width: "86%", height: "60%", borderRadius: 28, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.14)", transform: "rotate(4deg) translateY(16px)" }} />
-              <div style={{ position: "absolute", width: "91%", height: "62%", borderRadius: 28, background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.18)", transform: "rotate(-2.5deg) translateY(7px)" }} />
-              <div style={{ position: "relative", width: "96%", borderRadius: 28, padding: "84px 64px", ...GLASS_DARKBG, boxShadow: "0 28px 70px rgba(0,20,40,0.4)", textAlign: "center" }}>
-                <div style={{ fontFamily: font, fontSize: sz(20), fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: accentOnDark, marginBottom: 26 }}>{total} ideas · swipe</div>
-                <h1 style={{ fontFamily: displayFont, fontSize: fit(76, cover, 46), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: "#fff", margin: 0 }}>{renderEm(cover)}</h1>
-              </div>
-            </div>
-          </div>
-          <Foot dark right={COVER_R} />
-        </div>
-      );
-    }
+    // The stash of cards IS the format, so the geometry is fixed and only the
+    // surface moves. The two ghost cards behind sit at reduced opacity of the panel.
+    const ghost: React.CSSProperties = onDark
+      ? { background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.16)" }
+      : { background: C.white, border: `1px solid ${C.lineD}` };
     return (
-      <div id={id} style={{ ...wrap, background: C.off }}>
-        {dz.petals && <Petal w={620} o={0.7} style={{ position: "absolute", top: -170, right: -180 }} />}
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {dz.petals && <Petal w={620} o={S.petal} style={{ position: "absolute", top: -170, right: -180 }} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
-          <Eyebrow />
+          <Eyebrow dark={onDark} />
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
-            <div style={{ position: "absolute", width: "86%", height: "60%", borderRadius: 28, background: C.white, border: `1px solid ${C.lineD}`, transform: "rotate(4deg) translateY(16px)", opacity: 0.5 }} />
-            <div style={{ position: "absolute", width: "91%", height: "62%", borderRadius: 28, background: C.white, border: `1px solid ${C.lineD}`, transform: "rotate(-2.5deg) translateY(7px)", opacity: 0.75 }} />
-            <div style={{ position: "relative", width: "96%", borderRadius: 28, padding: "84px 64px", background: C.white, border: `1px solid ${C.line}`, boxShadow: "0 28px 70px rgba(0,40,70,0.12)", textAlign: "center" }}>
-              <div style={{ fontFamily: font, fontSize: sz(20), fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: accent, marginBottom: 26 }}>{total} ideas · swipe</div>
-              <h1 style={{ fontFamily: displayFont, fontSize: fit(76, cover, 46), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: C.ink, margin: 0 }}>{renderEm(cover)}</h1>
+            <div style={{ position: "absolute", width: "86%", height: "60%", borderRadius: surfaceId === "press" ? 0 : 28, ...ghost, transform: "rotate(4deg) translateY(16px)", opacity: onDark ? 1 : 0.5 }} />
+            <div style={{ position: "absolute", width: "91%", height: "62%", borderRadius: surfaceId === "press" ? 0 : 28, ...ghost, transform: "rotate(-2.5deg) translateY(7px)", opacity: onDark ? 1 : 0.75 }} />
+            <div style={{ position: "relative", width: "96%", borderRadius: surfaceId === "press" ? 0 : 28, padding: "84px 64px", ...S.panel, boxShadow: onDark ? "0 28px 70px rgba(0,20,40,0.4)" : "0 28px 70px rgba(0,40,70,0.12)", textAlign: "center" }}>
+              <div style={{ fontFamily: font, fontSize: sz(20), fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: onDark ? accentOnDark : accent, marginBottom: 26 }}>{total} ideas · swipe</div>
+              <h1 style={{ fontFamily: displayFont, fontSize: fit(76, cover, 46), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: S.heading, margin: 0 }}>{renderEm(cover)}</h1>
             </div>
           </div>
         </div>
-        <Foot right={COVER_R} />
+        <Foot dark={onDark} right={COVER_R} />
       </div>
     );
   }
@@ -315,13 +338,13 @@ export const Slide = React.memo(function Slide({
     const isKRead = /^the kognoz read/i.test(kick);
     const darkCard = isAsk || isKRead;
     return (
-      // `darkCard` is per-card (Ask / Kognoz-read always read dark). `cardGlass` is
-      // the deck-wide register from the design set. On the dark register the page
-      // turns and the ordinary cards become glass; the already-dark cards stay put.
-      <div id={id} style={{ ...wrap, background: cardGlass ? GRAD_DARK : C.off }}>
-        {dz.petals && <Petal w={380} o={cardGlass ? 0.32 : 0.4} style={{ position: "absolute", top: -110, right: -110 }} />}
+      // `darkCard` is per-card: Ask and Kognoz-read cards always read dark, on every
+      // surface, because that contrast is what makes the reveal work. Everything
+      // else follows the surface.
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {dz.petals && <Petal w={380} o={S.petal * 0.8} style={{ position: "absolute", top: -110, right: -110 }} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
-          <Eyebrow dark={cardGlass} n={nn} />
+          <Eyebrow dark={onDark} n={nn} />
           <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
             <div
               style={{
@@ -330,27 +353,25 @@ export const Slide = React.memo(function Slide({
                 padding: "76px 64px",
                 ...(darkCard
                   ? { background: GRAD_DARK, border: "none" }
-                  : cardGlass
-                  ? { ...GLASS_DARKBG, border: `1px solid ${isReveal ? C.teal : "rgba(255,255,255,0.18)"}` }
-                  : { background: C.white, border: `1px solid ${isReveal ? C.teal : C.line}` }),
-                boxShadow: cardGlass || darkCard ? "0 24px 60px rgba(0,20,40,0.35)" : "0 24px 60px rgba(0,40,70,0.10)",
+                  : { ...S.panel, ...(isReveal ? { border: `1px solid ${C.teal}` } : {}) }),
+                boxShadow: onDark || darkCard ? "0 24px 60px rgba(0,20,40,0.35)" : "0 24px 60px rgba(0,40,70,0.10)",
                 textAlign: "center",
                 position: "relative",
                 overflow: "hidden"
               }}
             >
               {darkCard && dz.petals && <Petal w={300} o={0.4} style={{ position: "absolute", bottom: -90, right: -90 }} />}
-              <div style={{ fontFamily: font, fontSize: sz(20), fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: darkCard ? C.green : isReveal ? C.teal : cardGlass ? accentOnDark : accent, marginBottom: 30, position: "relative" }}>
+              <div style={{ fontFamily: font, fontSize: sz(20), fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: darkCard ? C.green : isReveal ? C.teal : onDark ? accentOnDark : accent, marginBottom: 30, position: "relative" }}>
                 {kick}
               </div>
-              <div style={{ fontFamily: displayFont, fontSize: fit(58, data.body, 95), fontWeight: 600, lineHeight: 1.22, letterSpacing: "-0.01em", color: darkCard || cardGlass ? "#fff" : C.ink, position: "relative" }}>
+              <div style={{ fontFamily: displayFont, fontSize: fit(58, data.body, 95), fontWeight: 600, lineHeight: 1.22, letterSpacing: "-0.01em", color: darkCard ? "#fff" : S.heading, position: "relative" }}>
                 {renderLines(data.body)}
               </div>
               {isAsk && <div style={{ fontFamily: font, fontSize: sz(21), color: "rgba(255,255,255,0.65)", marginTop: 34, position: "relative" }}>The answer is on the next card</div>}
             </div>
           </div>
         </div>
-        <Foot dark={cardGlass} right={CONTENT_R} />
+        <Foot dark={onDark} right={CONTENT_R} />
       </div>
     );
   }
@@ -488,50 +509,44 @@ export const Slide = React.memo(function Slide({
   /* ============================== STAT CARD ============================== */
   if (kind === "stat") {
     const s0 = slides[0] || { title: "", body: "" };
-    if (cardGlass) {
-      return (
-        <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-          {dz.petals && <Petal w={620} o={0.55} style={{ position: "absolute", top: -200, right: -200 }} />}
-          <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
-            <Eyebrow dark />
+    // The number is the design. On light surfaces it takes the brand gradient; on
+    // dark ones it goes solid white inside a panel, which reads far better there.
+    return (
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {dz.petals && <Petal w={onDark ? 620 : 560} o={S.petal} style={{ position: "absolute", ...(onDark ? { top: -200, right: -200 } : { bottom: -170, right: -170 }) }} />}
+        <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
+          <Eyebrow dark={onDark} />
+          {onDark ? (
             <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
-              <div style={{ ...GLASS_DARKBG, width: "100%", borderRadius: 28, padding: "70px 60px", textAlign: "center" }}>
+              <div style={{ ...S.panel, width: "100%", borderRadius: 28, padding: "70px 60px", textAlign: "center" }}>
                 <div style={{ fontFamily: displayFont, fontSize: fit(220, s0.title, 8), fontWeight: 600, lineHeight: 0.95, letterSpacing: "-0.02em", color: "#fff", paddingBottom: "0.1em" }}>{s0.title}</div>
-                <p style={{ fontFamily: font, fontSize: fit(38, s0.body, 150), lineHeight: 1.5, color: "rgba(255,255,255,0.88)", fontWeight: 600, margin: 0 }}>{renderLines(s0.body)}</p>
+                <p style={{ fontFamily: font, fontSize: fit(38, s0.body, 150), lineHeight: 1.5, color: S.body, fontWeight: 600, margin: 0 }}>{renderLines(s0.body)}</p>
               </div>
             </div>
-          </div>
-          <Foot dark right={SINGLE_R} />
-        </div>
-      );
-    }
-    return (
-      <div id={id} style={{ ...wrap, background: C.off }}>
-        {dz.petals && <Petal w={560} o={0.5} style={{ position: "absolute", bottom: -170, right: -170 }} />}
-        <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
-          <Eyebrow />
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <div
-              style={{
-                fontFamily: displayFont,
-                fontSize: fit(240, s0.title, 8),
-                fontWeight: 600,
-                lineHeight: 0.95,
-                letterSpacing: "-0.02em",
-                background: GRAD,
-                WebkitBackgroundClip: "text",
-                backgroundClip: "text",
-                color: "transparent",
-                paddingBottom: "0.12em",
-                marginBottom: "-0.02em"
-              }}
-            >
-              {s0.title}
+          ) : (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <div
+                style={{
+                  fontFamily: displayFont,
+                  fontSize: fit(240, s0.title, 8),
+                  fontWeight: 600,
+                  lineHeight: 0.95,
+                  letterSpacing: "-0.02em",
+                  ...(surfaceId === "press"
+                    ? { color: C.ink }
+                    : { background: GRAD, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }),
+                  paddingBottom: "0.12em",
+                  marginBottom: "-0.02em"
+                }}
+              >
+                {s0.title}
+              </div>
+              {surfaceId === "press" && <div style={{ height: 6, background: C.ink, width: 220, margin: "0 0 30px" }} />}
+              <p style={{ fontFamily: font, fontSize: fit(40, s0.body, 150), lineHeight: 1.5, color: S.heading, fontWeight: 600, margin: 0, maxWidth: 820 }}>{renderLines(s0.body)}</p>
             </div>
-            <p style={{ fontFamily: font, fontSize: fit(40, s0.body, 150), lineHeight: 1.5, color: C.ink, fontWeight: 600, margin: 0, maxWidth: 820 }}>{renderLines(s0.body)}</p>
-          </div>
+          )}
         </div>
-        <Foot right={SINGLE_R} />
+        <Foot dark={onDark} right={SINGLE_R} />
       </div>
     );
   }
@@ -540,61 +555,44 @@ export const Slide = React.memo(function Slide({
   if (kind === "split") {
     const L = slides[0] || { title: "What the survey says", body: "" };
     const Rt = slides[1] || { title: "What behavior says", body: "" };
-    // Dark register. The format's whole argument is the contrast between what is
-    // said and what is done, so the two halves stay clearly distinct here too:
-    // the claim recedes into muted glass, the behaviour sits forward and lit.
-    if (cardGlass) {
-      return (
-        <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
-            <div style={{ padding: "72px 96px 44px" }}>
-              <Eyebrow dark />
-              <h1 style={{ fontFamily: displayFont, fontSize: fit(64, cover, 58), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.01em", color: "#fff", margin: "24px 0 0" }}>{renderEm(cover)}</h1>
-            </div>
-            <div style={{ flex: 1, display: "flex" }}>
-              {/* The claim is pushed back: darker than the page, muted type. */}
-              <div style={{ flex: 1, background: "rgba(0,20,40,0.42)", padding: "58px 60px", display: "flex", flexDirection: "column" }}>
-                <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.42)", marginBottom: 30 }}>{L.title}</div>
-                <p style={{ fontFamily: displayFont, fontSize: sz(45), lineHeight: 1.28, color: "rgba(255,255,255,0.55)", margin: 0, fontStyle: "italic" }}>&ldquo;{renderLines(L.body)}&rdquo;</p>
-              </div>
-              {/* The behaviour comes forward: lifted panel, green rule, full-white type.
-                  The light register gets this separation from pale-vs-dark; on dark the
-                  step has to be built deliberately or the format loses its argument. */}
-              <div style={{ flex: 1, background: "rgba(255,255,255,0.14)", borderLeft: `4px solid ${C.green}`, borderRadius: 0, padding: "58px 60px", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
-                {dz.petals && <Petal w={340} o={0.42} style={{ position: "absolute", bottom: -100, right: -100 }} />}
-                <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: C.green, marginBottom: 30, position: "relative" }}>{Rt.title}</div>
-                <p style={{ fontFamily: displayFont, fontSize: sz(45), lineHeight: 1.28, color: "#fff", margin: 0, position: "relative" }}>{Rt.body}</p>
-              </div>
-            </div>
-            <div style={{ padding: "36px 96px 84px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid rgba(255,255,255,0.14)" }}>
-              <Logo h={64} white />
-              <div style={{ fontFamily: font, fontSize: 22, color: "rgba(255,255,255,0.6)" }}>{SINGLE_R}</div>
-            </div>
-          </div>
-        </div>
-      );
-    }
+    // The format's argument IS the contrast between the two halves, so the claim
+    // always recedes and the behaviour always comes forward — on every surface.
+    const claimBg = onDark ? "rgba(0,20,40,0.42)" : surfaceId === "ivory" ? C.off : C.mist;
+    const claimLabel = onDark ? "rgba(255,255,255,0.42)" : C.inkMute;
+    const claimBody = onDark ? "rgba(255,255,255,0.55)" : C.inkSoft;
     return (
-      <div id={id} style={{ ...wrap, background: C.white }}>
+      <div id={id} style={{ ...wrap, background: S.page }}>
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ padding: "72px 96px 44px" }}>
-            <Eyebrow />
-            <h1 style={{ fontFamily: displayFont, fontSize: fit(64, cover, 58), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.01em", color: C.ink, margin: "24px 0 0" }}>{renderEm(cover)}</h1>
+            <Eyebrow dark={onDark} />
+            <h1 style={{ fontFamily: displayFont, fontSize: fit(64, cover, 58), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.01em", color: S.heading, margin: "24px 0 0" }}>{renderEm(cover)}</h1>
           </div>
           <div style={{ flex: 1, display: "flex" }}>
-            <div style={{ flex: 1, background: C.mist, padding: "58px 60px", display: "flex", flexDirection: "column" }}>
-              <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: C.inkMute, marginBottom: 30 }}>{L.title}</div>
-              <p style={{ fontFamily: displayFont, fontSize: sz(45), lineHeight: 1.28, color: C.inkSoft, margin: 0, fontStyle: "italic" }}>&ldquo;{renderLines(L.body)}&rdquo;</p>
+            <div style={{ flex: 1, background: claimBg, padding: "58px 60px", display: "flex", flexDirection: "column" }}>
+              <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: claimLabel, marginBottom: 30 }}>{L.title}</div>
+              <p style={{ fontFamily: displayFont, fontSize: sz(45), lineHeight: 1.28, color: claimBody, margin: 0, fontStyle: "italic" }}>&ldquo;{renderLines(L.body)}&rdquo;</p>
             </div>
-            <div style={{ flex: 1, background: GRAD_DARK, padding: "58px 60px", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
+            <div
+              style={{
+                flex: 1,
+                padding: "58px 60px",
+                display: "flex",
+                flexDirection: "column",
+                position: "relative",
+                overflow: "hidden",
+                ...(onDark
+                  ? { background: "rgba(255,255,255,0.14)", borderLeft: `4px solid ${C.green}` }
+                  : { background: GRAD_DARK })
+              }}
+            >
               {dz.petals && <Petal w={340} o={0.42} style={{ position: "absolute", bottom: -100, right: -100 }} />}
               <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: C.green, marginBottom: 30, position: "relative" }}>{Rt.title}</div>
               <p style={{ fontFamily: displayFont, fontSize: sz(45), lineHeight: 1.28, color: "#fff", margin: 0, position: "relative" }}>{Rt.body}</p>
             </div>
           </div>
-          <div style={{ padding: "36px 96px 84px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${C.line}` }}>
-            <Logo h={64} />
-            <div style={{ fontFamily: font, fontSize: 22, color: C.inkMute }}>{SINGLE_R}</div>
+          <div style={{ padding: "36px 96px 84px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${S.rule}` }}>
+            <Logo h={64} white={onDark} />
+            <div style={{ fontFamily: font, fontSize: 22, color: S.label }}>{SINGLE_R}</div>
           </div>
         </div>
       </div>
@@ -603,62 +601,14 @@ export const Slide = React.memo(function Slide({
 
   /* ============================== DIALOGUE ============================== */
   if (kind === "dialogue") {
-    if (cardGlass) {
-      return (
-        <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-          {dz.petals && <Petal w={520} o={0.5} style={{ position: "absolute", top: -160, right: -160 }} />}
-          <div style={{ position: "absolute", inset: 0, padding: "80px 96px 190px", display: "flex", flexDirection: "column" }}>
-            <Eyebrow dark />
-            <h1 style={{ fontFamily: displayFont, fontSize: fit(56, cover, 62), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: "#fff", margin: "22px 0 50px" }}>{renderEm(cover)}</h1>
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 28 }}>
-              {slides.map((m, i) => {
-                const isK = /kognoz/i.test(m.title);
-                return (
-                  <div key={i} style={{ display: "flex", justifyContent: isK ? "flex-end" : "flex-start" }}>
-                    <div style={{ maxWidth: "78%" }}>
-                      <div
-                        style={{
-                          fontFamily: font,
-                          fontSize: 20,
-                          fontWeight: 700,
-                          color: isK ? C.green : "rgba(255,255,255,0.55)",
-                          marginBottom: 8,
-                          textAlign: isK ? "right" : "left",
-                          letterSpacing: "0.06em",
-                          textTransform: "uppercase"
-                        }}
-                      >
-                        {m.title}
-                      </div>
-                      <div
-                        style={{
-                          ...GLASS_DARKBG,
-                          fontFamily: font,
-                          fontSize: sz(32),
-                          lineHeight: 1.45,
-                          padding: "26px 32px",
-                          borderRadius: isK ? "22px 22px 6px 22px" : "22px 22px 22px 6px",
-                          color: "#fff"
-                        }}
-                      >
-                        {m.body}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          <Foot dark right={SINGLE_R} />
-        </div>
-      );
-    }
+    // One renderer across all six surfaces. Kognoz's turn always sits right and
+    // carries the accent; the other speaker sits left and stays quieter.
     return (
-      <div id={id} style={{ ...wrap, background: C.off }}>
-        {dz.petals && <Petal w={460} o={0.4} style={{ position: "absolute", top: -140, right: -140 }} />}
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {dz.petals && <Petal w={onDark ? 520 : 460} o={S.petal} style={{ position: "absolute", top: -150, right: -150 }} />}
         <div style={{ position: "absolute", inset: 0, padding: "80px 96px 190px", display: "flex", flexDirection: "column" }}>
-          <Eyebrow />
-          <h1 style={{ fontFamily: displayFont, fontSize: fit(56, cover, 62), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: C.ink, margin: "22px 0 50px" }}>{renderEm(cover)}</h1>
+          <Eyebrow dark={onDark} />
+          <h1 style={{ fontFamily: displayFont, fontSize: fit(56, cover, 62), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: S.heading, margin: "22px 0 50px" }}>{renderEm(cover)}</h1>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 28 }}>
             {slides.map((m, i) => {
               const isK = /kognoz/i.test(m.title);
@@ -670,7 +620,7 @@ export const Slide = React.memo(function Slide({
                         fontFamily: font,
                         fontSize: 20,
                         fontWeight: 700,
-                        color: isK ? C.blue : C.inkMute,
+                        color: isK ? (onDark ? C.green : C.blue) : S.label,
                         marginBottom: 8,
                         textAlign: isK ? "right" : "left",
                         letterSpacing: "0.06em",
@@ -681,15 +631,13 @@ export const Slide = React.memo(function Slide({
                     </div>
                     <div
                       style={{
+                        ...S.panel,
                         fontFamily: font,
                         fontSize: sz(32),
                         lineHeight: 1.45,
                         padding: "26px 32px",
-                        borderRadius: isK ? "22px 22px 6px 22px" : "22px 22px 22px 6px",
-                        background: isK ? GRAD_DARK : C.white,
-                        color: isK ? "#fff" : C.ink,
-                        border: isK ? "none" : `1px solid ${C.line}`,
-                        boxShadow: "0 6px 24px rgba(0,40,70,0.06)"
+                        borderRadius: surfaceId === "press" ? (isK ? "0 0 0 0" : "0") : isK ? "22px 22px 6px 22px" : "22px 22px 22px 6px",
+                        color: S.heading
                       }}
                     >
                       {m.body}
@@ -700,61 +648,35 @@ export const Slide = React.memo(function Slide({
             })}
           </div>
         </div>
-        <Foot right={SINGLE_R} />
+        <Foot dark={onDark} right={SINGLE_R} />
       </div>
     );
   }
 
-  /* ========================= MONTAGE (3-frame panorama) ========================= */
   if (kind === "montage") {
     const pts = [slides[0] || { title: "", body: "" }, slides[1] || { title: "", body: "" }, slides[2] || { title: "", body: "" }];
-    // Dark register, mirroring the stat card: same layout, boardroom palette.
-    if (cardGlass) {
-      return (
-        <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-          {dz.petals && <Petal w={760} o={0.4} style={{ position: "absolute", top: -260, left: 780 }} />}
-          {dz.petals && <Petal w={680} o={0.32} style={{ position: "absolute", bottom: -260, left: 2040 }} />}
-          <div style={{ position: "absolute", inset: 0, padding: "88px 100px", display: "flex", flexDirection: "column" }}>
-            <Eyebrow dark />
-            <h1 style={{ fontFamily: displayFont, fontSize: fit(154, cover, 62), fontWeight: 600, lineHeight: 1.04, letterSpacing: "-0.015em", color: "#fff", margin: "30px 0 0", maxWidth: 3000 }}>{renderEm(cover)}</h1>
-            <div style={{ flex: 1 }} />
-            <div style={{ display: "flex", gap: 120 }}>
-              {pts.map((p, i) => (
-                <div key={i} style={{ flex: 1, maxWidth: 900, ...GLASS_DARKBG, borderRadius: 22, padding: "44px 46px" }}>
-                  <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, letterSpacing: "0.14em", color: [C.cyan, C.teal, C.green][i], marginBottom: 14 }}>{String(i + 1).padStart(2, "0")}</div>
-                  <div style={{ fontFamily: font, fontSize: sz(31), fontWeight: 800, color: "#fff", marginBottom: 12 }}>{p.title}</div>
-                  <p style={{ fontFamily: font, fontSize: sz(27), lineHeight: 1.5, color: "rgba(255,255,255,0.85)", margin: 0 }}>{p.body}</p>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 64 }}>
-              <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>{plain(cta)}</div>
-              <Logo h={72} white />
-            </div>
-          </div>
-        </div>
-      );
-    }
+    // One renderer, six surfaces. Previously this was two hardcoded branches, so
+    // four of the six design sets produced an identical light montage.
     return (
-      <div id={id} style={{ ...wrap, background: C.off }}>
-        {dz.petals && <Petal w={760} o={0.5} style={{ position: "absolute", top: -260, left: 780 }} />}
-        {dz.petals && <Petal w={680} o={0.4} style={{ position: "absolute", bottom: -260, left: 2040 }} />}
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {dz.petals && <Petal w={760} o={S.petal} style={{ position: "absolute", top: -260, left: 780 }} />}
+        {dz.petals && <Petal w={680} o={S.petal * 0.8} style={{ position: "absolute", bottom: -260, left: 2040 }} />}
         <div style={{ position: "absolute", inset: 0, padding: "88px 100px", display: "flex", flexDirection: "column" }}>
-          <Eyebrow />
-          <h1 style={{ fontFamily: displayFont, fontSize: fit(154, cover, 62), fontWeight: 600, lineHeight: 1.04, letterSpacing: "-0.015em", color: C.ink, margin: "30px 0 0", maxWidth: 3000 }}>{renderEm(cover)}</h1>
+          <Eyebrow dark={onDark} />
+          <h1 style={{ fontFamily: displayFont, fontSize: fit(154, cover, 62), fontWeight: 600, lineHeight: 1.04, letterSpacing: "-0.015em", color: S.heading, margin: "30px 0 0", maxWidth: 3000 }}>{renderEm(cover)}</h1>
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 120 }}>
             {pts.map((p, i) => (
-              <div key={i} style={{ flex: 1, maxWidth: 900 }}>
+              <div key={i} style={{ flex: 1, maxWidth: 900, ...S.panel, borderRadius: surfaceId === "press" ? 0 : 22, padding: "44px 46px" }}>
                 <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, letterSpacing: "0.14em", color: [C.cyan, C.teal, C.green][i], marginBottom: 14 }}>{String(i + 1).padStart(2, "0")}</div>
-                <div style={{ fontFamily: font, fontSize: sz(31), fontWeight: 800, color: C.ink, marginBottom: 12 }}>{p.title}</div>
-                <p style={{ fontFamily: font, fontSize: sz(27), lineHeight: 1.5, color: C.inkSoft, margin: 0 }}>{p.body}</p>
+                <div style={{ fontFamily: font, fontSize: sz(31), fontWeight: 800, color: S.heading, marginBottom: 12 }}>{p.title}</div>
+                <p style={{ fontFamily: font, fontSize: sz(27), lineHeight: 1.5, color: S.body, margin: 0 }}>{p.body}</p>
               </div>
             ))}
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 64 }}>
-            <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, color: C.inkMute }}>{plain(cta)}</div>
-            <Logo h={72} />
+            <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, color: S.label }}>{plain(cta)}</div>
+            <Logo h={72} white={onDark} />
           </div>
         </div>
       </div>
@@ -764,6 +686,7 @@ export const Slide = React.memo(function Slide({
   /* ============================ STORY (9:16 vertical) ============================ */
   if (kind === "story") {
     const s0 = slides[0] || { title: "", body: "" };
+    // A photo always wins the surface — the image is the design at 9:16.
     if (images.story) {
       return (
         <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
@@ -780,134 +703,48 @@ export const Slide = React.memo(function Slide({
         </div>
       );
     }
-    // Story ships dark, so its second register is the light one — same layout,
-    // editorial palette, matching the light stat card.
-    if (!cardGlass) {
-      return (
-        <div id={id} style={{ ...wrap, background: C.off }}>
-          {dz.petals && <Petal w={560} o={0.5} style={{ position: "absolute", top: -180, right: -190 }} />}
-          <div style={{ position: "absolute", inset: 0, padding: "112px 96px 196px", display: "flex", flexDirection: "column" }}>
-            <Eyebrow />
-            <h1 style={{ fontFamily: displayFont, fontSize: fit(90, cover, 42), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: C.ink, margin: "36px 0 44px" }}>{renderEm(cover)}</h1>
-            <ImageSlot img={images.story} onPick={(u) => setImg("story", u)} label="Add photo" style={{ height: 560, borderRadius: 24 }} />
-            <p style={{ fontFamily: font, fontSize: sz(37), lineHeight: 1.55, color: C.inkSoft, margin: "44px 0 0", flex: 1 }}>{renderLines(s0.body)}</p>
-          </div>
-          <Foot right={SINGLE_R} />
-        </div>
-      );
-    }
     return (
-      <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-        {dz.petals && <Petal w={560} o={0.45} style={{ position: "absolute", top: -180, right: -190 }} />}
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {dz.petals && <Petal w={560} o={S.petal} style={{ position: "absolute", top: -180, right: -190 }} />}
         <div style={{ position: "absolute", inset: 0, padding: "112px 96px 196px", display: "flex", flexDirection: "column" }}>
-          <Eyebrow dark />
-          <h1 style={{ fontFamily: displayFont, fontSize: fit(90, cover, 42), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: "36px 0 44px" }}>{renderEm(cover)}</h1>
-          <ImageSlot dark img={images.story} onPick={(u) => setImg("story", u)} label="Add photo" style={{ height: 560, borderRadius: 24 }} />
-          <p style={{ fontFamily: font, fontSize: sz(37), lineHeight: 1.55, color: "rgba(255,255,255,0.85)", margin: "44px 0 0", flex: 1 }}>{renderLines(s0.body)}</p>
+          <Eyebrow dark={onDark} />
+          <h1 style={{ fontFamily: displayFont, fontSize: fit(90, cover, 42), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: S.heading, margin: "36px 0 44px" }}>{renderEm(cover)}</h1>
+          <ImageSlot dark={onDark} img={images.story} onPick={(u) => setImg("story", u)} label="Add photo" style={{ height: 560, borderRadius: surfaceId === "press" ? 0 : 24 }} />
+          <p style={{ fontFamily: font, fontSize: sz(37), lineHeight: 1.55, color: S.body, margin: "44px 0 0", flex: 1 }}>{renderLines(s0.body)}</p>
         </div>
-        <Foot dark right={SINGLE_R} />
+        <Foot dark={onDark} right={SINGLE_R} />
       </div>
     );
   }
 
-  /* ========================== VIDEO (kinetic, animated) ========================== */
-  if (kind === "video") {
-    const s0 = slides[0] || { title: "", body: "" };
-    const words = plainWords(cover);
-    const bodyDelay = 0.7 + words.length * 0.14 + 0.4;
-    return (
-      <div id={id} style={{ ...wrap, background: C.off }}>
-        <style>{`
-          @keyframes kvRise { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-          @keyframes kvFade { from { opacity: 0; } to { opacity: 1; } }
-          @keyframes kvDrift { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-14px) scale(1.03); } }
-        `}</style>
-        <div style={{ position: "absolute", top: -170, right: -190, animation: "kvDrift 9s ease-in-out infinite" }}>{dz.petals && <Petal w={600} o={0.55} />}</div>
-        <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
-          <div style={{ opacity: 0, animation: "kvFade .6s ease .25s forwards" }}>
-            <Eyebrow />
-          </div>
-          <h1 style={{ fontFamily: displayFont, fontSize: fit(94, cover, 46), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: C.ink, margin: "50px 0 46px" }}>
-            {words.map((w, i) => (
-              <span
-                key={i}
-                style={{
-                  display: "inline-block",
-                  marginRight: "0.26em",
-                  opacity: 0,
-                  animation: `kvRise .8s cubic-bezier(.2,.75,.2,1) ${0.7 + i * 0.14}s forwards`,
-                  ...(w.em ? EM_STYLE : {})
-                }}
-              >
-                {w.t}
-              </span>
-            ))}
-          </h1>
-          <p style={{ fontFamily: font, fontSize: sz(40), lineHeight: 1.55, color: C.inkSoft, margin: 0, flex: 1, opacity: 0, animation: `kvFade .9s ease ${bodyDelay}s forwards` }}>{renderLines(s0.body)}</p>
-        </div>
-        <div style={{ opacity: 0, animation: `kvFade .8s ease ${bodyDelay + 1.2}s forwards` }}>
-          <Foot right={SINGLE_R} />
-        </div>
-      </div>
-    );
-  }
-
-  /* ==================== FOUNDER VIDEO SCRIPT (shoot kit) ==================== */
   if (kind === "script") {
-    // Dark register: same shoot-script layout on the boardroom palette.
-    if (cardGlass) {
-      return (
-        <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-          {dz.petals && <Petal w={520} o={0.4} style={{ position: "absolute", top: -170, right: -170 }} />}
-          <div style={{ position: "absolute", inset: 0, padding: "72px 84px", display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 26 }}>
-              <div style={{ fontFamily: font, fontSize: 21, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: accentOnDark }}>Founder video · shoot script</div>
-              <div style={{ fontFamily: font, fontSize: 19, fontWeight: 700, color: "rgba(255,255,255,0.6)", letterSpacing: "0.1em", textTransform: "uppercase" }}>{eyebrow}</div>
-            </div>
-            <h1 style={{ fontFamily: displayFont, fontSize: 52, fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: "#fff", margin: "0 0 34px" }}>{renderEm(cover)}</h1>
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 20 }}>
-              {slides.map((b, i) => (
-                <div key={i} style={{ display: "flex", gap: 22, padding: "24px 26px", ...GLASS_DARKBG, borderRadius: 14 }}>
-                  <div style={{ flexShrink: 0, width: 132, fontFamily: font, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: accentOnDark, paddingTop: 4 }}>{b.title}</div>
-                  <p style={{ fontFamily: font, fontSize: 27, lineHeight: 1.5, color: "rgba(255,255,255,0.92)", margin: 0 }}>{b.body}</p>
-                </div>
-              ))}
-            </div>
-            <div style={{ marginTop: 26, padding: "18px 26px", borderLeft: `3px solid ${accentOnDark}`, ...GLASS_DARKBG, borderRadius: "0 14px 14px 0" }}>
-              <div style={{ fontFamily: font, fontSize: 17, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.6)", marginBottom: 8 }}>Post caption</div>
-              <p style={{ fontFamily: font, fontSize: 23, lineHeight: 1.45, color: "rgba(255,255,255,0.85)", margin: 0 }}>{plain(cta)}</p>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 26 }}>
-              <Logo h={78} white />
-              <div style={{ fontFamily: font, fontSize: 18, color: "rgba(255,255,255,0.6)" }}>60–90s · talk to camera · captions on</div>
-            </div>
-          </div>
-        </div>
-      );
-    }
+    // Shoot script: one surface-driven sheet. The accent has to survive a dark page,
+    // where C.blue is the same colour as the background.
+    const cue = onDark ? accentOnDark : accent;
     return (
-      <div id={id} style={{ ...wrap, background: C.white }}>
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {onDark && dz.petals && <Petal w={520} o={S.petal} style={{ position: "absolute", top: -170, right: -170 }} />}
         <div style={{ position: "absolute", inset: 0, padding: "72px 84px", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 26 }}>
-            <div style={{ fontFamily: font, fontSize: 21, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: accent }}>Founder video · shoot script</div>
-            <div style={{ fontFamily: font, fontSize: 19, fontWeight: 700, color: C.inkMute, letterSpacing: "0.1em", textTransform: "uppercase" }}>{eyebrow}</div>
+            <div style={{ fontFamily: font, fontSize: 21, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: cue }}>Founder video · shoot script</div>
+            <div style={{ fontFamily: font, fontSize: 19, fontWeight: 700, color: S.label, letterSpacing: "0.1em", textTransform: "uppercase" }}>{eyebrow}</div>
           </div>
-          <h1 style={{ fontFamily: displayFont, fontSize: 52, fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: C.ink, margin: "0 0 34px" }}>{renderEm(cover)}</h1>
+          <h1 style={{ fontFamily: displayFont, fontSize: 52, fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: S.heading, margin: "0 0 34px" }}>{renderEm(cover)}</h1>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 20 }}>
             {slides.map((b, i) => (
-              <div key={i} style={{ display: "flex", gap: 22, padding: "24px 26px", background: C.off, borderRadius: 14 }}>
-                <div style={{ flexShrink: 0, width: 132, fontFamily: font, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: accent, paddingTop: 4 }}>{b.title}</div>
-                <p style={{ fontFamily: font, fontSize: 27, lineHeight: 1.5, color: C.ink, margin: 0 }}>{b.body}</p>
+              <div key={i} style={{ display: "flex", gap: 22, padding: "24px 26px", ...S.panel, borderRadius: surfaceId === "press" ? 0 : 14 }}>
+                <div style={{ flexShrink: 0, width: 132, fontFamily: font, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: cue, paddingTop: 4 }}>{b.title}</div>
+                <p style={{ fontFamily: font, fontSize: 27, lineHeight: 1.5, color: S.heading, margin: 0 }}>{b.body}</p>
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 26, padding: "18px 26px", borderLeft: `3px solid ${accent}`, background: C.off, borderRadius: "0 14px 14px 0" }}>
-            <div style={{ fontFamily: font, fontSize: 17, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: C.inkMute, marginBottom: 8 }}>Post caption</div>
-            <p style={{ fontFamily: font, fontSize: 23, lineHeight: 1.45, color: C.inkSoft, margin: 0 }}>{plain(cta)}</p>
+          <div style={{ marginTop: 26, padding: "18px 26px", borderLeft: `3px solid ${cue}`, ...S.panel, borderRadius: surfaceId === "press" ? 0 : "0 14px 14px 0" }}>
+            <div style={{ fontFamily: font, fontSize: 17, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: S.label, marginBottom: 8 }}>Post caption</div>
+            <p style={{ fontFamily: font, fontSize: 23, lineHeight: 1.45, color: S.body, margin: 0 }}>{plain(cta)}</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 26 }}>
-            <Logo h={78} />
-            <div style={{ fontFamily: font, fontSize: 18, color: C.inkMute }}>60–90s · talk to camera · captions on</div>
+            <Logo h={78} white={onDark} />
+            <div style={{ fontFamily: font, fontSize: 18, color: S.label }}>60–90s · talk to camera · captions on</div>
           </div>
         </div>
       </div>
@@ -957,7 +794,7 @@ export const Slide = React.memo(function Slide({
             <p style={{ fontFamily: font, fontSize: fit(36, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>{renderLines(data.body)}</p>
           </div>
         </div>
-        <Foot right={CONTENT_R} />
+        <Foot dark={onDark} right={CONTENT_R} />
       </div>
     );
   }

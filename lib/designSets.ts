@@ -71,29 +71,67 @@ export function lookLever(spec: { deck?: true; idea?: true; single?: string }): 
   }
 }
 
-/** Sets whose card register differs from the current one, for "cards" formats. */
-export function nextSetWithDifferentCards(current: DesignSetId): DesignSetId {
-  const cur = DESIGN_SETS[current] || DESIGN_SETS.editorial;
-  const order = LOOK_SETS;
-  const from = Math.max(0, order.indexOf(current));
-  for (let step = 1; step <= order.length; step++) {
-    const candidate = order[(from + step) % order.length];
-    if (DESIGN_SETS[candidate].cards !== cur.cards) return candidate;
-  }
-  return order[(from + 1) % order.length];
+/**
+ * A distinct surface per design set, for the single-asset renderers.
+ *
+ * The single formats (Montage, Says vs Does, Story, Stat, Dialogue, the Founder
+ * Video script, the Idea Deck stash) only ever consulted `dset.cards`, which is
+ * "classic" or "glass". So editorial, numeral, bloom and magazine all rendered the
+ * SAME light surface and dark + glass rendered the same dark one: six sets, two
+ * looks. Cycling every set was pointless when four of them were indistinguishable.
+ *
+ * Each set now maps to its own surface, so all six sets x five accent tones are
+ * genuinely different on every format, the way they already were on decks.
+ *
+ * Semantic ids only — the concrete colours live with the renderer in <Slide>, so
+ * this module stays free of design tokens.
+ */
+export type SurfaceId = "paper" | "ivory" | "boardroom" | "glass" | "bloom" | "press";
+
+export const SET_SURFACE: Record<Exclude<DesignSetId, "mixed">, SurfaceId> = {
+  editorial: "paper",     // off-white page, white cards, hairline rule
+  numeral: "ivory",       // white page, mist panels, no borders
+  dark: "boardroom",      // dark page, solid glass panels
+  glass: "glass",         // dark page, lighter and more translucent
+  bloom: "bloom",         // mist page, soft borderless cards
+  magazine: "press"       // off-white page, heavy rules, photo-forward
+};
+
+export const SURFACE_ORDER: SurfaceId[] = ["paper", "ivory", "boardroom", "glass", "bloom", "press"];
+
+/** Human names, for the "Next look" button when the set itself is "Mixed". */
+export const SURFACE_LABELS: Record<SurfaceId, string> = {
+  paper: "Paper",
+  ivory: "Ivory",
+  boardroom: "Boardroom",
+  glass: "Glass",
+  bloom: "Bloom",
+  press: "Press"
+};
+
+/** Surfaces that sit on a dark page — the renderer flips its type colours on these. */
+export function isDarkSurface(id: SurfaceId): boolean {
+  return id === "boardroom" || id === "glass";
 }
 
 /**
- * Which register a slide will actually render in.
- *
- * This was duplicated inline in <Slide> while the "Next look" button described the
- * design SET instead. On the "mixed" set the two disagree: `cards` is null, so the
- * register flips on seed parity and the artwork changes, but the set name never
- * moves — the button reads "Mixed" forever and looks stuck while the slide toggles.
- *
- * One definition, used by both, so the label can never drift from the render.
+ * The surface a slide should render. "Mixed" has no fixed surface by design, so it
+ * rotates through them on the seed, which is what makes it "max variety".
  */
-export function isDarkRegister(set: DesignSetId | undefined | null, seed: number): boolean {
-  const dset = DESIGN_SETS[set || "editorial"] || DESIGN_SETS.editorial;
-  return dset.cards === "glass" || (dset.cards === null && seed % 2 === 1);
+export function surfaceFor(set: DesignSetId | undefined | null, seed: number): SurfaceId {
+  if (!set || set === "mixed") {
+    const n = ((seed % SURFACE_ORDER.length) + SURFACE_ORDER.length) % SURFACE_ORDER.length;
+    return SURFACE_ORDER[n];
+  }
+  return SET_SURFACE[set as Exclude<DesignSetId, "mixed">] ?? "paper";
 }
+
+/**
+ * The next set for a "cards" format. Every set now looks different, so this is a
+ * plain walk through LOOK_SETS — no interleaving needed to guarantee a visible change.
+ */
+export function nextCardSet(step: number): DesignSetId {
+  const n = ((step % LOOK_SETS.length) + LOOK_SETS.length) % LOOK_SETS.length;
+  return LOOK_SETS[n];
+}
+

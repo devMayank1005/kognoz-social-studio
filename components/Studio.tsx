@@ -19,7 +19,7 @@ import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
 import { FORMATS, type FormatId } from "@/lib/formats";
 import { PILLARS } from "@/lib/pillars";
-import { DESIGN_SETS, isDarkRegister, lookLever, nextSetWithDifferentCards, type DesignSetId } from "@/lib/designSets";
+import { DESIGN_SETS, SURFACE_LABELS, surfaceFor, lookLever, nextCardSet, type DesignSetId } from "@/lib/designSets";
 import {
   coerceContent,
   applyIdeaDeckKickers,
@@ -453,10 +453,10 @@ export default function Studio() {
     }
 
     if (lever === "cards") {
-      // Stat Card / Dialogue only show the classic-vs-glass register, so jump
-      // straight to a set that actually flips it rather than to the next set,
-      // four of which look identical here.
-      const nextSet = design.set === "mixed" ? "mixed" : nextSetWithDifferentCards(design.set || "editorial");
+      // Every set now renders its own surface on these formats, so a plain walk
+      // through the sets gives a visibly different look each click. "Mixed" is an
+      // explicit choice and rotates surfaces on the seed instead.
+      const nextSet: DesignSetId = design.set === "mixed" ? "mixed" : nextCardSet(i);
       const nextAccent = LOOK_ACCENTS[i % LOOK_ACCENTS.length];
       saveDesign({ ...design, set: nextSet, accent: nextAccent });
       setSeed((x) => x + 1);
@@ -1357,12 +1357,12 @@ export default function Studio() {
             <button onClick={cycleLook} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: "pointer", border: "none", color: "#fff", background: GRAD }}>
               🎲 Next look ·{" "}
               {lever === "cards"
-                ? // Name the register, not the set. On the "mixed" set the register
-                  // flips on seed parity while the set name never moves, so labelling
-                  // the set made the button look stuck while the slide was changing.
-                  isDarkRegister(design.set, seed)
-                  ? "Dark"
-                  : "Light"
+                ? // Each set has its own surface now, so name it. On "mixed" the set
+                  // never moves, so name the rotating surface instead — otherwise the
+                  // button reads "Mixed" forever and looks stuck while the art changes.
+                  design.set === "mixed"
+                  ? SURFACE_LABELS[surfaceFor(design.set, seed)]
+                  : (DESIGN_SETS[design.set || "editorial"] || DESIGN_SETS.editorial).label.split(" ·")[0]
                 : lever === "accent"
                 ? design.accent
                   ? "tinted"

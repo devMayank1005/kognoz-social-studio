@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DESIGN_SETS, LOOK_SETS, lookLever, nextSetWithDifferentCards, isDarkRegister, type DesignSetId } from "./designSets";
+import { DESIGN_SETS, LOOK_SETS, SURFACE_ORDER, SURFACE_LABELS, surfaceFor, isDarkSurface, lookLever, nextCardSet, type DesignSetId } from "./designSets";
 import { FORMATS, STUDIO_FORMATS } from "./formats";
 
 // "Next look" appeared broken on Idea Deck, Stat Card, Says vs Does, Montage and
@@ -45,68 +45,67 @@ describe("lookLever", () => {
   });
 });
 
-describe("nextSetWithDifferentCards", () => {
-  it("always lands on a set whose card register actually differs", () => {
-    for (const from of LOOK_SETS) {
-      const to = nextSetWithDifferentCards(from);
-      expect(DESIGN_SETS[to].cards).not.toBe(DESIGN_SETS[from].cards);
+describe("surfaceFor — the fix for six sets rendering two looks", () => {
+  it("gives every design set its own distinct surface", () => {
+    // The bug: single-asset formats only read dset.cards, so editorial/numeral/
+    // bloom/magazine were all one light look and dark/glass were one dark look.
+    const surfaces = LOOK_SETS.map((id) => surfaceFor(id, 0));
+    expect(new Set(surfaces).size).toBe(LOOK_SETS.length);
+  });
+
+  it("is stable for a real set regardless of seed", () => {
+    for (const seed of [0, 1, 2, 5, 11]) {
+      expect(surfaceFor("editorial", seed)).toBe("paper");
+      expect(surfaceFor("magazine", seed)).toBe("press");
     }
   });
 
-  it("never returns the set it started from", () => {
-    for (const from of LOOK_SETS) {
-      expect(nextSetWithDifferentCards(from)).not.toBe(from);
-    }
+  it("rotates surfaces on the seed for Mixed, which is what makes it max variety", () => {
+    const seen = [0, 1, 2, 3, 4, 5].map((n) => surfaceFor("mixed", n));
+    expect(new Set(seen).size).toBe(SURFACE_ORDER.length);
   });
 
-  it("returns a real set for an unknown input rather than throwing", () => {
-    const to = nextSetWithDifferentCards("nonsense" as DesignSetId);
-    expect(LOOK_SETS).toContain(to);
+  it("changes surface on every seed bump for Mixed", () => {
+    for (let n = 0; n < 12; n++) expect(surfaceFor("mixed", n)).not.toBe(surfaceFor("mixed", n + 1));
   });
 
-  it("flips on a single step, where cycling sets in order would not", () => {
-    // editorial -> numeral is classic -> classic: visually identical on a Stat Card.
-    expect(DESIGN_SETS.editorial.cards).toBe(DESIGN_SETS.numeral.cards);
-    expect(DESIGN_SETS[nextSetWithDifferentCards("editorial")].cards).toBe("glass");
+  it("falls back to paper for an unknown or missing set", () => {
+    // A missing set behaves like Mixed and rotates; a set we simply do not know
+    // falls back to the default surface rather than rotating unpredictably.
+    expect(surfaceFor(undefined, 0)).toBe(SURFACE_ORDER[0]);
+    expect(surfaceFor("nonsense" as DesignSetId, 3)).toBe("paper");
+  });
+
+  it("marks exactly the two dark surfaces as dark", () => {
+    const dark = SURFACE_ORDER.filter(isDarkSurface);
+    expect(dark).toEqual(["boardroom", "glass"]);
+  });
+
+  it("names every surface for the button label", () => {
+    for (const id of SURFACE_ORDER) expect(SURFACE_LABELS[id]).toBeTruthy();
   });
 });
 
-describe("isDarkRegister", () => {
-  it("is fixed for sets that pin their card register", () => {
-    // These do not depend on seed at all.
-    for (const seed of [0, 1, 2, 3, 7]) {
-      expect(isDarkRegister("dark", seed)).toBe(true);
-      expect(isDarkRegister("glass", seed)).toBe(true);
-      expect(isDarkRegister("editorial", seed)).toBe(false);
-      expect(isDarkRegister("bloom", seed)).toBe(false);
+describe("nextCardSet", () => {
+  it("walks every design set in order", () => {
+    const seen = Array.from({ length: LOOK_SETS.length }, (_, i) => nextCardSet(i));
+    expect(seen).toEqual(LOOK_SETS);
+  });
+
+  it("lands on a different surface on every consecutive press", () => {
+    // This is the property the user actually cares about: one click, one new look.
+    for (let i = 0; i < 12; i++) {
+      expect(surfaceFor(nextCardSet(i), 0)).not.toBe(surfaceFor(nextCardSet(i + 1), 0));
     }
   });
 
-  it("alternates on seed for the mixed set — the case that looked stuck", () => {
-    // "mixed" has cards: null, so the register flips with the seed while the SET
-    // name never changes. Labelling the set made the button appear frozen.
-    expect(isDarkRegister("mixed", 0)).toBe(false);
-    expect(isDarkRegister("mixed", 1)).toBe(true);
-    expect(isDarkRegister("mixed", 2)).toBe(false);
-    expect(isDarkRegister("mixed", 3)).toBe(true);
+  it("wraps instead of running off the end, and survives a negative step", () => {
+    expect(nextCardSet(LOOK_SETS.length)).toBe(LOOK_SETS[0]);
+    expect(LOOK_SETS).toContain(nextCardSet(-1));
   });
 
-  it("changes on every seed bump for mixed, so the label must too", () => {
-    const seq = [0, 1, 2, 3, 4, 5].map((n) => isDarkRegister("mixed", n));
-    for (let i = 1; i < seq.length; i++) expect(seq[i]).not.toBe(seq[i - 1]);
-  });
-
-  it("falls back to editorial for an unknown or missing set", () => {
-    expect(isDarkRegister(undefined, 1)).toBe(false);
-    expect(isDarkRegister(null, 1)).toBe(false);
-    expect(isDarkRegister("nonsense" as DesignSetId, 1)).toBe(false);
-  });
-
-  it("agrees with DESIGN_SETS for every set at a fixed seed", () => {
-    for (const id of Object.keys(DESIGN_SETS) as DesignSetId[]) {
-      const cards = DESIGN_SETS[id].cards;
-      if (cards === "glass") expect(isDarkRegister(id, 0)).toBe(true);
-      if (cards === "classic") expect(isDarkRegister(id, 0)).toBe(false);
-    }
+  it("never auto-selects Mixed, which is a deliberate user choice", () => {
+    for (let i = 0; i < 20; i++) expect(nextCardSet(i)).not.toBe("mixed");
   });
 });
+
