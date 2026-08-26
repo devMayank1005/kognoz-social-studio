@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { storeGet, storeSet } from "@/lib/storeClient";
 import { C, FONT } from "@/lib/tokens";
 import { CalendarHeader } from "./CalendarHeader";
 import { CalendarFilters } from "./CalendarFilters";
@@ -53,13 +54,9 @@ export function CalendarView() {
       setLoading(true);
       setError("");
       try {
-        const res = await fetch(`/api/store?key=${STORAGE_KEY}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-
-        const savedValue = data?.value;
-        const loadedItems = migrateLegacyPlan(savedValue);
-        setItems(loadedItems);
+        const { value, stale } = await storeGet<unknown>(STORAGE_KEY);
+        if (stale) throw new Error("store unreachable");
+        setItems(migrateLegacyPlan(value));
       } catch (e) {
         console.warn("Falling back to local calendar initialization:", e);
         // Try localStorage fallback
@@ -89,21 +86,21 @@ export function CalendarView() {
       updatedAt: new Date().toISOString()
     };
 
-    // Save locally immediately
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch {}
-
-    // Save to server
-    try {
-      const res = await fetch(`/api/store?key=${STORAGE_KEY}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || `HTTP ${res.status}`);
+      const saved = await storeSet<unknown>(STORAGE_KEY, payload);
+      if (saved.ok) {
+        setError("");
+      } else if (saved.reason === "conflict") {
+        // Someone else saved while this tab was editing. Overwriting them is what
+        // the old blind PUT did, and it destroyed work silently. Take the server's
+        // copy and tell the user their change did not stick.
+        setItems(migrateLegacyPlan(saved.serverValue));
+        setError(
+          `${saved.updatedBy || "Someone else"} changed the calendar while you were editing. ` +
+            `Their version is now shown — please redo your change.`
+        );
+      } else {
+        setError("Note: Changes saved locally. Server sync pending.");
       }
     } catch (e) {
       console.warn("Failed to persist calendar to server:", e);

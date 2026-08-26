@@ -37,6 +37,7 @@ import {
   groundingDefault
 } from "@/lib/promptBuilders";
 import { callClaudeJSON, callClaudeText, FAST_MODEL } from "@/lib/claudeClient";
+import { storeGet, storeSet, storePeek } from "@/lib/storeClient";
 import { exportPdf, exportPanorama, exportStrip, exportPNG, saveBlobAs } from "@/lib/exportPipeline";
 import { Slide, type SlideDesign, type SlideKind } from "./Slide";
 import { Logo } from "./Logo";
@@ -68,49 +69,6 @@ const DEFAULT_SLIDES: CoercedSlide[] = [
   { title: "The cause is usually structural", body: "Watch the behavior and the problem is rarely attitude. Decision rights, spans, and consequences are set up to push everything upward. Structures can be redesigned." },
   { title: "Read it with the Immersion Index", body: "Five conditions, read through behavioral signals across the organization. You see what is happening and which two changes matter most." }
 ];
-
-async function storeGet<T>(key: string): Promise<T | null> {
-  // 1. Instant local cache read (0ms latency)
-  if (typeof window !== "undefined") {
-    try {
-      const local = localStorage.getItem(key);
-      if (local) return JSON.parse(local) as T;
-    } catch {}
-  }
-  // 2. Background server fetch
-  try {
-    const res = await fetch(`/api/store?key=${key}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data?.value && typeof window !== "undefined") {
-      try {
-        localStorage.setItem(key, JSON.stringify(data.value));
-      } catch {}
-    }
-    return (data?.value as T) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function storeSet(key: string, value: unknown): Promise<void> {
-  // 1. Instant local persistence
-  if (typeof window !== "undefined") {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {}
-  }
-  // 2. Async server sync (non-blocking)
-  try {
-    await fetch(`/api/store?key=${key}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(value)
-    });
-  } catch {
-    /* best-effort persistence — the UI already reflects the change locally */
-  }
-}
 
 export default function Studio() {
   const { data: session } = useSession();
@@ -216,9 +174,9 @@ export default function Studio() {
   useEffect(() => {
     (async () => {
       const [d, hp, sm] = await Promise.all([
-        storeGet<Partial<SlideDesign>>("kognoz-design"),
-        storeGet<string>("kognoz-house-prefs"),
-        storeGet<StyleExample[]>("kognoz-style-memory")
+        storeGet<Partial<SlideDesign>>("kognoz-design").then((r) => r.value),
+        storeGet<string>("kognoz-house-prefs").then((r) => r.value),
+        storeGet<StyleExample[]>("kognoz-style-memory").then((r) => r.value)
       ]);
       if (d && Object.keys(d).length) setDesignLocal((cur) => ({ ...cur, ...d }));
       if (typeof hp === "string") setHousePrefsLocal(hp);
@@ -299,7 +257,7 @@ export default function Studio() {
   async function markDrafted(itemN: number | string) {
     // Calendar Create-> sets the item to Draft on successful generation
     // Round-trips through /api/store since Studio doesn't hold calendar state directly.
-    const plan = await storeGet<{ items: { id?: string; n?: number; status: string }[] }>("kognoz-calendar");
+    const { value: plan } = await storeGet<{ items: { id?: string; n?: number; status: string }[] }>("kognoz-calendar");
     if (!plan || !Array.isArray(plan.items)) return;
     const next = {
       ...plan,
@@ -308,7 +266,12 @@ export default function Studio() {
         return matches ? { ...it, status: "Draft" } : it;
       })
     };
-    await storeSet("kognoz-calendar", next);
+    const saved = await storeSet("kognoz-calendar", next);
+    if (!saved.ok && saved.reason === "conflict") {
+      // Someone edited the calendar while this deck was generating. Marking one
+      // item as Draft is not worth overwriting their work — say so and move on.
+      setError("Generated, but the calendar was changed by someone else, so its status was not updated.");
+    }
   }
 
   async function generate(

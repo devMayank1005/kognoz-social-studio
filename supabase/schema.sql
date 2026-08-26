@@ -23,7 +23,11 @@ create table if not exists store (
   ),
   value jsonb not null,
   updated_at timestamptz not null default now(),
-  updated_by text -- user email, for "who edited last" (P2 nicety, §15) — populate now, surface later
+  updated_by text, -- user email, for "who edited last" (P2 nicety, §15) — populate now, surface later
+  -- Optimistic-locking token, bumped on every successful write. A client sends the
+  -- version it read; a mismatch means someone else wrote first and the request is
+  -- rejected with 409 rather than silently overwriting their work.
+  version int not null default 1
 );
 
 -- Row Level Security on; no public policies. All access goes through the
