@@ -19,7 +19,7 @@ import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
 import { FORMATS, type FormatId } from "@/lib/formats";
 import { PILLARS } from "@/lib/pillars";
-import { DESIGN_SETS, type DesignSetId } from "@/lib/designSets";
+import { DESIGN_SETS, lookLever, nextSetWithDifferentCards, type DesignSetId } from "@/lib/designSets";
 import {
   coerceContent,
   applyIdeaDeckKickers,
@@ -433,9 +433,36 @@ export default function Studio() {
 
   const LOOK_SETS: DesignSetId[] = ["editorial", "numeral", "dark", "glass", "bloom", "magazine"];
   const LOOK_ACCENTS: (string | null)[] = [null, C.blue, C.teal, C.cyan, C.green];
+
+  // Which dimension THIS format can actually render. Cycling a design set on a
+  // format that has no way to express one is why the button looked broken on
+  // Idea Deck, Stat Card, Says vs Does, Montage and Founder Video.
+  const lever = lookLever(fmt);
+
   const cycleLook = () => {
     const i = lookI + 1;
     setLookI(i);
+
+    if (lever === "accent") {
+      // Idea Deck / Founder Video show only the accent. Step it every click
+      // instead of once every six, which is what made them feel dead.
+      const nextAccent = LOOK_ACCENTS[i % LOOK_ACCENTS.length];
+      saveDesign({ ...design, accent: nextAccent });
+      setSeed((x) => x + 1);
+      return;
+    }
+
+    if (lever === "cards") {
+      // Stat Card / Dialogue only show the classic-vs-glass register, so jump
+      // straight to a set that actually flips it rather than to the next set,
+      // four of which look identical here.
+      const nextSet = design.set === "mixed" ? "mixed" : nextSetWithDifferentCards(design.set || "editorial");
+      const nextAccent = LOOK_ACCENTS[i % LOOK_ACCENTS.length];
+      saveDesign({ ...design, set: nextSet, accent: nextAccent });
+      setSeed((x) => x + 1);
+      return;
+    }
+
     const nextSet: DesignSetId = design.set === "mixed" ? "mixed" : LOOK_SETS[i % LOOK_SETS.length];
     const nextAccent = LOOK_ACCENTS[Math.floor(i / LOOK_SETS.length) % LOOK_ACCENTS.length];
     saveDesign({ ...design, set: nextSet, accent: nextAccent });
@@ -1326,11 +1353,24 @@ export default function Studio() {
         )}
 
         <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap", justifyContent: "center", flexShrink: 0 }}>
-          {fmt.single !== "video" && (
+          {fmt.single !== "video" && lever !== "none" && (
             <button onClick={cycleLook} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: "pointer", border: "none", color: "#fff", background: GRAD }}>
-              🎲 Next look · {(DESIGN_SETS[design.set || "editorial"] || DESIGN_SETS.editorial).label.split(" ·")[0]}
-              {design.accent ? " · tinted" : ""}
+              🎲 Next look ·{" "}
+              {lever === "accent"
+                ? design.accent
+                  ? "tinted"
+                  : "auto tone"
+                : (DESIGN_SETS[design.set || "editorial"] || DESIGN_SETS.editorial).label.split(" ·")[0]}
+              {lever !== "accent" && design.accent ? " · tinted" : ""}
             </button>
+          )}
+          {fmt.single !== "video" && lever === "none" && (
+            <div
+              title="This format renders one fixed layout, so there are no alternative looks to cycle."
+              style={{ fontFamily: font, fontSize: 12, color: C.inkMute, alignSelf: "center", padding: "10px 4px", lineHeight: 1.4 }}
+            >
+              {format} has a single fixed look
+            </div>
           )}
           <button onClick={() => handleExportPNG(current)} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: "pointer", border: "none", color: "#fff", background: C.blue }}>
             {fmt.frames ? `Download ${fmt.frames} frames` : fmt.single === "video" ? "Download poster PNG" : "Download this slide"}

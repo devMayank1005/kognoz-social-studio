@@ -32,3 +32,48 @@ export const LOOK_SETS: DesignSetId[] = ["editorial", "numeral", "dark", "glass"
 // (null | C.blue | C.teal | C.cyan | C.green) — kept as a shape reference here.
 export const LOOK_ACCENT_KEYS: (null | "blue" | "teal" | "cyan" | "green")[] = [null, "blue", "teal", "cyan", "green"];
 export const TOTAL_LOOKS = LOOK_SETS.length * LOOK_ACCENT_KEYS.length; // 30
+
+// ---------------------------------------------------------------------------
+// What a "look" can actually change, per format.
+//
+// A DesignSetSpec only carries `cover`, `contents` and `cards`. Those drive the
+// deck cover/content renderers and the stat/dialogue card register — and nothing
+// else. The single-asset renderers for Says vs Does, Montage and Story hardcode
+// their backgrounds, and Idea Deck / Founder Video vary only by accent colour.
+//
+// So "Next look" was cycling a design set that several formats have no way to
+// express. The button worked; the formats had nothing to show. Worse, the accent
+// only advanced every 6th click, so accent-only formats looked dead 5 clicks in 6.
+//
+// This maps each format to the dimension it can actually display, so the button
+// can step THAT and stay honest about formats with a single fixed look.
+// ---------------------------------------------------------------------------
+export type LookLever = "layout" | "cards" | "accent" | "none";
+
+export function lookLever(spec: { deck?: true; idea?: true; single?: string }): LookLever {
+  if (spec.idea) return "accent";        // idea cards are fixed; only the accent shows
+  if (spec.deck) return "layout";        // Carousel, Square — full cover/content variants
+  switch (spec.single) {
+    case "article":
+      return "layout";
+    case "stat":
+    case "dialogue":
+      return "cards";                    // classic vs glass register
+    case "script":
+      return "accent";
+    default:
+      return "none";                     // split, montage, story, video: one fixed look
+  }
+}
+
+/** Sets whose card register differs from the current one, for "cards" formats. */
+export function nextSetWithDifferentCards(current: DesignSetId): DesignSetId {
+  const cur = DESIGN_SETS[current] || DESIGN_SETS.editorial;
+  const order = LOOK_SETS;
+  const from = Math.max(0, order.indexOf(current));
+  for (let step = 1; step <= order.length; step++) {
+    const candidate = order[(from + step) % order.length];
+    if (DESIGN_SETS[candidate].cards !== cur.cards) return candidate;
+  }
+  return order[(from + 1) % order.length];
+}
