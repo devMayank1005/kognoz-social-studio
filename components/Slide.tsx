@@ -7,7 +7,7 @@
 
 import React, { useRef } from "react";
 import { C, GRAD, GRAD_DARK, FONT, DISPLAY_FONT, GLASS_DARKBG, GLASS_LIGHTBG } from "@/lib/tokens";
-import { DESIGN_SETS, type DesignSetId } from "@/lib/designSets";
+import { DESIGN_SETS, isDarkRegister, type DesignSetId } from "@/lib/designSets";
 import { plainWords, type CoercedSlide } from "@/lib/coerce";
 import { Logo } from "./Logo";
 
@@ -226,7 +226,11 @@ export const Slide = React.memo(function Slide({
         ? CONTENT_ORDER[(idx + seed) % CONTENT_ORDER.length]
         : dset.contents[(idx + seed) % dset.contents.length]
       : 0;
-  const cardGlass = dset.cards === "glass" || (dset.cards === null && seed % 2 === 1);
+  const cardGlass = isDarkRegister(dz.set, seed);
+  // GRAD_DARK is built from C.blue, so an accent of blue is invisible on a dark
+  // register — label and background are the same colour. The lighter tones read
+  // fine as-is. Mirrors what <Eyebrow dark> already does at the top of this file.
+  const accentOnDark = !accent || accent === C.blue ? C.cyan : accent;
 
   // Site-language eyebrow: small, letterspaced, uppercase. No bars, no capsules.
   const Eyebrow = ({ dark, n }: { dark?: boolean; n?: string }) => (
@@ -265,6 +269,27 @@ export const Slide = React.memo(function Slide({
 
   /* ==================== IDEA DECK (Deepstash-style stash cards) ==================== */
   if (ideaMode && kind === "cover") {
+    // Dark register. The stash of cards is the whole idea here, so the stack keeps
+    // its geometry and only the palette moves.
+    if (cardGlass) {
+      return (
+        <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
+          {dz.petals && <Petal w={620} o={0.5} style={{ position: "absolute", top: -170, right: -180 }} />}
+          <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
+            <Eyebrow dark />
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+              <div style={{ position: "absolute", width: "86%", height: "60%", borderRadius: 28, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.14)", transform: "rotate(4deg) translateY(16px)" }} />
+              <div style={{ position: "absolute", width: "91%", height: "62%", borderRadius: 28, background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.18)", transform: "rotate(-2.5deg) translateY(7px)" }} />
+              <div style={{ position: "relative", width: "96%", borderRadius: 28, padding: "84px 64px", ...GLASS_DARKBG, boxShadow: "0 28px 70px rgba(0,20,40,0.4)", textAlign: "center" }}>
+                <div style={{ fontFamily: font, fontSize: sz(20), fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: accentOnDark, marginBottom: 26 }}>{total} ideas · swipe</div>
+                <h1 style={{ fontFamily: displayFont, fontSize: fit(76, cover, 46), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: "#fff", margin: 0 }}>{renderEm(cover)}</h1>
+              </div>
+            </div>
+          </div>
+          <Foot dark right={COVER_R} />
+        </div>
+      );
+    }
     return (
       <div id={id} style={{ ...wrap, background: C.off }}>
         {dz.petals && <Petal w={620} o={0.7} style={{ position: "absolute", top: -170, right: -180 }} />}
@@ -290,36 +315,42 @@ export const Slide = React.memo(function Slide({
     const isKRead = /^the kognoz read/i.test(kick);
     const darkCard = isAsk || isKRead;
     return (
-      <div id={id} style={{ ...wrap, background: C.off }}>
-        {dz.petals && <Petal w={380} o={0.4} style={{ position: "absolute", top: -110, right: -110 }} />}
+      // `darkCard` is per-card (Ask / Kognoz-read always read dark). `cardGlass` is
+      // the deck-wide register from the design set. On the dark register the page
+      // turns and the ordinary cards become glass; the already-dark cards stay put.
+      <div id={id} style={{ ...wrap, background: cardGlass ? GRAD_DARK : C.off }}>
+        {dz.petals && <Petal w={380} o={cardGlass ? 0.32 : 0.4} style={{ position: "absolute", top: -110, right: -110 }} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
-          <Eyebrow n={nn} />
+          <Eyebrow dark={cardGlass} n={nn} />
           <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
             <div
               style={{
                 width: "100%",
                 borderRadius: 28,
                 padding: "76px 64px",
-                background: darkCard ? GRAD_DARK : C.white,
-                border: darkCard ? "none" : `1px solid ${isReveal ? C.teal : C.line}`,
-                boxShadow: "0 24px 60px rgba(0,40,70,0.10)",
+                ...(darkCard
+                  ? { background: GRAD_DARK, border: "none" }
+                  : cardGlass
+                  ? { ...GLASS_DARKBG, border: `1px solid ${isReveal ? C.teal : "rgba(255,255,255,0.18)"}` }
+                  : { background: C.white, border: `1px solid ${isReveal ? C.teal : C.line}` }),
+                boxShadow: cardGlass || darkCard ? "0 24px 60px rgba(0,20,40,0.35)" : "0 24px 60px rgba(0,40,70,0.10)",
                 textAlign: "center",
                 position: "relative",
                 overflow: "hidden"
               }}
             >
               {darkCard && dz.petals && <Petal w={300} o={0.4} style={{ position: "absolute", bottom: -90, right: -90 }} />}
-              <div style={{ fontFamily: font, fontSize: sz(20), fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: darkCard ? C.green : isReveal ? C.teal : accent, marginBottom: 30, position: "relative" }}>
+              <div style={{ fontFamily: font, fontSize: sz(20), fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: darkCard ? C.green : isReveal ? C.teal : cardGlass ? accentOnDark : accent, marginBottom: 30, position: "relative" }}>
                 {kick}
               </div>
-              <div style={{ fontFamily: displayFont, fontSize: fit(58, data.body, 95), fontWeight: 600, lineHeight: 1.22, letterSpacing: "-0.01em", color: darkCard ? "#fff" : C.ink, position: "relative" }}>
+              <div style={{ fontFamily: displayFont, fontSize: fit(58, data.body, 95), fontWeight: 600, lineHeight: 1.22, letterSpacing: "-0.01em", color: darkCard || cardGlass ? "#fff" : C.ink, position: "relative" }}>
                 {renderLines(data.body)}
               </div>
               {isAsk && <div style={{ fontFamily: font, fontSize: sz(21), color: "rgba(255,255,255,0.65)", marginTop: 34, position: "relative" }}>The answer is on the next card</div>}
             </div>
           </div>
         </div>
-        <Foot right={CONTENT_R} />
+        <Foot dark={cardGlass} right={CONTENT_R} />
       </div>
     );
   }
@@ -509,6 +540,40 @@ export const Slide = React.memo(function Slide({
   if (kind === "split") {
     const L = slides[0] || { title: "What the survey says", body: "" };
     const Rt = slides[1] || { title: "What behavior says", body: "" };
+    // Dark register. The format's whole argument is the contrast between what is
+    // said and what is done, so the two halves stay clearly distinct here too:
+    // the claim recedes into muted glass, the behaviour sits forward and lit.
+    if (cardGlass) {
+      return (
+        <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "72px 96px 44px" }}>
+              <Eyebrow dark />
+              <h1 style={{ fontFamily: displayFont, fontSize: fit(64, cover, 58), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.01em", color: "#fff", margin: "24px 0 0" }}>{renderEm(cover)}</h1>
+            </div>
+            <div style={{ flex: 1, display: "flex" }}>
+              {/* The claim is pushed back: darker than the page, muted type. */}
+              <div style={{ flex: 1, background: "rgba(0,20,40,0.42)", padding: "58px 60px", display: "flex", flexDirection: "column" }}>
+                <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.42)", marginBottom: 30 }}>{L.title}</div>
+                <p style={{ fontFamily: displayFont, fontSize: sz(45), lineHeight: 1.28, color: "rgba(255,255,255,0.55)", margin: 0, fontStyle: "italic" }}>&ldquo;{renderLines(L.body)}&rdquo;</p>
+              </div>
+              {/* The behaviour comes forward: lifted panel, green rule, full-white type.
+                  The light register gets this separation from pale-vs-dark; on dark the
+                  step has to be built deliberately or the format loses its argument. */}
+              <div style={{ flex: 1, background: "rgba(255,255,255,0.14)", borderLeft: `4px solid ${C.green}`, borderRadius: 0, padding: "58px 60px", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
+                {dz.petals && <Petal w={340} o={0.42} style={{ position: "absolute", bottom: -100, right: -100 }} />}
+                <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: C.green, marginBottom: 30, position: "relative" }}>{Rt.title}</div>
+                <p style={{ fontFamily: displayFont, fontSize: sz(45), lineHeight: 1.28, color: "#fff", margin: 0, position: "relative" }}>{Rt.body}</p>
+              </div>
+            </div>
+            <div style={{ padding: "36px 96px 84px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid rgba(255,255,255,0.14)" }}>
+              <Logo h={64} white />
+              <div style={{ fontFamily: font, fontSize: 22, color: "rgba(255,255,255,0.6)" }}>{SINGLE_R}</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div id={id} style={{ ...wrap, background: C.white }}>
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
@@ -643,6 +708,33 @@ export const Slide = React.memo(function Slide({
   /* ========================= MONTAGE (3-frame panorama) ========================= */
   if (kind === "montage") {
     const pts = [slides[0] || { title: "", body: "" }, slides[1] || { title: "", body: "" }, slides[2] || { title: "", body: "" }];
+    // Dark register, mirroring the stat card: same layout, boardroom palette.
+    if (cardGlass) {
+      return (
+        <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
+          {dz.petals && <Petal w={760} o={0.4} style={{ position: "absolute", top: -260, left: 780 }} />}
+          {dz.petals && <Petal w={680} o={0.32} style={{ position: "absolute", bottom: -260, left: 2040 }} />}
+          <div style={{ position: "absolute", inset: 0, padding: "88px 100px", display: "flex", flexDirection: "column" }}>
+            <Eyebrow dark />
+            <h1 style={{ fontFamily: displayFont, fontSize: fit(154, cover, 62), fontWeight: 600, lineHeight: 1.04, letterSpacing: "-0.015em", color: "#fff", margin: "30px 0 0", maxWidth: 3000 }}>{renderEm(cover)}</h1>
+            <div style={{ flex: 1 }} />
+            <div style={{ display: "flex", gap: 120 }}>
+              {pts.map((p, i) => (
+                <div key={i} style={{ flex: 1, maxWidth: 900, ...GLASS_DARKBG, borderRadius: 22, padding: "44px 46px" }}>
+                  <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, letterSpacing: "0.14em", color: [C.cyan, C.teal, C.green][i], marginBottom: 14 }}>{String(i + 1).padStart(2, "0")}</div>
+                  <div style={{ fontFamily: font, fontSize: sz(31), fontWeight: 800, color: "#fff", marginBottom: 12 }}>{p.title}</div>
+                  <p style={{ fontFamily: font, fontSize: sz(27), lineHeight: 1.5, color: "rgba(255,255,255,0.85)", margin: 0 }}>{p.body}</p>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 64 }}>
+              <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>{plain(cta)}</div>
+              <Logo h={72} white />
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div id={id} style={{ ...wrap, background: C.off }}>
         {dz.petals && <Petal w={760} o={0.5} style={{ position: "absolute", top: -260, left: 780 }} />}
@@ -685,6 +777,22 @@ export const Slide = React.memo(function Slide({
             <p style={{ fontFamily: font, fontSize: fit(33, s0.body, 180), lineHeight: 1.5, color: "rgba(255,255,255,0.9)", margin: 0 }}>{renderLines(s0.body)}</p>
           </div>
           <Foot dark right={SINGLE_R} />
+        </div>
+      );
+    }
+    // Story ships dark, so its second register is the light one — same layout,
+    // editorial palette, matching the light stat card.
+    if (!cardGlass) {
+      return (
+        <div id={id} style={{ ...wrap, background: C.off }}>
+          {dz.petals && <Petal w={560} o={0.5} style={{ position: "absolute", top: -180, right: -190 }} />}
+          <div style={{ position: "absolute", inset: 0, padding: "112px 96px 196px", display: "flex", flexDirection: "column" }}>
+            <Eyebrow />
+            <h1 style={{ fontFamily: displayFont, fontSize: fit(90, cover, 42), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: C.ink, margin: "36px 0 44px" }}>{renderEm(cover)}</h1>
+            <ImageSlot img={images.story} onPick={(u) => setImg("story", u)} label="Add photo" style={{ height: 560, borderRadius: 24 }} />
+            <p style={{ fontFamily: font, fontSize: sz(37), lineHeight: 1.55, color: C.inkSoft, margin: "44px 0 0", flex: 1 }}>{renderLines(s0.body)}</p>
+          </div>
+          <Foot right={SINGLE_R} />
         </div>
       );
     }
@@ -746,6 +854,37 @@ export const Slide = React.memo(function Slide({
 
   /* ==================== FOUNDER VIDEO SCRIPT (shoot kit) ==================== */
   if (kind === "script") {
+    // Dark register: same shoot-script layout on the boardroom palette.
+    if (cardGlass) {
+      return (
+        <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
+          {dz.petals && <Petal w={520} o={0.4} style={{ position: "absolute", top: -170, right: -170 }} />}
+          <div style={{ position: "absolute", inset: 0, padding: "72px 84px", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 26 }}>
+              <div style={{ fontFamily: font, fontSize: 21, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: accentOnDark }}>Founder video · shoot script</div>
+              <div style={{ fontFamily: font, fontSize: 19, fontWeight: 700, color: "rgba(255,255,255,0.6)", letterSpacing: "0.1em", textTransform: "uppercase" }}>{eyebrow}</div>
+            </div>
+            <h1 style={{ fontFamily: displayFont, fontSize: 52, fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: "#fff", margin: "0 0 34px" }}>{renderEm(cover)}</h1>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 20 }}>
+              {slides.map((b, i) => (
+                <div key={i} style={{ display: "flex", gap: 22, padding: "24px 26px", ...GLASS_DARKBG, borderRadius: 14 }}>
+                  <div style={{ flexShrink: 0, width: 132, fontFamily: font, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: accentOnDark, paddingTop: 4 }}>{b.title}</div>
+                  <p style={{ fontFamily: font, fontSize: 27, lineHeight: 1.5, color: "rgba(255,255,255,0.92)", margin: 0 }}>{b.body}</p>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 26, padding: "18px 26px", borderLeft: `3px solid ${accentOnDark}`, ...GLASS_DARKBG, borderRadius: "0 14px 14px 0" }}>
+              <div style={{ fontFamily: font, fontSize: 17, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.6)", marginBottom: 8 }}>Post caption</div>
+              <p style={{ fontFamily: font, fontSize: 23, lineHeight: 1.45, color: "rgba(255,255,255,0.85)", margin: 0 }}>{plain(cta)}</p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 26 }}>
+              <Logo h={78} white />
+              <div style={{ fontFamily: font, fontSize: 18, color: "rgba(255,255,255,0.6)" }}>60–90s · talk to camera · captions on</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div id={id} style={{ ...wrap, background: C.white }}>
         <div style={{ position: "absolute", inset: 0, padding: "72px 84px", display: "flex", flexDirection: "column" }}>

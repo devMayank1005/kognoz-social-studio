@@ -45,24 +45,29 @@ export const TOTAL_LOOKS = LOOK_SETS.length * LOOK_ACCENT_KEYS.length; // 30
 // express. The button worked; the formats had nothing to show. Worse, the accent
 // only advanced every 6th click, so accent-only formats looked dead 5 clicks in 6.
 //
-// This maps each format to the dimension it can actually display, so the button
-// can step THAT and stay honest about formats with a single fixed look.
+// Every format except Video now renders a light and a dark register, so the button
+// steps the card register and lands on a visibly different look on every click.
 // ---------------------------------------------------------------------------
 export type LookLever = "layout" | "cards" | "accent" | "none";
 
 export function lookLever(spec: { deck?: true; idea?: true; single?: string }): LookLever {
-  if (spec.idea) return "accent";        // idea cards are fixed; only the accent shows
+  if (spec.idea) return "cards";         // stash renders a light and a dark register
   if (spec.deck) return "layout";        // Carousel, Square — full cover/content variants
   switch (spec.single) {
     case "article":
       return "layout";
     case "stat":
     case "dialogue":
-      return "cards";                    // classic vs glass register
+    case "split":
+    case "montage":
+    case "story":
     case "script":
-      return "accent";
+      // All six now render a light and a dark register off dset.cards, the way
+      // the stat card always did. Story is the odd one: it ships dark, so its
+      // second register is the light one.
+      return "cards";
     default:
-      return "none";                     // split, montage, story, video: one fixed look
+      return "none";                     // video: poster frame only, no look to cycle
   }
 }
 
@@ -76,4 +81,19 @@ export function nextSetWithDifferentCards(current: DesignSetId): DesignSetId {
     if (DESIGN_SETS[candidate].cards !== cur.cards) return candidate;
   }
   return order[(from + 1) % order.length];
+}
+
+/**
+ * Which register a slide will actually render in.
+ *
+ * This was duplicated inline in <Slide> while the "Next look" button described the
+ * design SET instead. On the "mixed" set the two disagree: `cards` is null, so the
+ * register flips on seed parity and the artwork changes, but the set name never
+ * moves — the button reads "Mixed" forever and looks stuck while the slide toggles.
+ *
+ * One definition, used by both, so the label can never drift from the render.
+ */
+export function isDarkRegister(set: DesignSetId | undefined | null, seed: number): boolean {
+  const dset = DESIGN_SETS[set || "editorial"] || DESIGN_SETS.editorial;
+  return dset.cards === "glass" || (dset.cards === null && seed % 2 === 1);
 }

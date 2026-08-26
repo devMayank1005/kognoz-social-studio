@@ -19,7 +19,7 @@ import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
 import { FORMATS, type FormatId } from "@/lib/formats";
 import { PILLARS } from "@/lib/pillars";
-import { DESIGN_SETS, lookLever, nextSetWithDifferentCards, type DesignSetId } from "@/lib/designSets";
+import { DESIGN_SETS, isDarkRegister, lookLever, nextSetWithDifferentCards, type DesignSetId } from "@/lib/designSets";
 import {
   coerceContent,
   applyIdeaDeckKickers,
@@ -795,7 +795,7 @@ export default function Studio() {
           <span style={{ fontFamily: font, fontSize: 12, color: C.inkSoft, lineHeight: 1.45 }}>
             Ground with web search
             <span style={{ color: C.inkMute }}>
-              {" "}· verifies statistics live, up to 3 searches. Costs several times a plain
+              {" "}· verifies statistics live, up to 2 searches. Costs several times a plain
               generation, so leave it off unless the piece leans on external numbers.
             </span>
           </span>
@@ -1356,12 +1356,19 @@ export default function Studio() {
           {fmt.single !== "video" && lever !== "none" && (
             <button onClick={cycleLook} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: "pointer", border: "none", color: "#fff", background: GRAD }}>
               🎲 Next look ·{" "}
-              {lever === "accent"
+              {lever === "cards"
+                ? // Name the register, not the set. On the "mixed" set the register
+                  // flips on seed parity while the set name never moves, so labelling
+                  // the set made the button look stuck while the slide was changing.
+                  isDarkRegister(design.set, seed)
+                  ? "Dark"
+                  : "Light"
+                : lever === "accent"
                 ? design.accent
                   ? "tinted"
                   : "auto tone"
                 : (DESIGN_SETS[design.set || "editorial"] || DESIGN_SETS.editorial).label.split(" ·")[0]}
-              {lever !== "accent" && design.accent ? " · tinted" : ""}
+              {design.accent ? " · tinted" : ""}
             </button>
           )}
           {fmt.single !== "video" && lever === "none" && (
