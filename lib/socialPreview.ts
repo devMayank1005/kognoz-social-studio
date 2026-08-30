@@ -145,7 +145,10 @@ export interface Fit {
   mode: FitMode;
   /** The aspect the viewer actually sees. */
   renderedAspect: number;
-  /** Fraction of the asset removed at each edge, 0–0.5. */
+  /**
+   * Fraction of the asset removed at each edge, 0–0.5. Deliberately unrounded: these
+   * drive the preview's layout, and rounding a geometry input is error for no gain.
+   */
   cropTop: number;
   cropBottom: number;
   cropLeft: number;
@@ -157,6 +160,9 @@ export interface Fit {
 }
 
 const round = (n: number, dp = 4) => Math.round(n * 10 ** dp) / 10 ** dp;
+// `-0 * x` is `-0`, which is real enough to fail an equality check on an offset that
+// is conceptually zero. Geometry callers should never have to think about it.
+const noNegZero = (n: number) => (n === 0 ? 0 : n);
 
 /**
  * What this placement does to an asset of these proportions.
@@ -194,8 +200,8 @@ export function placementFit(assetW: number, assetH: number, placement: Placemen
       renderedAspect: round(placement.maxAspect),
       cropTop: 0,
       cropBottom: 0,
-      cropLeft: round(lost / 2),
-      cropRight: round(lost / 2),
+      cropLeft: lost / 2,
+      cropRight: lost / 2,
       lostPct: round(lost * 100, 1),
       axis: "horizontal",
       severity: severityOf(lost, "horizontal")
@@ -208,8 +214,8 @@ export function placementFit(assetW: number, assetH: number, placement: Placemen
   return {
     mode: "cropped",
     renderedAspect: round(placement.minAspect),
-    cropTop: round(lost / 2),
-    cropBottom: round(lost / 2),
+    cropTop: lost / 2,
+    cropBottom: lost / 2,
     cropLeft: 0,
     cropRight: 0,
     lostPct: round(lost * 100, 1),
@@ -300,4 +306,76 @@ export function describeAspect(aspect: number): string {
   ];
   const hit = known.find(([v]) => Math.abs(v - aspect) < 0.005);
   return hit ? hit[1] : `${round(aspect, 2)}:1`;
+}
+
+// ---------------------------------------------------------------------------
+// Placing the artwork inside a mock card.
+//
+// The preview shrinks a native-size <Slide> with a CSS transform inside a clipping
+// box, so every card needs a scale and a translate. Two different shifts land in that
+// one translate and they are easy to conflate:
+//
+//   the FRAME shift   only for a framed format, where one wide node holds every frame
+//                     and the box picks out a slice of it
+//   the CROP shift    for any placement that trims the asset to its own shape
+//
+// A deck page is its own node — the caller has already chosen which — so it must never
+// get the frame shift. Applying it anyway pushed every page after the first entirely
+// outside its box, which is exactly what happened: Carousel showed slide 1 and then
+// five blanks. The guard lives here now, in one place, under test.
+// ---------------------------------------------------------------------------
+
+/** How far left the node slides to bring `frameIndex` into view. Zero for decks. */
+export function frameShiftPx(assetW: number, frames: number | undefined, frameIndex: number, scale: number): number {
+  if (!frames || frames <= 1) return 0;
+  return noNegZero(-frameIndex * assetW * scale);
+}
+
+export interface ArtworkTransform {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  /** Height of the clipping box at this width. */
+  boxH: number;
+}
+
+/**
+ * Where to put the node so the box shows what the platform would show.
+ *
+ * `reveal` is the "show what gets cropped" view: the whole asset at box width with the
+ * crop ignored, so the discarded bands can be dimmed over it.
+ */
+export function artworkTransform(opts: {
+  assetW: number;
+  assetH: number;
+  frames?: number;
+  frameIndex: number;
+  boxWidth: number;
+  fit: Fit;
+  reveal?: boolean;
+}): ArtworkTransform {
+  const { assetW, assetH, frames, frameIndex, boxWidth, fit, reveal } = opts;
+  if (!(assetW > 0) || !(assetH > 0) || !(boxWidth > 0)) {
+    throw new Error("artworkTransform needs positive dimensions");
+  }
+
+  if (reveal) {
+    const scale = boxWidth / assetW;
+    return {
+      scale,
+      offsetX: noNegZero(frameShiftPx(assetW, frames, frameIndex, scale)),
+      offsetY: 0,
+      boxH: assetH * scale
+    };
+  }
+
+  const shownW = assetW * (1 - fit.cropLeft - fit.cropRight);
+  const shownH = assetH * (1 - fit.cropTop - fit.cropBottom);
+  const scale = boxWidth / shownW;
+  return {
+    scale,
+    offsetX: noNegZero(frameShiftPx(assetW, frames, frameIndex, scale) - fit.cropLeft * assetW * scale),
+    offsetY: noNegZero(-fit.cropTop * assetH * scale),
+    boxH: shownH * scale
+  };
 }

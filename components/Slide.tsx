@@ -9,6 +9,7 @@ import React, { useRef } from "react";
 import { C, GRAD, GRAD_DARK, FONT, DISPLAY_FONT, GLASS_DARKBG, GLASS_LIGHTBG } from "@/lib/tokens";
 import { DESIGN_SETS, isDarkSurface, surfaceFor, type DesignSetId, type SurfaceId } from "@/lib/designSets";
 import { plainWords, type CoercedSlide } from "@/lib/coerce";
+import { splitAcrossFrames, frameRoles } from "@/lib/montage";
 import { Logo } from "./Logo";
 
 const font = FONT;
@@ -718,99 +719,150 @@ export const Slide = React.memo(function Slide({
   }
 
   if (kind === "montage") {
+    const FRAMES = 3;
     const pts = [slides[0] || { title: "", body: "" }, slides[1] || { title: "", body: "" }, slides[2] || { title: "", body: "" }];
-    const showMontagePhoto = photoOn || [0, 1, 2].some((i) => Boolean(images[`m${i}`]));
 
-    // This exports as three separate carousel frames (frames: 3 in lib/formats.ts), so
-    // the old single padded row was wrong twice over. The cards froze at maxWidth 900
-    // and landed at x=100/1120/2140 against cuts at 1080 and 2160, which sliced 20px off
-    // card three and welded that sliver onto frame two; and the headline, eyebrow, CTA
-    // and logo all sat in one band across the full 3240, so frame two exported with no
-    // branding at all and a long headline split a word across the first cut.
+    // Posted as three carousel slides, and meant to read as ONE continuous piece that
+    // happens to be divided — swiping pans across it rather than stepping between three
+    // unrelated cards. Three things carry across the cuts by design:
     //
-    // Each frame is now an exact 1080-wide column that carries its own logo and stands
-    // on its own as a slide. The headline belongs to frame one, the CTA closes frame
-    // three, and nothing crosses a cut.
-    const frameW = baseW / 3;
+    //   the ground     a wash that flows left to right, so each frame opens on a
+    //                  different point along it
+    //   the shapes     petals centred ON the cuts, so a shape you half-see completes
+    //                  when you swipe
+    //   the headline   laid a phrase per frame, broken only between words, and never
+    //                  inside an emphasis pair (see lib/montage.ts)
+    //
+    // What must NEVER cross a cut is content that would be sliced: the cards stay inside
+    // their own 1080 column. Continuity comes from elements designed to span, not from
+    // something accidentally cut in half — that distinction is why card three used to be
+    // clipped, and lib/slideIndex.test.ts still pins the columns against the cuts.
+    //
+    // The mark appears once, closing the last frame. Repeating it on all three was the
+    // single thing that most broke the illusion when swiping.
+    const frameW = baseW / FRAMES;
+    const phrases = splitAcrossFrames(cover, FRAMES);
     const accentOf = [C.cyan, C.teal, C.green];
 
+    // One wide photo across the whole strip rather than three separate ones: a single
+    // image panned across three swipes is the strongest continuity device there is. As
+    // on Story, a photo wins the surface outright.
+    const wide = images.montage;
+    const showPhoto = photoOn || Boolean(wide);
+    const onPhoto = Boolean(wide);
+    const heading = onPhoto ? "#fff" : S.heading;
+    const bodyCol = onPhoto ? "rgba(255,255,255,0.92)" : S.body;
+    const labelCol = onPhoto ? "rgba(255,255,255,0.78)" : S.label;
+    const panelStyle = onPhoto ? GLASS_DARKBG : S.panel;
+    const darkType = onDark || onPhoto;
+
     return (
-      <div id={id} style={{ ...wrap, background: S.page }}>
-        {dz.petals && <Petal w={760} o={S.petal} style={{ position: "absolute", top: -260, left: 60 }} />}
-        {dz.petals && <Petal w={680} o={S.petal * 0.8} style={{ position: "absolute", bottom: -260, left: 2260 }} />}
-        <div style={{ position: "absolute", inset: 0, display: "flex" }}>
-          {pts.map((p, i) => (
-            <div
-              key={i}
-              style={{
-                width: frameW,
-                flexShrink: 0,
-                boxSizing: "border-box",
-                padding: "80px 72px",
-                display: "flex",
-                flexDirection: "column",
-                position: "relative"
-              }}
-            >
-              {i === 0 ? (
-                <>
-                  <Eyebrow dark={onDark} />
+      <div id={id} style={{ ...wrap, background: onPhoto ? GRAD_DARK : S.page }}>
+        {/* The slot IS the background layer: full-bleed and first in the stack, so the
+            empty state is clickable across the whole strip and the filled state needs no
+            second copy of the image. Rendering the photo separately as well would inline
+            the same base64 twice into every exported SVG. */}
+        {showPhoto && (
+          <ImageSlot
+            img={wide}
+            onPick={(u) => setImg("montage", u)}
+            dark={darkType}
+            label="Add one wide photo — it spans all three frames"
+            style={{ position: "absolute", inset: 0, background: wide ? "transparent" : undefined }}
+          />
+        )}
+        {wide && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "linear-gradient(90deg, rgba(4,26,43,0.74) 0%, rgba(4,26,43,0.5) 50%, rgba(4,26,43,0.74) 100%)",
+              pointerEvents: "none"
+            }}
+          />
+        )}
+        {/* The ground drifts across the full 3240 instead of sitting flat, so no two
+            frames open on the same colour and a swipe reads as panning. */}
+        {!onPhoto && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: `linear-gradient(90deg, ${C.gradFrom}1A 0%, ${C.gradTo}1A 100%)`,
+              pointerEvents: "none"
+            }}
+          />
+        )}
+        {/* Centred ON the cuts at 1080 and 2160. A petal carries no information, so half
+            of one is not a clipped element — it is the shape that completes when the
+            next frame arrives. Suppressed over a photo, where the scrim already carries
+            the drift and a blob would only muddy the picture. */}
+        {!onPhoto && dz.petals && <Petal w={760} o={S.petal} style={{ position: "absolute", top: -250, left: frameW - 380 }} />}
+        {!onPhoto && dz.petals && <Petal w={680} o={S.petal * 0.8} style={{ position: "absolute", bottom: -240, left: frameW * 2 - 340 }} />}
+
+        <div style={{ position: "absolute", inset: 0, display: "flex", pointerEvents: "none" }}>
+          {pts.map((p, i) => {
+            const role = frameRoles(i, FRAMES);
+            return (
+              <div
+                key={i}
+                style={{
+                  width: frameW,
+                  flexShrink: 0,
+                  boxSizing: "border-box",
+                  padding: "80px 72px",
+                  display: "flex",
+                  flexDirection: "column",
+                  position: "relative"
+                }}
+              >
+                {role.eyebrow ? <Eyebrow dark={darkType} /> : <div style={{ height: 30 }} />}
+
+                {phrases[i] ? (
                   <h1
                     style={{
                       fontFamily: displayFont,
-                      fontSize: fit(74, cover, 90),
+                      fontSize: fit(92, phrases[i], 24),
                       fontWeight: 600,
-                      lineHeight: 1.05,
+                      lineHeight: 1.04,
                       letterSpacing: "-0.015em",
-                      color: S.heading,
+                      color: heading,
                       margin: "22px 0 0"
                     }}
                   >
-                    {renderEm(cover)}
+                    {renderEm(phrases[i])}
                   </h1>
-                </>
-              ) : null}
+                ) : null}
 
-              <div
-                style={{
-                  ...S.panel,
-                  borderRadius: surfaceId === "press" ? 0 : 22,
-                  padding: "38px 40px",
-                  marginTop: i === 0 ? 34 : 0,
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  minHeight: 0
-                }}
-              >
-                <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.14em", color: accentOf[i], marginBottom: 12 }}>
-                  {String(i + 1).padStart(2, "0")}
+                <div
+                  style={{
+                    ...panelStyle,
+                    borderRadius: surfaceId === "press" && !onPhoto ? 0 : 22,
+                    padding: "38px 40px",
+                    marginTop: 34,
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                    minHeight: 0
+                  }}
+                >
+                  <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.14em", color: accentOf[i], marginBottom: 12 }}>
+                    {String(i + 1).padStart(2, "0")}
+                  </div>
+                  <div style={{ fontFamily: font, fontSize: fit(36, p.title, 40), fontWeight: 800, color: heading, marginBottom: 12 }}>{p.title}</div>
+                  <p style={{ fontFamily: font, fontSize: fit(29, p.body, 200), lineHeight: 1.5, color: bodyCol, margin: 0 }}>{renderLines(p.body)}</p>
                 </div>
-                <div style={{ fontFamily: font, fontSize: fit(i === 0 ? 34 : 40, p.title, 40), fontWeight: 800, color: S.heading, marginBottom: 12 }}>{p.title}</div>
-                <p style={{ fontFamily: font, fontSize: fit(i === 0 ? 27 : 31, p.body, 200), lineHeight: 1.5, color: S.body, margin: 0 }}>{renderLines(p.body)}</p>
-                {showMontagePhoto && (
-                  <ImageSlot
-                    img={images[`m${i}`]}
-                    onPick={(u) => setImg(`m${i}`, u)}
-                    dark={onDark}
-                    label={`Add photo · frame ${i + 1}`}
-                    style={{ marginTop: 26, flex: 1, minHeight: 240, borderRadius: surfaceId === "press" ? 0 : 14 }}
-                  />
-                )}
-              </div>
 
-              {/* Every frame carries the mark: each one is a standalone slide in the
-                  carousel, and frame two used to export with no branding whatsoever. */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 30, gap: 16 }}>
-                {i === 2 ? (
-                  <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, color: S.label }}>{plain(cta)}</div>
-                ) : (
-                  <span />
-                )}
-                <Logo h={58} white={onDark} />
+                {/* Fixed height on every frame so the cards end on the same baseline
+                    across the cuts — a card bottom that jumped between frames would read
+                    as three separate designs rather than one piece. */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 30, gap: 16, height: 58 }}>
+                  {role.cta ? <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, color: labelCol }}>{plain(cta)}</div> : <span />}
+                  {role.logo ? <Logo h={58} white={darkType} /> : null}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );

@@ -6,7 +6,9 @@ import {
   previewAssetSize,
   captionFit,
   fitWarning,
-  describeAspect
+  describeAspect,
+  frameShiftPx,
+  artworkTransform
 } from "./socialPreview";
 import { FORMATS } from "./formats";
 
@@ -206,5 +208,92 @@ describe("bad input", () => {
   it("refuses a zero or negative dimension instead of returning NaN", () => {
     expect(() => fit(0, 1350, "linkedin-feed")).toThrow(/positive dimensions/);
     expect(() => fit(1080, -1, "linkedin-feed")).toThrow(/positive dimensions/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The regression that made this worth extracting.
+//
+// A deck page is its own rendered node; a framed format is one wide node the box cuts
+// a slice out of. Both used to run through the same inline translate, so a deck page
+// at index 3 was shifted three asset-widths to the left and vanished. Carousel, Square
+// and Idea Deck showed slide 1 and then five empty boxes in the feed preview.
+// ---------------------------------------------------------------------------
+describe("frameShiftPx", () => {
+  it("is zero for a deck, whose page is already the right node", () => {
+    expect(frameShiftPx(1080, undefined, 3, 0.4)).toBe(0);
+    expect(frameShiftPx(1080, 1, 5, 0.4)).toBe(0);
+  });
+
+  it("slides one asset width per frame for a framed format", () => {
+    expect(frameShiftPx(1080, 3, 0, 0.5)).toBe(0);
+    expect(frameShiftPx(1080, 3, 1, 0.5)).toBe(-540);
+    expect(frameShiftPx(1080, 3, 2, 0.5)).toBe(-1080);
+  });
+});
+
+describe("artworkTransform", () => {
+  const full = placementFit(1080, 1350, placementById("linkedin-feed"));
+
+  it("leaves every deck page at the same origin", () => {
+    // The bug in one assertion: page 4 of a Carousel must sit exactly where page 1 does.
+    const first = artworkTransform({ assetW: 1080, assetH: 1350, frameIndex: 0, boxWidth: 420, fit: full });
+    const fourth = artworkTransform({ assetW: 1080, assetH: 1350, frameIndex: 3, boxWidth: 420, fit: full });
+    expect(fourth.offsetX).toBe(0);
+    expect(fourth).toEqual(first);
+  });
+
+  it("steps a Montage frame across by exactly one frame width", () => {
+    const t = artworkTransform({ assetW: 1080, assetH: 1350, frames: 3, frameIndex: 2, boxWidth: 420, fit: full });
+    expect(t.scale).toBeCloseTo(420 / 1080, 6);
+    expect(t.offsetX).toBeCloseTo(-2 * 1080 * (420 / 1080), 6);
+  });
+
+  it("scales to the box and reports the height that box needs", () => {
+    const t = artworkTransform({ assetW: 1080, assetH: 1350, frameIndex: 0, boxWidth: 540, fit: full });
+    expect(t.scale).toBe(0.5);
+    expect(t.boxH).toBe(675);
+    expect(t.offsetY).toBe(0);
+  });
+
+  it("lifts the node when the placement crops the top", () => {
+    // A 9:16 Story into a 4:5 feed: 29.7% removed, half of it off the top.
+    const cropped = placementFit(1080, 1920, placementById("linkedin-feed"));
+    const t = artworkTransform({ assetW: 1080, assetH: 1920, frameIndex: 0, boxWidth: 420, fit: cropped });
+    expect(t.offsetY).toBeLessThan(0);
+    expect(t.offsetY).toBeCloseTo(-cropped.cropTop * 1920 * t.scale, 4);
+    expect(t.boxH).toBeCloseTo(420 / 0.8, 3); // the box is the placement's shape now
+  });
+
+  it("pulls the node left when the placement crops the sides", () => {
+    const cropped = placementFit(3240, 1350, placementById("instagram-feed"));
+    const t = artworkTransform({ assetW: 3240, assetH: 1350, frameIndex: 0, boxWidth: 400, fit: cropped });
+    expect(t.offsetX).toBeLessThan(0);
+    expect(t.offsetY).toBe(0);
+  });
+
+  it("combines both shifts for a cropped frame, never one instead of the other", () => {
+    const cropped = placementFit(1080, 1350, placementById("instagram-grid")); // 4:5 -> 1:1
+    const t = artworkTransform({ assetW: 1080, assetH: 1350, frames: 3, frameIndex: 1, boxWidth: 260, fit: cropped });
+    const frameOnly = frameShiftPx(1080, 3, 1, t.scale);
+    expect(t.offsetX).toBeCloseTo(frameOnly - cropped.cropLeft * 1080 * t.scale, 6);
+    expect(t.offsetY).toBeLessThan(0);
+  });
+
+  it("reveal mode shows the whole asset, crop ignored", () => {
+    const cropped = placementFit(1080, 1920, placementById("linkedin-feed"));
+    const t = artworkTransform({ assetW: 1080, assetH: 1920, frameIndex: 0, boxWidth: 420, fit: cropped, reveal: true });
+    expect(t.offsetY).toBe(0);
+    expect(t.boxH).toBeCloseTo(1920 * (420 / 1080), 3);
+  });
+
+  it("reveal still steps frames, so the right slice is the one being dimmed", () => {
+    const cropped = placementFit(1080, 1350, placementById("instagram-grid"));
+    const t = artworkTransform({ assetW: 1080, assetH: 1350, frames: 3, frameIndex: 2, boxWidth: 260, fit: cropped, reveal: true });
+    expect(t.offsetX).toBeCloseTo(-2 * 1080 * (260 / 1080), 6);
+  });
+
+  it("refuses a zero box rather than dividing by it", () => {
+    expect(() => artworkTransform({ assetW: 1080, assetH: 1350, frameIndex: 0, boxWidth: 0, fit: full })).toThrow(/positive dimensions/);
   });
 });

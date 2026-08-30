@@ -25,6 +25,8 @@ import {
   captionFit,
   fitWarning,
   describeAspect,
+  artworkTransform,
+  frameShiftPx,
   type Placement,
   type PlatformId
 } from "@/lib/socialPreview";
@@ -135,7 +137,7 @@ export function SocialPreview({
       // Every pixel survives; the asset just does not fill the frame.
       const boxH = width / placement.minAspect;
       const s = Math.min(width / asset.w, boxH / asset.h);
-      const shiftX = frames && frames > 1 ? -frameIndex * asset.w * s : 0;
+      const shiftX = frameShiftPx(asset.w, frames, frameIndex, s);
       return (
         <div style={{ position: "relative", width, height: boxH, overflow: "hidden", background: "#000" }}>
           <div
@@ -156,23 +158,37 @@ export function SocialPreview({
       );
     }
 
-    const shownW = asset.w * (1 - fit.cropLeft - fit.cropRight);
-    const shownH = asset.h * (1 - fit.cropTop - fit.cropBottom);
-    const s = width / shownW;
-    const boxH = shownH * s;
-    const offsetX = -((frameIndex * asset.w) + fit.cropLeft * asset.w) * s;
-    const offsetY = -(fit.cropTop * asset.h) * s;
+    // A deck page is already the right node, so it must NOT be shifted by frameIndex;
+    // a framed format must. Both used to run through one unguarded translate here,
+    // which pushed every deck page after the first clean out of its box.
+    const { scale: s, offsetX, offsetY, boxH } = artworkTransform({
+      assetW: asset.w,
+      assetH: asset.h,
+      frames,
+      frameIndex,
+      boxWidth: width,
+      fit
+    });
 
     // "Show what gets cropped": reveal the whole asset and dim everything the platform
     // discards, so you can see WHERE the loss falls rather than only that it happened.
     if (showCrop && fit.mode === "cropped") {
-      const fs = width / asset.w;
-      const fullH = asset.h * fs;
+      const reveal = artworkTransform({
+        assetW: asset.w,
+        assetH: asset.h,
+        frames,
+        frameIndex,
+        boxWidth: width,
+        fit,
+        reveal: true
+      });
+      const fs = reveal.scale;
+      const fullH = reveal.boxH;
       return (
         <div style={{ position: "relative", width, height: fullH, overflow: "hidden", background: C.off }}>
           <div
             style={{
-              transform: `translateX(${-frameIndex * asset.w * fs}px) scale(${fs})`,
+              transform: `translateX(${reveal.offsetX}px) scale(${fs})`,
               transformOrigin: "top left",
               width: baseW,
               height: baseH

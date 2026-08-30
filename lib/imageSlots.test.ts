@@ -34,11 +34,17 @@ function branch(kind: string): string {
 }
 
 describe("photoKeyFor offers no key the renderers cannot read", () => {
-  it("Montage has an ImageSlot per frame", () => {
+  it("Montage takes one wide photo across the whole strip", () => {
+    // Was one slot per frame. Three unrelated pictures fought the continuous read, so
+    // it is now a single image panned across the three swipes.
     const montage = branch("montage");
     expect(montage).toContain("ImageSlot");
-    expect(montage).toMatch(/setImg\(`m\$\{i\}`/);
-    expect(montage).toMatch(/images\[`m\$\{i\}`\]/);
+    expect(montage).toContain('setImg("montage"');
+    expect(montage).toContain("images.montage");
+    expect(montage).not.toMatch(/setImg\(`m\$\{i\}`/);
+    // Full-bleed and behind the frames, which is what makes the empty slot clickable
+    // across the whole canvas.
+    expect(montage).toContain('style={{ position: "absolute", inset: 0, background: wide ? "transparent" : undefined }}');
   });
 
   it("Studio knows Montage can take a photo", () => {
@@ -101,17 +107,40 @@ describe("Montage exports as whole frames", () => {
 
   it("the renderer builds fixed frame-width columns rather than a padded flex row", () => {
     const montage = branch("montage");
-    expect(montage).toContain("baseW / 3");
+    expect(montage).toContain("baseW / FRAMES");
     expect(montage).toContain("flexShrink: 0");
     // The old row is what pushed card three across the cut at x=2160.
     expect(montage).not.toContain("gap: 120");
     expect(montage).not.toContain("maxWidth: 900");
   });
 
-  it("every frame carries the logo, so none exports unbranded", () => {
+  it("the mark is rendered once, not on every frame", () => {
+    // The reverse of what this asserted before, and deliberately. Each frame carrying
+    // its own logo made the strip read as three separate cards; the ask was for one
+    // continuous piece, signed at the end. frameRoles decides, and lib/montage.test.ts
+    // pins it to the last frame.
     const montage = branch("montage");
-    // One Logo inside the per-frame map, not one for the whole strip.
-    expect(montage.match(/<Logo /g) || []).toHaveLength(1);
-    expect(montage.indexOf("<Logo ")).toBeGreaterThan(montage.indexOf("pts.map("));
+    expect(montage).toContain("frameRoles(i, FRAMES)");
+    expect(montage).toContain("role.logo ? <Logo");
+    expect(montage).toContain("role.cta ?");
+    expect(montage).toContain("role.eyebrow ?");
+  });
+
+  it("the headline is split across the frames, never cut mid-word", () => {
+    const montage = branch("montage");
+    expect(montage).toContain("splitAcrossFrames(cover, FRAMES)");
+    expect(montage).toContain("renderEm(phrases[i])");
+    // The whole cover on one frame is the old layout.
+    expect(montage).not.toContain("renderEm(cover)");
+  });
+
+  it("carries continuity devices that are designed to cross the cuts", () => {
+    const montage = branch("montage");
+    // Petals centred on the cuts at 1080 and 2160 — decoration, so a half of one is a
+    // shape completing on the next swipe rather than a clipped element.
+    expect(montage).toContain("left: frameW - 380");
+    expect(montage).toContain("left: frameW * 2 - 340");
+    // A ground that drifts left to right across the full width.
+    expect(montage).toContain("linear-gradient(90deg");
   });
 });

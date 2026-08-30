@@ -587,20 +587,14 @@ export default function Studio() {
   /**
    * Which image slot the URL importer writes to.
    *
-   * Montage was absent here, so neither photo control rendered for it and its renderer
-   * had no slot to render into — the format simply could not take a picture. It has
-   * three independent frames, and there is no per-frame selection in the editor, so the
-   * importer fills the first empty one; clicking a frame's own slot uploads to exactly
-   * that frame.
+   * Montage takes ONE wide picture spanning all three frames, not one per frame: the
+   * strip is posted as a continuous piece, and a single image panned across three
+   * swipes is what makes it read that way. Three unrelated pictures fought it.
    */
-  const montageTarget = (): number => {
-    for (let i = 0; i < 3; i++) if (!images[`m${i}`]) return i;
-    return 0; // all three taken — replace the first
-  };
   const photoKeyFor = (): string | null => {
     if (fmt.single === "story") return "story";
     if (fmt.single === "article") return "article";
-    if (fmt.single === "montage") return `m${montageTarget()}`;
+    if (fmt.single === "montage") return "montage";
     if (fmt.deck && !fmt.idea && cur.kind === "cover") return "cover";
     if (fmt.deck && !fmt.idea && cur.kind === "content") return `s${current - 1}`;
     return null;
@@ -1687,7 +1681,7 @@ export default function Studio() {
         </div>
         {urlOpen && photoKeyFor() && (
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexShrink: 0, width: "min(560px, 92%)" }}>
-            <input value={urlVal} onChange={(e) => setUrlVal(e.target.value)} placeholder={fmt.single === "montage" ? `Paste an image URL — lands on frame ${montageTarget() + 1} of 3` : "Paste an image URL (Unsplash images import cleanly) — lands on this slide's photo slot"} style={{ flex: 1, fontFamily: font, fontSize: 12.5, color: C.ink, background: C.white, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 12px", outline: "none" }} />
+            <input value={urlVal} onChange={(e) => setUrlVal(e.target.value)} placeholder={fmt.single === "montage" ? "Paste an image URL — one wide photo across all three frames" : "Paste an image URL (Unsplash images import cleanly) — lands on this slide's photo slot"} style={{ flex: 1, fontFamily: font, fontSize: 12.5, color: C.ink, background: C.white, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 12px", outline: "none" }} />
             <button onClick={importImageUrl} disabled={urlBusy || !urlVal.trim()} style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "0 16px", borderRadius: 8, cursor: urlBusy || !urlVal.trim() ? "default" : "pointer", border: "none", color: "#fff", background: C.teal, opacity: urlBusy || !urlVal.trim() ? 0.55 : 1 }}>
               {urlBusy ? "…" : "Import"}
             </button>
