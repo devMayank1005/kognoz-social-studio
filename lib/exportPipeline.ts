@@ -11,6 +11,7 @@
 
 import { buildPdfFromJpegs } from "./pdfBuilder";
 import { getEmbeddableFontFaceCssSafe } from "./exportFonts";
+import { frameWidth } from "./slideIndex";
 
 export async function buildSlideSvg(elId: string, baseW: number, baseH: number, fontFaceCss: string): Promise<string | null> {
   const node = document.getElementById(elId);
@@ -150,6 +151,40 @@ export function saveBlobAs(blob: Blob, name: string): void {
   }, 1500);
 }
 
+/**
+ * Crop a region out of an already-rasterised slide image.
+ *
+ * The 3-argument drawImage draws at the image's intrinsic size and lets the small
+ * canvas clip it, which is what makes this a crop. slideCanvas() uses the 5-argument
+ * scaling form instead and therefore cannot crop — that is the whole reason the
+ * frame exports cannot go through it.
+ *
+ * White-filled first: JPEG has no alpha, so transparent pixels would come out black.
+ */
+export function cropFrame(img: HTMLImageElement, w: number, h: number, offsetX: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, offsetX, 0);
+  return canvas;
+}
+
+/** Canvas → raw JPEG bytes, the form buildPdfFromJpegs embeds (/Filter /DCTDecode). */
+export function canvasToJpegBytes(canvas: HTMLCanvasElement, quality = 0.92): Uint8Array {
+  const dataUrl = canvas.toDataURL("image/jpeg", quality);
+  const bin = atob(dataUrl.split(",")[1]);
+  const bytes = new Uint8Array(bin.length);
+  for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+  return bytes;
+}
+
+function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise<Blob>((res, rej) => canvas.toBlob((bl) => (bl ? res(bl) : rej(new Error("empty blob"))), "image/png"));
+}
+
 // Deck → PDF (primary export, PRD §12). elIds must be in deck order,
 // e.g. ["exp-0", "exp-1", ...].
 export async function exportPdf(
@@ -169,15 +204,50 @@ export async function exportPdf(
       missed.push(i + 1);
       continue;
     }
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-    const bin = atob(dataUrl.split(",")[1]);
-    const bytes = new Uint8Array(bin.length);
-    for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
-    jpegs.push(bytes);
+    jpegs.push(canvasToJpegBytes(canvas));
   }
   if (!jpegs.length) throw new Error("no slides rendered");
   if (missed.length) throw new Error(`slides ${missed.join(", ")} could not be rendered`);
   saveBlobAs(buildPdfFromJpegs(jpegs, baseW, baseH), `${filenameBase}.pdf`);
+}
+
+/**
+ * A wide framed canvas (Montage) → a multi-page PDF, one page per frame.
+ *
+ * This is the file LinkedIn document posts upload directly. exportPdf cannot do it:
+ * it is one-element-per-page, and Montage is a SINGLE element that has to be sliced.
+ *
+ * Two things matter here:
+ *
+ *  1. The wide canvas is rasterised ONCE and cropped N times. Going through
+ *     exportPdf would rebuild the SVG, re-inline the fonts and re-decode the image
+ *     for every page — the expensive part, repeated for no reason.
+ *
+ *  2. buildPdfFromJpegs asserts the page geometry from its arguments and never reads
+ *     it back out of the JPEG bytes, so it must be handed the FRAME width, not the
+ *     canvas width. Passing baseW here produces a PDF that is structurally valid,
+ *     opens without complaint, and is completely garbled. lib/pdfBuilder.test.ts
+ *     pins the resulting /MediaBox for exactly this reason.
+ */
+export async function exportFramesPdf(
+  elId: string,
+  baseW: number,
+  baseH: number,
+  frames: number,
+  filenameBase = "kognoz-montage",
+  onProgress?: (frameN: number, total: number) => void
+): Promise<void> {
+  if (!frames || frames < 1) throw new Error("exportFramesPdf needs a frame count");
+  const loaded = await loadSlideImage(elId, baseW, baseH);
+  if (!loaded) throw new Error(`could not render ${elId}`);
+
+  const fw = frameWidth(baseW, frames);
+  const jpegs: Uint8Array[] = [];
+  for (let k = 0; k < frames; k++) {
+    onProgress?.(k + 1, frames);
+    jpegs.push(canvasToJpegBytes(cropFrame(loaded.img, fw, baseH, -k * fw)));
+  }
+  saveBlobAs(buildPdfFromJpegs(jpegs, fw, baseH), `${filenameBase}.pdf`);
 }
 
 export async function exportPanorama(elId: string, baseW: number, baseH: number, filenameBase = "kognoz-montage-panorama"): Promise<void> {
@@ -225,34 +295,20 @@ export interface ExportPngOpts {
 
 export async function exportPNG(opts: ExportPngOpts): Promise<void> {
   const { elId, baseW, baseH, frames, filenameBase, onFrameSaved } = opts;
-  const rasterize = async (img: HTMLImageElement, w: number, h: number, offsetX: number): Promise<Blob> => {
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, offsetX, 0);
-    return await new Promise<Blob>((res, rej) => canvas.toBlob((bl) => (bl ? res(bl) : rej(new Error("empty blob"))), "image/png"));
-  };
+  // One rasterisation, N crops. loadSlideImage rebuilds the SVG, inlines every font
+  // and decodes the result, so it stays outside the loop.
+  const loaded = await loadSlideImage(elId, baseW, baseH);
+  if (!loaded) throw new Error(`could not render ${elId}`);
 
-  let loaded: { img: HTMLImageElement; url: string | null } | null = null;
-  try {
-    loaded = await loadSlideImage(elId, baseW, baseH);
-    if (!loaded) return;
-    if (frames) {
-      const fw = baseW / frames;
-      for (let k = 0; k < frames; k++) {
-        const blob = await rasterize(loaded.img, fw, baseH, -k * fw);
-        saveBlobAs(blob, `${filenameBase}-frame-${k + 1}.png`);
-        onFrameSaved?.(k);
-        await new Promise((r) => setTimeout(r, 600));
-      }
-    } else {
-      const blob = await rasterize(loaded.img, baseW, baseH, 0);
-      saveBlobAs(blob, `${filenameBase}.png`);
+  if (frames) {
+    const fw = frameWidth(baseW, frames);
+    for (let k = 0; k < frames; k++) {
+      saveBlobAs(await canvasToPngBlob(cropFrame(loaded.img, fw, baseH, -k * fw)), `${filenameBase}-frame-${k + 1}.png`);
+      onFrameSaved?.(k);
+      // Chrome gates rapid programmatic downloads; the gap keeps all N arriving.
+      await new Promise((r) => setTimeout(r, 600));
     }
-  } catch (e) {
-    throw e;
+    return;
   }
+  saveBlobAs(await canvasToPngBlob(cropFrame(loaded.img, baseW, baseH, 0)), `${filenameBase}.png`);
 }

@@ -39,7 +39,8 @@ import {
 } from "@/lib/promptBuilders";
 import { callClaudeJSON, callClaudeText, FAST_MODEL } from "@/lib/claudeClient";
 import { storeGet, storeSet, storePeek } from "@/lib/storeClient";
-import { exportPdf, exportPanorama, exportStrip, exportPNG, saveBlobAs } from "@/lib/exportPipeline";
+import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG, saveBlobAs } from "@/lib/exportPipeline";
+import { SocialPreview, type PreviewPage } from "@/components/SocialPreview";
 import { Slide, type SlideDesign, type SlideKind } from "./Slide";
 import { Logo } from "./Logo";
 
@@ -157,6 +158,11 @@ export default function Studio() {
   // interleaved run writing the same filenames.
   const [exportBusy, setExportBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  // Seeded from the cover, since that is the hook, and overwritten by the calendar
+  // item's own caption when we arrived from one. Free text after that.
+  const [previewCaption, setPreviewCaption] = useState("");
+  const captionTouched = useRef(false);
   const [urlOpen, setUrlOpen] = useState(false);
   const [urlVal, setUrlVal] = useState("");
   const [urlBusy, setUrlBusy] = useState(false);
@@ -339,6 +345,13 @@ export default function Studio() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // The caption follows the cover until the user edits it, so opening the preview on
+  // a fresh deck shows something real rather than an empty box.
+  useEffect(() => {
+    // The cover carries *emphasis* markers for the renderer; a caption is plain text.
+    if (!captionTouched.current) setPreviewCaption(String(cover || "").replace(/\*/g, ""));
+  }, [cover]);
 
   async function markDrafted(itemN: number | string) {
     // Calendar Create-> sets the item to Draft on successful generation
@@ -633,6 +646,15 @@ export default function Studio() {
 
   // -------------------- export handlers --------------------
   const elIds = deck.map((_, i) => `exp-${i}`);
+  // The same per-page bundle the hidden export copies get, so the feed preview shows
+  // the identical artwork rather than a second interpretation of it.
+  const previewPages: PreviewPage[] = deck.map((d, i) => ({
+    kind: d.kind,
+    data: d as CoercedSlide,
+    idx: d.kind === "content" ? i : 0,
+    scale: scales[i] || 1,
+    photoOn: !!imgOn[i]
+  }));
   const filenameBase = (i: number) => `kognoz-${format.toLowerCase().replace(/\s+/g, "-")}-${String(i + 1).padStart(2, "0")}`;
 
   /** Export one slide. Returns the failure text, or null on success. */
@@ -702,6 +724,40 @@ export default function Studio() {
       setPdfBusy(0);
     }
   }
+  /**
+   * Montage's LinkedIn-ready export: the 3-page PDF for a document post AND the three
+   * numbered PNGs for a native image carousel, from one click.
+   *
+   * Montage is the only single format that is genuinely a multi-page document, but the
+   * deck PDF button is gated on `fmt.deck`, so it was the one format that could not
+   * produce the file LinkedIn uploads directly.
+   *
+   * The PDF is written first: it is the artefact most likely to be wanted, so if the
+   * run is interrupted the useful file is already on disk.
+   */
+  async function handleExportLinkedIn() {
+    if (exportBusy || pdfBusy) return;
+    const frames = fmt.frames;
+    if (!frames) return;
+    setExportBusy(true);
+    setError("");
+    const base = `kognoz-${format.toLowerCase().replace(/\s+/g, "-")}`;
+    try {
+      await exportFramesPdf("exp-0", baseW, baseH, frames, `${base}-linkedin`, (k) => setPdfBusy(k));
+      setPdfBusy(0);
+      await exportPNG({ elId: "exp-0", baseW, baseH, frames, filenameBase: base });
+      saveStyleExample();
+    } catch (e) {
+      setError(
+        `LinkedIn export failed (${e instanceof Error ? e.name + ": " + e.message : e}). ` +
+          `"Download ${frames} frames" still works, and a screenshot of the preview always does.`
+      );
+    } finally {
+      setPdfBusy(0);
+      setExportBusy(false);
+    }
+  }
+
   async function handleExportPanorama() {
     if (exportBusy) return;
     setExportBusy(true);
@@ -804,6 +860,25 @@ export default function Studio() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- latched; runs once on the query params present at mount
   }, [searchParams]);
+
+  // Arrived from a calendar row: that row already holds the caption this asset ships
+  // with, which is the text whose truncation actually matters.
+  useEffect(() => {
+    if (primedItem == null || captionTouched.current) return;
+    let live = true;
+    (async () => {
+      const { value: plan } = await storeGet<{ items: { id?: string; n?: number; content?: string }[] }>("kognoz-calendar");
+      if (!live || !plan || !Array.isArray(plan.items)) return;
+      const hit = plan.items.find(
+        (it) => it.id === String(primedItem) || (typeof it.n === "number" && it.n === Number(primedItem))
+      );
+      if (hit?.content && !captionTouched.current) setPreviewCaption(hit.content);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [primedItem]);
+
 
   // -------------------- style helpers (ported verbatim) --------------------
   const label: React.CSSProperties = { fontFamily: font, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: C.inkMute, marginBottom: 8, display: "block" };
@@ -1650,10 +1725,38 @@ export default function Studio() {
             </button>
           )}
           {fmt.frames && (
+            <button
+              onClick={handleExportLinkedIn}
+              disabled={exportBusy || !!pdfBusy}
+              title={`A ${fmt.frames}-page PDF for a LinkedIn document post, plus the ${fmt.frames} frames as PNGs for an image carousel`}
+              style={{
+                fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8,
+                cursor: exportBusy || pdfBusy ? "default" : "pointer", border: "none", color: "#fff",
+                background: GRAD, opacity: exportBusy || pdfBusy ? 0.7 : 1
+              }}
+            >
+              {pdfBusy
+                ? `Building PDF · frame ${pdfBusy}/${fmt.frames}…`
+                : exportBusy
+                ? "Saving frames…"
+                : `⬇ LinkedIn-ready · PDF + ${fmt.frames} PNGs`}
+            </button>
+          )}
+          {fmt.frames && (
             <button onClick={handleExportPanorama} disabled={exportBusy} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy ? "default" : "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent", opacity: exportBusy ? 0.6 : 1 }}>
               🖼 Panorama · one image
             </button>
           )}
+          <button
+            onClick={() => setPreviewOpen(true)}
+            title="See this in a LinkedIn, Instagram or X feed before you post it"
+            style={{
+              fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8,
+              cursor: "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent"
+            }}
+          >
+            👁 Preview in feed
+          </button>
           {deck.length > 1 && (
             <button onClick={handleExportAll} disabled={exportBusy} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy ? "default" : "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent", opacity: exportBusy ? 0.6 : 1 }}>
               {exportBusy ? "Downloading…" : `Download all (${exportFileCount(deck.length, fmt.frames)})`}
@@ -1661,9 +1764,41 @@ export default function Studio() {
           )}
         </div>
         <div style={{ fontFamily: font, fontSize: 11, color: C.inkMute, marginTop: 12, maxWidth: 380, textAlign: "center", lineHeight: 1.5 }}>
-          PNGs export at full size, with the Fraunces/Open Sans font files embedded so they render correctly outside the browser. A Design set holds ONE layout across the whole deck. &quot;Next look&quot; cycles 30 uniform looks (6 sets × 5 accent tones); pick a set or accent directly in Design elements to pin it. Photo slots appear on Carousel, Square, Article, Story and Montage — click “Add photo”, then click the slot to upload or use “Image URL”. Montage slices into carousel frames (dashed lines show the cuts). &quot;Deck PDF&quot; is the file LinkedIn document posts upload directly, one slide per page. &quot;Review strip&quot; is a half-size single image for quick sharing.
+          PNGs export at full size, with the Fraunces/Open Sans font files embedded so they render correctly outside the browser. A Design set holds ONE layout across the whole deck. &quot;Next look&quot; cycles 30 uniform looks (6 sets × 5 accent tones); pick a set or accent directly in Design elements to pin it. Photo slots appear on Carousel, Square, Article, Story and Montage — click “Add photo”, then click the slot to upload or use “Image URL”. Montage slices into carousel frames (dashed lines show the cuts). &quot;Deck PDF&quot; is the file LinkedIn document posts upload directly, one slide per page; on Montage, &quot;LinkedIn-ready&quot; does the same with one frame per page and hands you the PNGs too. &quot;Review strip&quot; is a half-size single image for quick sharing.
         </div>
       </div>
+
+      <SocialPreview
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        formatLabel={format}
+        baseW={baseW}
+        baseH={baseH}
+        frames={fmt.frames}
+        pages={previewPages}
+        shared={{
+          accent,
+          eyebrow,
+          cta,
+          baseW,
+          baseH,
+          total,
+          cover,
+          slides,
+          seed,
+          images,
+          setImg,
+          design,
+          ideaMode: !!fmt.idea
+        }}
+        caption={previewCaption}
+        onCaptionChange={(v) => {
+          captionTouched.current = true;
+          setPreviewCaption(v);
+        }}
+        authorName={session?.user?.name}
+        authorEmail={session?.user?.email}
+      />
 
       {/* hidden full-resolution renders used for export */}
       <div style={{ position: "absolute", left: -99999, top: 0, pointerEvents: "none" }} aria-hidden>
