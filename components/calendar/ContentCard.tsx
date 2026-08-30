@@ -1,5 +1,7 @@
 "use client";
 
+import { buildStudioHref } from "./calendarUtils";
+
 import React from "react";
 import { C, FONT } from "@/lib/tokens";
 import { STUDIO_FORMATS } from "@/lib/formats";
@@ -31,17 +33,6 @@ export function ContentCard({ item, onEdit, onStatusChange, compact = false }: C
   const pillarCol = PILLAR_COLORS[item.pillar] || C.blue;
   const author = getAuthorInfo(item.authorName, item.authorEmail || item.platform);
 
-  function createStudioHref(): string {
-    const p = new URLSearchParams({
-      topic: item.topic || item.title,
-      format: item.contentType,
-      pillar: item.pillar,
-      n: String(item.n || item.id)
-    });
-    if (item.set) p.set("set", item.set);
-    if (item.style) p.set("style", item.style);
-    return `/?${p.toString()}`;
-  }
 
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData("text/plain", item.id);
@@ -190,7 +181,7 @@ export function ContentCard({ item, onEdit, onStatusChange, compact = false }: C
 
           {isStudioFmt && (
             <a
-              href={createStudioHref()}
+              href={buildStudioHref(item)}
               onClick={(e) => e.stopPropagation()}
               style={{
                 fontSize: 10.5,

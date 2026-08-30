@@ -52,8 +52,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(data, { headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=300" } });
   } catch (e) {
-    console.warn(`Local store GET fallback for ${key}:`, e);
-    return NextResponse.json({ value: null, version: 0 }, { headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=300" } });
+    // Reporting `{ value: null }` here told the client the key was EMPTY when what
+    // we actually mean is that we could not tell. Callers then render a blank or
+    // seeded state as if it were real, and the next save writes that over live data.
+    // A 5xx makes storeGet return stale:true, which is the honest answer.
+    console.warn(`Store GET failed for ${key}:`, e);
+    return NextResponse.json({ error: "store unreachable" }, { status: 503 });
   }
 }
 
@@ -156,9 +160,9 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ ok: true, version: updated.version });
   } catch (e) {
-    console.warn(`Local store PUT fallback for ${key}:`, e);
-    return NextResponse.json({ ok: true });
+    // Never answer `ok` for a write that threw. The client treats ok as "this is
+    // safely on the server" and stops warning the user; it isn't and it wasn't.
+    console.warn(`Store PUT failed for ${key}:`, e);
+    return NextResponse.json({ error: "store unreachable" }, { status: 503 });
   }
-
-  return NextResponse.json({ ok: true });
 }

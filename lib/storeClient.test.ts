@@ -138,3 +138,63 @@ describe("the scenario this exists to prevent", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// A write must never go out without a version the server actually gave us.
+//
+// The server treats a PUT with no X-Store-Version as an unconditional upsert. Because
+// a failed read used to return without recording a version, one dropped GET switched
+// optimistic locking off for the whole session — every later save blindly overwrote
+// whatever was on the server, which is exactly what locking exists to prevent.
+// ---------------------------------------------------------------------------
+describe("a failed read must not license a blind write", () => {
+  it("sends no PUT at all when the version cannot be established", async () => {
+    mockServer([() => ({ status: 503, body: { error: "store unreachable" } })]);
+    const res = await storeSet("kognoz-calendar", { items: ["mine"] });
+
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.reason).toBe("offline");
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+  });
+
+  it("keeps the value locally so the user's work is not thrown away", async () => {
+    mockServer([() => ({ status: 503, body: {} })]);
+    await storeSet("kognoz-calendar", { items: ["mine"] });
+    expect(JSON.parse(localStorage.getItem("kognoz-calendar") as string)).toEqual({ items: ["mine"] });
+  });
+
+  it("reads a version first when it has none, then writes conditionally", async () => {
+    mockServer([okRead({ items: [] }, 7), okWrite(8)]);
+    const res = await storeSet("kognoz-calendar", { items: ["new"] });
+
+    expect(res.ok).toBe(true);
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts).toHaveLength(1);
+    expect(puts[0].version).toBe("7"); // the version the probe read, not a guess
+    expect(cachedVersion("kognoz-calendar")).toBe(8);
+  });
+
+  it("the probe does not clobber the pending value in the local cache", async () => {
+    mockServer([okRead({ items: ["server"] }, 3), okWrite(4)]);
+    await storeSet("kognoz-calendar", { items: ["pending"] });
+    expect(JSON.parse(localStorage.getItem("kognoz-calendar") as string)).toEqual({ items: ["pending"] });
+  });
+
+  it("every write carries a version once one is known", async () => {
+    mockServer([okRead({ a: 1 }, 2), okWrite(3), okWrite(4)]);
+    await storeGet("kognoz-design");
+    await storeSet("kognoz-design", { a: 2 });
+    await storeSet("kognoz-design", { a: 3 });
+
+    const puts = calls.filter((c) => c.method === "PUT");
+    expect(puts.map((p) => p.version)).toEqual(["2", "3"]);
+    expect(puts.every((p) => p.version !== null)).toBe(true);
+  });
+
+  it("a stale read leaves no version behind for a later write to reuse", async () => {
+    mockServer([() => ({ status: 503, body: {} })]);
+    const read = await storeGet("kognoz-calendar");
+    expect(read.stale).toBe(true);
+    expect(cachedVersion("kognoz-calendar")).toBeNull();
+  });
+});

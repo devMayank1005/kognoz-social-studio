@@ -156,13 +156,19 @@ export async function exportPdf(
   elIds: string[],
   baseW: number,
   baseH: number,
-  onProgress?: (slideN: number, total: number) => void
+  onProgress?: (slideN: number, total: number) => void,
+  filenameBase = "kognoz-deck"
 ): Promise<void> {
   const jpegs: Uint8Array[] = [];
+  const missed: number[] = [];
   for (let i = 0; i < elIds.length; i++) {
     onProgress?.(i + 1, elIds.length);
     const canvas = await slideCanvas(elIds[i], baseW, baseH, 1);
-    if (!canvas) continue;
+    if (!canvas) {
+      // Skipping silently produced a short PDF that looked complete.
+      missed.push(i + 1);
+      continue;
+    }
     const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
     const bin = atob(dataUrl.split(",")[1]);
     const bytes = new Uint8Array(bin.length);
@@ -170,20 +176,22 @@ export async function exportPdf(
     jpegs.push(bytes);
   }
   if (!jpegs.length) throw new Error("no slides rendered");
-  saveBlobAs(buildPdfFromJpegs(jpegs, baseW, baseH), "kognoz-deck.pdf");
+  if (missed.length) throw new Error(`slides ${missed.join(", ")} could not be rendered`);
+  saveBlobAs(buildPdfFromJpegs(jpegs, baseW, baseH), `${filenameBase}.pdf`);
 }
 
-export async function exportPanorama(elId: string, baseW: number, baseH: number): Promise<void> {
+export async function exportPanorama(elId: string, baseW: number, baseH: number, filenameBase = "kognoz-montage-panorama"): Promise<void> {
   const canvas = await slideCanvas(elId, baseW, baseH, 1);
-  if (!canvas) return;
+  // Returning quietly meant the button did nothing at all — no file, no message.
+  if (!canvas) throw new Error(`could not render ${elId}`);
   const blob = await new Promise<Blob>((res, rej) => canvas.toBlob((bl) => (bl ? res(bl) : rej(new Error("empty blob"))), "image/png"));
-  saveBlobAs(blob, "kognoz-montage-panorama.png");
+  saveBlobAs(blob, `${filenameBase}.png`);
 }
 
 // The whole deck as one tall image: review it, share it on WhatsApp, or
 // archive the asset in a single file. Half-scale — keeps the tall canvas
 // inside mobile canvas-memory limits (PRD §12).
-export async function exportStrip(elIds: string[], baseW: number, baseH: number): Promise<void> {
+export async function exportStrip(elIds: string[], baseW: number, baseH: number, filenameBase = "kognoz-deck-full"): Promise<void> {
   const SCL = 0.5;
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(baseW * SCL);
@@ -191,13 +199,19 @@ export async function exportStrip(elIds: string[], baseW: number, baseH: number)
   const ctx = canvas.getContext("2d")!;
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const missed: number[] = [];
   for (let i = 0; i < elIds.length; i++) {
     const sc = await slideCanvas(elIds[i], baseW, baseH, SCL);
-    if (!sc) continue;
+    if (!sc) {
+      // A skipped slide left a white band, which reads as a design choice.
+      missed.push(i + 1);
+      continue;
+    }
     ctx.drawImage(sc, 0, i * Math.round(baseH * SCL));
   }
+  if (missed.length) throw new Error(`slides ${missed.join(", ")} could not be rendered`);
   const blob = await new Promise<Blob>((res, rej) => canvas.toBlob((bl) => (bl ? res(bl) : rej(new Error("empty blob"))), "image/png"));
-  saveBlobAs(blob, "kognoz-deck-full.png");
+  saveBlobAs(blob, `${filenameBase}.png`);
 }
 
 export interface ExportPngOpts {

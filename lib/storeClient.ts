@@ -81,16 +81,36 @@ export function storePeek<T>(key: string): T | null {
  * Conditional write. Sends the version this value was based on; the server rejects
  * the write with 409 if anyone else has saved since, and returns their version so
  * the caller can reconcile rather than overwrite.
+ *
+ * A write only goes out once we hold a version that actually came from the server.
+ * The server treats a PUT with no `X-Store-Version` as unconditional, so sending one
+ * after a failed read overwrites whatever is there — which is how a single dropped
+ * GET used to switch optimistic locking off for the rest of the session, and how a
+ * tab showing the seed template could replace a real calendar with it.
+ *
+ * When no version is held we read one first. If that read also fails we report
+ * `offline` and send nothing: the local cache keeps the value, and the server keeps
+ * the copy we were never able to compare against.
  */
 export async function storeSet<T = unknown>(key: string, value: unknown): Promise<StoreWrite<T>> {
+  if (cachedVersion(key) === null) {
+    // storeGet caches the server's copy locally, so probe BEFORE recording `value`
+    // or the pending write is erased by the value we were about to replace.
+    const probe = await storeGet<T>(key);
+    if (probe.stale) {
+      writeLocal(key, value);
+      return { ok: false, reason: "offline" };
+    }
+  }
   writeLocal(key, value);
   const expected = cachedVersion(key);
+  if (expected === null) return { ok: false, reason: "offline" };
   try {
     const res = await fetch(`/api/store?key=${encodeURIComponent(key)}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        ...(expected !== null ? { "X-Store-Version": String(expected) } : {})
+        "X-Store-Version": String(expected)
       },
       body: JSON.stringify(value)
     });
@@ -110,7 +130,7 @@ export async function storeSet<T = unknown>(key: string, value: unknown): Promis
     }
     if (!res.ok) return { ok: false, reason: "offline" };
 
-    const next = typeof data?.version === "number" ? data.version : (expected ?? 0) + 1;
+    const next = typeof data?.version === "number" ? data.version : expected + 1;
     versions.set(key, next);
     return { ok: true, version: next };
   } catch {

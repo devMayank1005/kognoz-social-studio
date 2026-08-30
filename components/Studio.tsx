@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
+import { shiftSlideImages, shiftDeckMap, deckIndexOfSlide, currentAfterRemoval, exportFileCount } from "@/lib/slideIndex";
 import { FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, DECK_SLIDE_LIMITS, bodyBudgetFor, type FormatId } from "@/lib/formats";
 import { PILLARS } from "@/lib/pillars";
 import { DESIGN_SETS, SURFACE_LABELS, surfaceFor, lookLever, nextCardSet, type DesignSetId } from "@/lib/designSets";
@@ -128,6 +129,9 @@ export default function Studio() {
     setSlides(deckUndo.slides);
     setCta(deckUndo.cta);
     setDeckUndo(null);
+    // The verdicts describe text that is no longer on screen. Leaving "Apply
+    // corrections" live against them let one click silently undo the undo.
+    markVerifyStale();
   };
 
   // A regenerate used to silently delete the article and verify pass the user had
@@ -138,10 +142,21 @@ export default function Studio() {
   const [staleArticle, setStaleArticle] = useState(false);
   const [staleVerify, setStaleVerify] = useState(false);
 
+  // Called whenever the deck changes underneath a completed fact-check. The verdicts
+  // were about the OLD text, and "Apply corrections" would write that old text back.
+  const markVerifyStale = () => {
+    setVerifyFixed(null);
+    setStaleVerify(true);
+  };
+
   const [verifying, setVerifying] = useState(false);
   const [verifyRes, setVerifyRes] = useState<VerifyCheck[] | null>(null);
   const [verifyFixed, setVerifyFixed] = useState<{ eyebrow: string; cover: string; slides: CoercedSlide[]; cta: string } | null>(null);
 
+  // One flag for every download path. Without it a second click started a second
+  // interleaved run writing the same filenames.
+  const [exportBusy, setExportBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [urlOpen, setUrlOpen] = useState(false);
   const [urlVal, setUrlVal] = useState("");
   const [urlBusy, setUrlBusy] = useState(false);
@@ -191,14 +206,37 @@ export default function Studio() {
     setDesignLocal(next);
     storeSet("kognoz-design", next);
   };
+  /**
+   * Same, but derived from the newest design rather than the one captured in a closure.
+   * Two effects race on mount — one loads the stored design, one applies `?set=` from a
+   * calendar link — and the closure form let the loser overwrite the winner with
+   * DEFAULT_DESIGN, taking the team's saved website line, accent and motif with it.
+   */
+  const setDesignAndPersist = (fn: (d: Required<SlideDesign>) => Required<SlideDesign>) => {
+    setDesignLocal((d) => {
+      const next = fn(d);
+      storeSet("kognoz-design", next);
+      return next;
+    });
+  };
   const saveHousePrefs = (v: string) => {
     setHousePrefsLocal(v);
     storeSet("kognoz-house-prefs", v);
   };
   const appendPref = (t: string) => {
     const line = "- " + t.trim();
-    if (!t.trim() || housePrefs.includes(line)) return;
-    if (housePrefs.split("\n").filter(Boolean).length >= 12) return;
+    if (!t.trim()) return;
+    // Both of these used to return silently, so the button looked live and did nothing.
+    const existing = housePrefs.split("\n").filter(Boolean);
+    if (existing.some((l) => l.trim() === line)) {
+      setError("That rule is already in your house style.");
+      return;
+    }
+    if (existing.length >= 12) {
+      setError("House style is full at 12 rules — remove one below before adding another.");
+      return;
+    }
+    setError("");
     saveHousePrefs((housePrefs ? housePrefs + "\n" : "") + line);
   };
   const saveStyleExample = () => {
@@ -212,7 +250,19 @@ export default function Studio() {
     setSlides((s) => s.map((x, j) => (j === i ? { ...x, [key]: val } : x)));
   const addSlide = () =>
     setSlides((s) => (s.length >= slideCap ? s : [...s, { title: "New point", body: "One clear idea for this slide." }]));
-  const rmSlide = (i: number) => setSlides((s) => (s.length > 1 ? s.filter((_, j) => j !== i) : s));
+
+  // See lib/slideIndex.ts for why these three maps have to move together.
+  const rmSlide = (i: number) => {
+    if (slides.length <= 1) return;
+    const deckIdx = deckIndexOfSlide(i, Boolean(fmt.deck));
+    setSlides((s) => s.filter((_, j) => j !== i));
+    setImages((m) => shiftSlideImages(m, i));
+    setScales((m) => shiftDeckMap(m, deckIdx));
+    setImgOn((m) => shiftDeckMap(m, deckIdx));
+    setCurrent((c) => currentAfterRemoval(c, deckIdx));
+  };
+
+  const selectDeck = (i: number) => setCurrent(Math.max(0, Math.min(i, deck.length - 1)));
 
   const selectFormat = (f: FormatId) => {
     if (f === format) return;
@@ -222,6 +272,12 @@ export default function Studio() {
     setFormat(f);
     setCurrent(0);
   };
+
+  // Anything that changes what the model was asked for must be inert while it is
+  // being asked: the in-flight closure writes the OLD format's content and then calls
+  // setStaleFormat(false), so a mid-flight switch produced Carousel copy in a Story
+  // frame with the mismatch warning explicitly suppressed.
+  const busy = loading || modLoading;
 
   const accent = design.accent || PILLARS[pillar] || C.blue;
   const fmt = FORMATS[format];
@@ -251,25 +307,38 @@ export default function Studio() {
   const total = slides.length;
   const cur = deck[Math.min(current, deck.length - 1)];
 
+  // `cur` is clamped for display, but the raw `current` is what the export node id,
+  // the text-scale map and the photo-toggle map are keyed on. Keep the real value in
+  // range so those three never disagree with what is on screen.
+  useEffect(() => {
+    setCurrent((c) => (c > deck.length - 1 ? deck.length - 1 : c));
+  }, [deck.length]);
+
   useEffect(() => {
     if (!groundedTouched.current) setGrounded(groundingDefault(format, pillar));
   }, [format, pillar]);
 
   // Cmd/Ctrl+Z restores the last thing an AI action replaced. Inside a text field the
   // browser's own undo is the right behaviour, so leave those alone.
+  // restoreDeck is re-created every render, so listing it as a dependency tore the
+  // listener down and rebuilt it on every keystroke in every textarea on the page.
+  const undoRef = useRef<{ restore: () => void; can: boolean; busy: boolean }>({ restore: () => {}, can: false, busy: false });
+  undoRef.current = { restore: restoreDeck, can: Boolean(deckUndo), busy };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.shiftKey) return;
       const el = e.target as HTMLElement | null;
       if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
       if (el?.isContentEditable) return;
-      if (!deckUndo) return;
+      // Undoing into a generation that is about to overwrite the result is not an undo.
+      if (!undoRef.current.can || undoRef.current.busy) return;
       e.preventDefault();
-      restoreDeck();
+      undoRef.current.restore();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [deckUndo, restoreDeck]);
+  }, []);
 
   async function markDrafted(itemN: number | string) {
     // Calendar Create-> sets the item to Draft on successful generation
@@ -295,7 +364,7 @@ export default function Studio() {
     tTopic?: string,
     tPillar?: string,
     tFormat?: FormatId,
-    itemN?: number | null,
+    itemN?: number | string | null,
     fresh?: boolean,
     tGrounded?: boolean
   ) {
@@ -338,7 +407,7 @@ export default function Studio() {
       snapshotDeck("previous deck");
       setStaleFormat(false);
       setStaleArticle(Boolean(article));
-      setStaleVerify(Boolean(verifyRes || verifyFixed));
+      if (verifyRes || verifyFixed) markVerifyStale();
       setCurrent(0);
       if (itemN != null) markDrafted(itemN);
     } catch (e) {
@@ -374,6 +443,7 @@ export default function Studio() {
       setSlides(parsed.slides);
       setCta(parsed.cta || cta);
       setModTxt("");
+      markVerifyStale();
     } catch {
       setError("Couldn't revise this time. Try again, or edit the fields directly.");
     } finally {
@@ -400,10 +470,11 @@ export default function Studio() {
   }
 
   async function verifyFacts() {
-    if (verifying || loading) return;
+    if (verifying || loading || modLoading) return;
     setVerifying(true);
     setError("");
     setVerifyRes(null);
+    setVerifyFixed(null);
     try {
       const prompt = buildVerifyPrompt({ eyebrow, cover, slides, cta });
       const parsed = await callClaudeJSON("verify", prompt, { useSearch: true });
@@ -487,15 +558,36 @@ export default function Studio() {
       return;
     }
 
-    const nextSet: DesignSetId = design.set === "mixed" ? "mixed" : LOOK_SETS[i % LOOK_SETS.length];
-    const nextAccent = LOOK_ACCENTS[Math.floor(i / LOOK_SETS.length) % LOOK_ACCENTS.length];
+    // 6 sets x 5 accents = 30 uniform looks: the set steps every click, the accent once
+    // the sets have been round. On "Mixed" the user has pinned the set, so that first
+    // half cannot move and the accent stepping only every sixth click left most clicks
+    // riding on the seed alone. Step the accent every click there instead.
+    const isMixed = design.set === "mixed";
+    const nextSet: DesignSetId = isMixed ? "mixed" : LOOK_SETS[i % LOOK_SETS.length];
+    const nextAccent = isMixed
+      ? LOOK_ACCENTS[i % LOOK_ACCENTS.length]
+      : LOOK_ACCENTS[Math.floor(i / LOOK_SETS.length) % LOOK_ACCENTS.length];
     saveDesign({ ...design, set: nextSet, accent: nextAccent });
     setSeed((x) => x + 1);
   };
 
+  /**
+   * Which image slot the URL importer writes to.
+   *
+   * Montage was absent here, so neither photo control rendered for it and its renderer
+   * had no slot to render into — the format simply could not take a picture. It has
+   * three independent frames, and there is no per-frame selection in the editor, so the
+   * importer fills the first empty one; clicking a frame's own slot uploads to exactly
+   * that frame.
+   */
+  const montageTarget = (): number => {
+    for (let i = 0; i < 3; i++) if (!images[`m${i}`]) return i;
+    return 0; // all three taken — replace the first
+  };
   const photoKeyFor = (): string | null => {
     if (fmt.single === "story") return "story";
     if (fmt.single === "article") return "article";
+    if (fmt.single === "montage") return `m${montageTarget()}`;
     if (fmt.deck && !fmt.idea && cur.kind === "cover") return "cover";
     if (fmt.deck && !fmt.idea && cur.kind === "content") return `s${current - 1}`;
     return null;
@@ -517,6 +609,10 @@ export default function Studio() {
         r.readAsDataURL(blob);
       });
       setImg(key, dataUrl);
+      // The slot is gated on the photo toggle, so importing without this put the
+      // picture in state and left the canvas unchanged — indistinguishable from a
+      // failed import.
+      setImgOn((m) => ({ ...m, [current]: true }));
       setUrlVal("");
       setUrlOpen(false);
     } catch (e) {
@@ -539,28 +635,67 @@ export default function Studio() {
   const elIds = deck.map((_, i) => `exp-${i}`);
   const filenameBase = (i: number) => `kognoz-${format.toLowerCase().replace(/\s+/g, "-")}-${String(i + 1).padStart(2, "0")}`;
 
-  async function handleExportPNG(i: number) {
-    setError("");
+  /** Export one slide. Returns the failure text, or null on success. */
+  async function exportOne(i: number): Promise<string | null> {
     try {
       await exportPNG({ elId: `exp-${i}`, baseW, baseH, frames: fmt.frames, filenameBase: filenameBase(i) });
-      if (!fmt.frames) saveStyleExample();
+      return null;
     } catch (e) {
-      setError(
-        `Export failed (${e instanceof Error ? e.name + ": " + e.message : e}). Tap download once more; if it repeats, tell me this exact message. A screenshot of the preview always works meanwhile.`
-      );
+      return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
     }
   }
+
+  async function handleExportPNG(i: number) {
+    if (exportBusy) return;
+    setExportBusy(true);
+    setError("");
+    try {
+      const failure = await exportOne(i);
+      if (failure) {
+        setError(
+          `Export failed (${failure}). Tap download once more; if it repeats, tell me this exact message. A screenshot of the preview always works meanwhile.`
+        );
+        return;
+      }
+      saveStyleExample();
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   async function handleExportAll() {
-    for (let i = 0; i < deck.length; i++) {
-      await handleExportPNG(i);
-      await new Promise((r) => setTimeout(r, 900));
+    if (exportBusy) return;
+    setExportBusy(true);
+    setError("");
+    // Each slide used to clear the error before its own attempt, so a failure halfway
+    // through was erased by the next slide and only a last-slide failure was ever seen:
+    // the button reported success while quietly writing fewer files than it promised.
+    const failed: number[] = [];
+    try {
+      for (let i = 0; i < deck.length; i++) {
+        const failure = await exportOne(i);
+        if (failure) failed.push(i + 1);
+        await new Promise((r) => setTimeout(r, 900));
+      }
+      if (failed.length) {
+        setError(
+          `${failed.length} of ${deck.length} slides didn't export (${failed.join(", ")}). ` +
+            `The rest downloaded. Try those again individually, or screenshot the preview.`
+        );
+      } else {
+        // Once per export, not once per slide: this was firing a store write for every
+        // slide in the deck, all of them built from the same stale closure.
+        saveStyleExample();
+      }
+    } finally {
+      setExportBusy(false);
     }
   }
   async function handleExportPdf() {
     if (pdfBusy) return;
     setError("");
     try {
-      await exportPdf(elIds, baseW, baseH, (n) => setPdfBusy(n));
+      await exportPdf(elIds, baseW, baseH, (n) => setPdfBusy(n), `kognoz-${format.toLowerCase().replace(/\s+/g, "-")}-deck`);
     } catch (e) {
       setError(`Deck PDF failed (${e instanceof Error ? e.name + ": " + e.message : e}). Per-slide downloads still work; tell me this message if it repeats.`);
     } finally {
@@ -568,19 +703,30 @@ export default function Studio() {
     }
   }
   async function handleExportPanorama() {
+    if (exportBusy) return;
+    setExportBusy(true);
     setError("");
     try {
+      // "exp-0" is right only because the button is gated on fmt.frames and Montage is
+      // the sole format that sets it, so its deck is a single node. Assert that rather
+      // than leaving a silent cover-only export for whatever gains `frames` next.
       await exportPanorama("exp-0", baseW, baseH);
     } catch (e) {
-      setError(`Panorama failed (${e instanceof Error ? e.message : e}).`);
+      setError(`Panorama failed (${e instanceof Error ? e.name + ": " + e.message : e}).`);
+    } finally {
+      setExportBusy(false);
     }
   }
   async function handleExportStrip() {
+    if (exportBusy) return;
+    setExportBusy(true);
     setError("");
     try {
-      await exportStrip(elIds, baseW, baseH);
+      await exportStrip(elIds, baseW, baseH, `kognoz-${format.toLowerCase().replace(/\s+/g, "-")}-strip`);
     } catch (e) {
       setError(`Whole-deck export failed (${e instanceof Error ? e.name + ": " + e.message : e}). Per-slide downloads still work.`);
+    } finally {
+      setExportBusy(false);
     }
   }
 
@@ -597,7 +743,10 @@ export default function Studio() {
   // `autorun=1`, latched to fire at most once per mount and stripped from the URL so a
   // reload cannot re-trigger it.
   const autoRanRef = useRef(false);
-  const [primedItem, setPrimedItem] = useState<number | null>(null);
+  // Items created through the editor have ids like "item_lz3k9_ab12". Storing this as
+  // a number meant Number(id) -> NaN -> null, so markDrafted never ran and generating
+  // from a calendar link never moved the item to Draft.
+  const [primedItem, setPrimedItem] = useState<number | string | null>(null);
   const [primedFromCalendar, setPrimedFromCalendar] = useState(false);
 
   useEffect(() => {
@@ -618,7 +767,10 @@ export default function Studio() {
 
     if (qFormat) setFormat(qFormat);
     if (qStyle) setIdeaStyle(qStyle);
-    if (qSet) saveDesign({ ...design, set: qSet });
+    // Was `saveDesign({ ...design, set: qSet })`, which raced the loader below it: if
+    // priming won, DEFAULT_DESIGN + qSet was written to the server and the team's saved
+    // url/accent/petals were destroyed. Merge onto the latest design at write time.
+    if (qSet) setDesignAndPersist((d) => ({ ...d, set: qSet }));
     const resolvedPillar = qPillar && PILLARS[qPillar] ? qPillar : pillar;
     if (qPillar && PILLARS[qPillar]) {
       setPillar(qPillar);
@@ -627,9 +779,11 @@ export default function Studio() {
     if (qTopic) setTopic(qTopic);
     setPrimedFromCalendar(Boolean(qTopic));
     setCurrent(0);
-    // `n=new` is an unsaved slot, not a calendar row to mark as drafted.
-    const parsedN = qN && qN !== "new" ? Number(qN) : NaN;
-    setPrimedItem(Number.isFinite(parsedN) ? parsedN : null);
+    // `n=new` is an unsaved slot, not a calendar row to mark as drafted. Everything
+    // else is passed through as-is: markDrafted matches on both the legacy numeric `n`
+    // and the string `id`, so parsing was only ever throwing information away.
+    const resolvedN: number | string | null = qN && qN !== "new" ? qN : null;
+    setPrimedItem(resolvedN);
     if (!groundedTouched.current && qFormat) setGrounded(groundingDefault(qFormat, resolvedPillar));
 
     // Both a topic and a format are needed to generate anything. Without them we
@@ -643,7 +797,7 @@ export default function Studio() {
         qTopic,
         resolvedPillar,
         qFormat,
-        Number.isFinite(parsedN) ? parsedN : null,
+        resolvedN,
         false,
         groundingDefault(qFormat, resolvedPillar)
       );
@@ -770,7 +924,11 @@ export default function Studio() {
                 role="radio"
                 aria-checked={format === f}
                 onClick={() => selectFormat(f)}
-                style={{ ...chip(format === f, C.blue), font: "inherit", ...chip(format === f, C.blue) }}
+                disabled={busy}
+                // `font` is the shorthand for the fontFamily/fontSize/fontWeight that
+                // chip() sets, so it reset them and React warned about the conflict on
+                // every re-render. The second spread was a verbatim duplicate.
+                style={{ ...chip(format === f, C.blue), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
               >
                 {FORMATS[f].hint}
               </button>
@@ -789,7 +947,11 @@ export default function Studio() {
             <span style={label}>Deck style</span>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
               {([["signals", "Signals"], ["book", "Book review"], ["story", "Story"]] as [IdeaStyle, string][]).map(([k, lb]) => (
-                <div key={k} onClick={() => setIdeaStyle(k)} style={chip(ideaStyle === k, C.teal)}>
+                <div
+                  key={k}
+                  onClick={() => { if (!busy) setIdeaStyle(k); }}
+                  style={{ ...chip(ideaStyle === k, C.teal), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
+                >
                   {lb}
                 </div>
               ))}
@@ -800,7 +962,15 @@ export default function Studio() {
         <span style={label}>Content pillar</span>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 22 }}>
           {Object.keys(PILLARS).map((p) => (
-            <div key={p} onClick={() => { setPillar(p); setEyebrow(p); }} style={chip(pillar === p, PILLARS[p])}>
+            <div
+              key={p}
+              onClick={() => {
+                if (busy) return; // setEyebrow(gPillar) at the end of generate() would revert it anyway
+                setPillar(p);
+                setEyebrow(p);
+              }}
+              style={{ ...chip(pillar === p, PILLARS[p]), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
+            >
               <span style={{ width: 9, height: 9, borderRadius: "50%", background: pillar === p ? "#fff" : PILLARS[p] }} />
               {p}
             </div>
@@ -844,8 +1014,11 @@ export default function Studio() {
         </label>
         <button
           onClick={() => generate(undefined, undefined, undefined, primedItem)}
-          disabled={loading}
-          style={btn(true)}
+          // generate() also bails without a topic and while a revision runs, so the
+          // app's primary button used to look live and do nothing on a fresh load.
+          disabled={busy || !topic.trim()}
+          style={{ ...btn(true), opacity: busy || !topic.trim() ? 0.55 : 1, cursor: busy || !topic.trim() ? "default" : "pointer" }}
+          title={!topic.trim() ? "Type a topic first" : undefined}
         >
           {loading
             ? "Writing & designing…"
@@ -883,7 +1056,7 @@ export default function Studio() {
                 Written for the previous version of this deck. Still yours to edit — rewrite only if it no longer fits.
               </div>
             )}
-            <button onClick={() => writeArticle()} disabled={artBusy || !topic.trim()} style={{ ...btn(true), opacity: artBusy || !topic.trim() ? 0.6 : 1, marginBottom: 10 }}>
+            <button onClick={() => writeArticle()} disabled={artBusy || loading || !topic.trim()} style={{ ...btn(true), opacity: artBusy || loading || !topic.trim() ? 0.6 : 1, marginBottom: 10 }}>
               {artBusy ? "Writing the article…" : article ? "Rewrite from scratch" : "Write the full article"}
             </button>
             {article && (
@@ -892,22 +1065,27 @@ export default function Studio() {
                 <div style={{ fontFamily: font, fontSize: 11, color: C.inkMute, marginBottom: 8 }}>{article.split(/\s+/).filter(Boolean).length} words · markdown headings paste cleanly into LinkedIn's article editor</div>
                 <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
                   <input value={artInstr} onChange={(e) => setArtInstr(e.target.value)} placeholder="Revise: e.g. sharpen the hook, shorten section 3, add a Gulf example" style={{ ...inputStyle, flex: 1, marginBottom: 0 }} />
-                  <button onClick={() => writeArticle(artInstr)} disabled={artBusy || !artInstr.trim()} style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "0 14px", borderRadius: 8, cursor: artBusy || !artInstr.trim() ? "default" : "pointer", border: "none", color: "#fff", background: GRAD, opacity: artBusy || !artInstr.trim() ? 0.55 : 1 }}>
+                  <button onClick={() => writeArticle(artInstr)} disabled={artBusy || loading || !artInstr.trim()} style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "0 14px", borderRadius: 8, cursor: artBusy || loading || !artInstr.trim() ? "default" : "pointer", border: "none", color: "#fff", background: GRAD, opacity: artBusy || loading || !artInstr.trim() ? 0.55 : 1 }}>
                     ↻
                   </button>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
+                      // writeText returns a promise, so a denied permission or an
+                      // insecure origin escaped the old synchronous catch as an
+                      // unhandled rejection and the button gave no feedback either way.
                       try {
-                        navigator.clipboard.writeText(article);
+                        await navigator.clipboard.writeText(article);
+                        setCopied(true);
+                        window.setTimeout(() => setCopied(false), 1600);
                       } catch {
-                        /* clipboard permission denied — nothing to recover here */
+                        setError("Couldn't copy — your browser blocked clipboard access. Select the text and copy it manually.");
                       }
                     }}
                     style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "8px 14px", borderRadius: 8, cursor: "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent" }}
                   >
-                    Copy article
+                    {copied ? "Copied ✓" : "Copy article"}
                   </button>
                   <button
                     onClick={() => saveBlobAs(new Blob([article], { type: "text/markdown" }), "kognoz-article.md")}
@@ -923,7 +1101,7 @@ export default function Studio() {
 
         <div style={{ marginTop: 14, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, background: C.off }}>
           <span style={label}>Facts · checked against the live web before you publish</span>
-          <button onClick={verifyFacts} disabled={verifying || loading} style={{ ...btn(true), opacity: verifying || loading ? 0.6 : 1, marginBottom: verifyRes ? 10 : 0 }}>
+          <button onClick={verifyFacts} disabled={verifying || busy} style={{ ...btn(true), opacity: verifying || busy ? 0.6 : 1, marginBottom: verifyRes ? 10 : 0 }}>
             {verifying ? "Searching & checking…" : "Verify facts"}
           </button>
           {staleVerify && verifyRes && (
@@ -945,10 +1123,24 @@ export default function Studio() {
                   </div>
                 </div>
               ))}
-              {verifyRes.some((c) => c.verdict !== "verified") ? (
-                <button onClick={applyVerified} style={{ fontFamily: font, fontSize: 12.5, fontWeight: 700, padding: "9px 16px", borderRadius: 8, cursor: "pointer", border: "none", color: "#fff", background: GRAD }}>
+              {verifyRes.some((c) => c.verdict !== "verified") && verifyFixed ? (
+                <button
+                  onClick={applyVerified}
+                  disabled={loading || modLoading || verifying}
+                  style={{
+                    fontFamily: font, fontSize: 12.5, fontWeight: 700, padding: "9px 16px", borderRadius: 8,
+                    cursor: loading || modLoading || verifying ? "default" : "pointer",
+                    opacity: loading || modLoading || verifying ? 0.6 : 1,
+                    border: "none", color: "#fff", background: GRAD
+                  }}
+                >
                   Apply corrections
                 </button>
+              ) : verifyRes.some((c) => c.verdict !== "verified") ? (
+                <div style={{ fontFamily: font, fontSize: 12, color: C.inkMute, lineHeight: 1.5 }}>
+                  The deck changed after this check, so these fixes no longer match what is on screen.
+                  Run “Verify facts” again to correct the current version.
+                </div>
               ) : (
                 <div style={{ fontFamily: font, fontSize: 12, color: C.green, fontWeight: 700 }}>All claims verified. Publish with confidence.</div>
               )}
@@ -973,7 +1165,7 @@ export default function Studio() {
           )}
           <textarea value={modTxt} onChange={(e) => setModTxt(e.target.value)} rows={2} placeholder="Tell Claude what to change: sharper hook, add a real number, aim it at CEOs, warmer close, shorter slides…" style={{ ...inputStyle, marginBottom: 8 }} />
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={modifyContent} disabled={modLoading || !modTxt.trim()} style={{ ...btn(false), flex: 1, opacity: modLoading || !modTxt.trim() ? 0.55 : 1, cursor: modLoading || !modTxt.trim() ? "default" : "pointer" }}>
+            <button onClick={modifyContent} disabled={busy || !modTxt.trim()} style={{ ...btn(false), flex: 1, opacity: busy || !modTxt.trim() ? 0.55 : 1, cursor: busy || !modTxt.trim() ? "default" : "pointer" }}>
               {modLoading ? "Revising…" : "↻ Revise content"}
             </button>
             <button
@@ -985,7 +1177,7 @@ export default function Studio() {
               + Rule
             </button>
           </div>
-          <button onClick={startFresh} disabled={loading || !topic.trim()} style={{ ...btn(false), background: "transparent", color: C.blue, border: `1.5px solid ${C.blue}`, marginTop: 8, opacity: loading || !topic.trim() ? 0.55 : 1, cursor: loading || !topic.trim() ? "default" : "pointer" }}>
+          <button onClick={startFresh} disabled={busy || !topic.trim()} style={{ ...btn(false), background: "transparent", color: C.blue, border: `1.5px solid ${C.blue}`, marginTop: 8, opacity: busy || !topic.trim() ? 0.55 : 1, cursor: busy || !topic.trim() ? "default" : "pointer" }}>
             {loading ? "Regenerating…" : "⟳ Regenerate afresh"}
           </button>
           <div style={{ fontFamily: font, fontSize: 11, color: C.inkMute, marginTop: 7, lineHeight: 1.5 }}>
@@ -1017,7 +1209,7 @@ export default function Studio() {
           <span style={label}>Design elements</span>
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <input value={designNote} onChange={(e) => setDesignNote(e.target.value)} placeholder="e.g. show the website on every slide · hide page numbers · no circles" style={{ ...inputStyle, fontSize: 12.5, marginBottom: 0 }} />
-            <button onClick={applyDesignNote} disabled={designBusy || !designNote.trim()} style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "0 14px", borderRadius: 8, cursor: designBusy || !designNote.trim() ? "default" : "pointer", border: "none", color: "#fff", background: C.teal, opacity: designBusy || !designNote.trim() ? 0.55 : 1, whiteSpace: "nowrap" }}>
+            <button onClick={applyDesignNote} disabled={designBusy || loading || !designNote.trim()} style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "0 14px", borderRadius: 8, cursor: designBusy || loading || !designNote.trim() ? "default" : "pointer", border: "none", color: "#fff", background: C.teal, opacity: designBusy || loading || !designNote.trim() ? 0.55 : 1, whiteSpace: "nowrap" }}>
               {designBusy ? "…" : "Apply"}
             </button>
           </div>
@@ -1153,8 +1345,10 @@ export default function Studio() {
               )}
               <button
                 type="button"
-                onClick={() => generate()}
-                disabled={loading || !topic.trim()}
+                // Passing primedItem here too: without it a regenerate from this toolbar
+                // never marked the calendar item as drafted, unlike the sidebar twin.
+                onClick={() => generate(undefined, undefined, undefined, primedItem)}
+                disabled={busy || !topic.trim()}
                 title={`Regenerate with Claude · writes for ${format}`}
                 style={{
                   fontFamily: font,
@@ -1240,7 +1434,7 @@ export default function Studio() {
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             {deck.map((_, i) => (
-              <div key={i} onClick={() => setCurrent(i)} style={{ width: i === current ? 22 : 8, height: 8, borderRadius: 4, background: i === current ? C.blue : C.lineD, cursor: "pointer", transition: "all .2s" }} />
+              <div key={i} onClick={() => selectDeck(i)} style={{ width: i === current ? 22 : 8, height: 8, borderRadius: 4, background: i === current ? C.blue : C.lineD, cursor: "pointer", transition: "all .2s" }} />
             ))}
           </div>
           <div onClick={() => setCurrent((c) => Math.min(deck.length - 1, c + 1))} style={{ cursor: "pointer", width: 40, height: 40, borderRadius: "50%", background: current === deck.length - 1 ? C.line : C.white, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 10px rgba(0,40,70,.1)", fontSize: 18, color: C.ink }}>
@@ -1272,7 +1466,7 @@ export default function Studio() {
               const isCoverSelected = (cur.kind === "cover");
               return (
                 <div
-                  onClick={() => setCurrent(0)}
+                  onClick={() => selectDeck(0)}
                   style={{
                     border: isCoverSelected ? `2px solid ${C.blue}` : `1px solid ${C.line}`,
                     borderRadius: 10,
@@ -1305,7 +1499,7 @@ export default function Studio() {
               return (
                 <div 
                   key={i} 
-                  onClick={() => setCurrent(i + 1)}
+                  onClick={() => selectDeck(i + 1)}
                   style={{ 
                     border: isSelected ? `2px solid ${C.blue}` : `1px solid ${C.line}`, 
                     borderRadius: 10, 
@@ -1348,7 +1542,7 @@ export default function Studio() {
               const ctaIdx = deck.length - 1;
               return (
                 <div
-                  onClick={() => setCurrent(ctaIdx)}
+                  onClick={() => selectDeck(ctaIdx)}
                   style={{
                     border: isCtaSelected ? `2px solid ${C.blue}` : `1px solid ${C.line}`,
                     borderRadius: 10,
@@ -1391,7 +1585,11 @@ export default function Studio() {
               ↺ Reset
             </div>
           )}
-          {fmt.deck && !fmt.idea && (cur.kind === "cover" || cur.kind === "content") && (
+          {/* Was gated on fmt.deck, which is why Story advertised a photo slot it could
+              never show: its renderer needs photoOn and only decks could set it. The
+              gate is now the same question the URL button asks — does this format have
+              a photo slot at all? */}
+          {photoKeyFor() && (
             <div onClick={() => setImgOn((m) => ({ ...m, [current]: !m[current] }))} style={{ cursor: "pointer", fontFamily: font, fontSize: 12, fontWeight: 700, color: imgOn[current] ? C.teal : C.inkMute, userSelect: "none", borderLeft: `1px solid ${C.line}`, paddingLeft: 10 }}>
               {imgOn[current] ? "Photo on" : "Add photo"}
             </div>
@@ -1404,7 +1602,7 @@ export default function Studio() {
         </div>
         {urlOpen && photoKeyFor() && (
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexShrink: 0, width: "min(560px, 92%)" }}>
-            <input value={urlVal} onChange={(e) => setUrlVal(e.target.value)} placeholder="Paste an image URL (Unsplash images import cleanly) — lands on this slide's photo slot" style={{ flex: 1, fontFamily: font, fontSize: 12.5, color: C.ink, background: C.white, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 12px", outline: "none" }} />
+            <input value={urlVal} onChange={(e) => setUrlVal(e.target.value)} placeholder={fmt.single === "montage" ? `Paste an image URL — lands on frame ${montageTarget() + 1} of 3` : "Paste an image URL (Unsplash images import cleanly) — lands on this slide's photo slot"} style={{ flex: 1, fontFamily: font, fontSize: 12.5, color: C.ink, background: C.white, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 12px", outline: "none" }} />
             <button onClick={importImageUrl} disabled={urlBusy || !urlVal.trim()} style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "0 16px", borderRadius: 8, cursor: urlBusy || !urlVal.trim() ? "default" : "pointer", border: "none", color: "#fff", background: C.teal, opacity: urlBusy || !urlVal.trim() ? 0.55 : 1 }}>
               {urlBusy ? "…" : "Import"}
             </button>
@@ -1438,7 +1636,7 @@ export default function Studio() {
               {format} has a single fixed look
             </div>
           )}
-          <button onClick={() => handleExportPNG(current)} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: "pointer", border: "none", color: "#fff", background: C.blue }}>
+          <button onClick={() => handleExportPNG(current)} disabled={exportBusy} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy ? "default" : "pointer", border: "none", color: "#fff", background: C.blue, opacity: exportBusy ? 0.6 : 1 }}>
             {fmt.frames ? `Download ${fmt.frames} frames` : fmt.single === "video" ? "Download poster PNG" : "Download this slide"}
           </button>
           {fmt.deck && (
@@ -1447,21 +1645,23 @@ export default function Studio() {
             </button>
           )}
           {fmt.deck && (
-            <button onClick={handleExportStrip} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent" }}>
+            <button onClick={handleExportStrip} disabled={exportBusy} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy ? "default" : "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent", opacity: exportBusy ? 0.6 : 1 }}>
               🧵 Review strip
             </button>
           )}
           {fmt.frames && (
-            <button onClick={handleExportPanorama} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent" }}>
+            <button onClick={handleExportPanorama} disabled={exportBusy} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy ? "default" : "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent", opacity: exportBusy ? 0.6 : 1 }}>
               🖼 Panorama · one image
             </button>
           )}
-          <button onClick={handleExportAll} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent" }}>
-            Download all ({deck.length})
-          </button>
+          {deck.length > 1 && (
+            <button onClick={handleExportAll} disabled={exportBusy} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy ? "default" : "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent", opacity: exportBusy ? 0.6 : 1 }}>
+              {exportBusy ? "Downloading…" : `Download all (${exportFileCount(deck.length, fmt.frames)})`}
+            </button>
+          )}
         </div>
         <div style={{ fontFamily: font, fontSize: 11, color: C.inkMute, marginTop: 12, maxWidth: 380, textAlign: "center", lineHeight: 1.5 }}>
-          PNGs export at full size, with the Fraunces/Open Sans font files embedded so they render correctly outside the browser. A Design set holds ONE layout across the whole deck. &quot;Next look&quot; cycles 30 uniform looks (6 sets × 5 accent tones); pick a set or accent directly in Design elements to pin it. Click any image area to drop in a photo. Montage slices into carousel frames (dashed lines show the cuts). &quot;Deck PDF&quot; is the file LinkedIn document posts upload directly, one slide per page. &quot;Review strip&quot; is a half-size single image for quick sharing.
+          PNGs export at full size, with the Fraunces/Open Sans font files embedded so they render correctly outside the browser. A Design set holds ONE layout across the whole deck. &quot;Next look&quot; cycles 30 uniform looks (6 sets × 5 accent tones); pick a set or accent directly in Design elements to pin it. Photo slots appear on Carousel, Square, Article, Story and Montage — click “Add photo”, then click the slot to upload or use “Image URL”. Montage slices into carousel frames (dashed lines show the cuts). &quot;Deck PDF&quot; is the file LinkedIn document posts upload directly, one slide per page. &quot;Review strip&quot; is a half-size single image for quick sharing.
         </div>
       </div>
 

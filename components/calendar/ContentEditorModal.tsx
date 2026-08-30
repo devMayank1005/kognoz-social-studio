@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { C, FONT, DISPLAY_FONT, GRAD } from "@/lib/tokens";
 import { STUDIO_FORMATS } from "@/lib/formats";
@@ -17,14 +17,15 @@ import {
   type ContentItem,
   type ContentStatus
 } from "./types";
-import { generateContentId, getTodayKey } from "./calendarUtils";
+import { generateContentId, getTodayKey, buildStudioHref } from "./calendarUtils";
 
 interface ContentEditorModalProps {
   item: ContentItem | null; // null = creating new item
   initialDate?: string;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (item: ContentItem) => void;
+  /** Resolves false when the save did not reach the server, so the modal can stay open. */
+  onSave: (item: ContentItem) => void | Promise<boolean>;
   onDelete?: (id: string) => void;
 }
 
@@ -55,7 +56,19 @@ export function ContentEditorModal({
   // Replacing a textarea's value from React wipes the browser's native undo stack,
   // so Cmd+Z cannot bring back what the AI overwrote. Without this the only way
   // back to your own words is paying for another generation.
-  const [undoContent, setUndoContent] = useState<string | null>(null);
+  // A stack, not one slot. With one slot a second rewrite stored the first AI output
+  // over the user's own words and the original was gone for good, while the "Undo AI
+  // rewrite" button carried on implying it could be recovered.
+  const [undoStack, setUndoStack] = useState<string[]>([]);
+  // The exact text the last generation produced. Cmd+Z only rewinds while the box
+  // still holds it untouched — otherwise the shortcut threw away everything the user
+  // had typed since, with no redo, because the controlled value had already wiped the
+  // browser's own undo history.
+  const [aiOutput, setAiOutput] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const overlayArmed = useRef(false);
   const [aiError, setAiError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -71,7 +84,8 @@ export function ContentEditorModal({
         setStatus(item.status || "Planned");
         setPillar(item.pillar || "Behavioral Signal");
         setContent(item.content || "");
-        setUndoContent(null);
+        setUndoStack([]);
+        setAiOutput(null);
       } else {
         setTitle("");
         setTopic("");
@@ -82,13 +96,75 @@ export function ContentEditorModal({
         setStatus("Planned");
         setPillar("Behavioral Signal");
         setContent("");
-        setUndoContent(null);
+        setUndoStack([]);
+        setAiOutput(null);
       }
       setAiInstruction("");
       setAiError("");
       setConfirmDelete(false);
+      setConfirmDiscard(false);
+      setSaveError("");
     }
   }, [isOpen, item, initialDate]);
+
+  // What the form looked like when it opened, mirroring the initialiser above, so an
+  // untouched form closes without a prompt and a touched one never closes silently.
+  const pristine = item
+    ? {
+        title: item.title || item.topic || "",
+        topic: item.topic || item.title || "",
+        platform: item.platform || "LinkedIn",
+        contentType: item.contentType || "Carousel",
+        date: item.date || getTodayKey(),
+        time: item.time || "10:00",
+        status: (item.status || "Planned") as ContentStatus,
+        pillar: item.pillar || "Behavioral Signal",
+        content: item.content || ""
+      }
+    : {
+        title: "",
+        topic: "",
+        platform: "LinkedIn",
+        contentType: "Carousel",
+        date: initialDate || getTodayKey(),
+        time: "10:00",
+        status: "Planned" as ContentStatus,
+        pillar: "Behavioral Signal",
+        content: ""
+      };
+
+  const isDirty =
+    title !== pristine.title ||
+    topic !== pristine.topic ||
+    platform !== pristine.platform ||
+    contentType !== pristine.contentType ||
+    date !== pristine.date ||
+    time !== pristine.time ||
+    status !== pristine.status ||
+    pillar !== pristine.pillar ||
+    content !== pristine.content;
+
+  // Closing used to discard everything on the spot — including a caption the user had
+  // just paid Claude for — on a stray backdrop click.
+  const requestClose = useCallback(() => {
+    if (isDirty) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onClose();
+  }, [isDirty, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        requestClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isOpen, requestClose]);
 
   if (!isOpen) return null;
 
@@ -117,8 +193,10 @@ export function ContentEditorModal({
       // sonnet rates to reword copy that already existed.
       const isRewrite = Boolean(content.trim()) || Boolean(aiInstruction.trim());
       const generated = await callClaudeText("caption", prompt, isRewrite ? { model: FAST_MODEL } : undefined);
-      setUndoContent(content);
-      setContent(generated.trim());
+      const next = generated.trim();
+      setUndoStack((s) => [...s, content]);
+      setContent(next);
+      setAiOutput(next);
     } catch (e) {
       setAiError(e instanceof Error ? e.message : "AI caption generation failed");
     } finally {
@@ -126,8 +204,9 @@ export function ContentEditorModal({
     }
   }
 
-  function handleSaveSubmit(e: React.FormEvent) {
+  async function handleSaveSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isSaving) return;
     const finalTopic = topic.trim() || title.trim() || "Untitled Post";
     const finalTitle = title.trim() || finalTopic;
 
@@ -154,22 +233,37 @@ export function ContentEditorModal({
       updatedAt: new Date().toISOString()
     };
 
-    onSave(savedItem);
-    onClose();
+    // Closing before the write resolved meant a 409 told the user to "redo your
+    // change" after the form holding it had already unmounted. Wait for the answer.
+    setIsSaving(true);
+    setSaveError("");
+    try {
+      const ok = await onSave(savedItem);
+      if (ok === false) {
+        setSaveError("That didn't save — your text is still here. Check the message above and try again.");
+        return;
+      }
+      onClose();
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const isStudioFmt = (STUDIO_FORMATS as readonly string[]).includes(contentType);
 
+  // Built from what is on screen, so the link carries the topic the user can see —
+  // but nothing here is saved, so a dirty form and the stored row will diverge. The
+  // button below says so rather than leaving the user to discover it.
   function createStudioHref(): string {
-    const p = new URLSearchParams({
+    return buildStudioHref({
       topic: topic || title,
-      format: contentType,
+      contentType,
       pillar,
-      n: String(item?.n || item?.id || "new")
+      n: item?.n,
+      id: item?.id,
+      set: item?.set,
+      style: item?.style
     });
-    if (item?.set) p.set("set", item.set);
-    if (item?.style) p.set("style", item.style);
-    return `/?${p.toString()}`;
   }
 
   const activeAuthor = getAuthorInfo(
@@ -203,7 +297,17 @@ export function ContentEditorModal({
 
   return (
     <div
-      onClick={onClose}
+      onMouseDown={(e) => {
+        overlayArmed.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        // A click is delivered to the nearest common ancestor of mousedown and
+        // mouseup, so selecting caption text and releasing outside the dialog used to
+        // count as a backdrop click and threw the whole draft away.
+        const bothOnBackdrop = overlayArmed.current && e.target === e.currentTarget;
+        overlayArmed.current = false;
+        if (bothOnBackdrop) requestClose();
+      }}
       style={{
         position: "fixed",
         inset: 0,
@@ -279,7 +383,7 @@ export function ContentEditorModal({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             style={{
               background: C.mist,
               border: "none",
@@ -364,8 +468,7 @@ export function ContentEditorModal({
                 onChange={(e) => setDate(e.target.value)}
                 required
                 style={inputStyle}
-              >
-              </input>
+              />
             </div>
 
             <div>
@@ -442,10 +545,15 @@ export function ContentEditorModal({
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <span style={{ ...labelStyle, marginBottom: 0 }}>Caption / Post Copy</span>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {undoContent !== null && (
+                {undoStack.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => { setContent(undoContent); setUndoContent(null); }}
+                    onClick={() => {
+                      const prev = undoStack[undoStack.length - 1];
+                      setUndoStack((s) => s.slice(0, -1));
+                      setContent(prev);
+                      setAiOutput(null);
+                    }}
                     title="Restore the text the AI replaced (Cmd/Ctrl+Z)"
                     style={{
                       fontSize: 11, fontWeight: 700, color: C.blue, background: "none",
@@ -465,12 +573,16 @@ export function ContentEditorModal({
               value={content}
               onChange={(e) => setContent(e.target.value)}
               onKeyDown={(e) => {
-                // Only intercept when there is an AI overwrite to undo; otherwise
-                // let the browser handle normal typing undo as usual.
-                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey && undoContent !== null) {
+                // Only intercept while the box still holds the AI output verbatim. Once
+                // the user has typed over it, Cmd+Z is theirs: hijacking it discarded
+                // every edit made since the generation, with nothing to redo from.
+                const untouched = aiOutput !== null && content === aiOutput;
+                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey && untouched && undoStack.length > 0) {
                   e.preventDefault();
-                  setContent(undoContent);
-                  setUndoContent(null);
+                  const prev = undoStack[undoStack.length - 1];
+                  setUndoStack((s) => s.slice(0, -1));
+                  setContent(prev);
+                  setAiOutput(null);
                 }
               }}
               rows={5}
@@ -485,6 +597,15 @@ export function ContentEditorModal({
                   type="text"
                   value={aiInstruction}
                   onChange={(e) => setAiInstruction(e.target.value)}
+                  onKeyDown={(e) => {
+                    // This input sits inside the form, so Enter used to trigger implicit
+                    // submission: the post saved and closed, and the instruction the user
+                    // had just typed was thrown away without generating anything.
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (!isGeneratingAI && topic.trim()) void handleGenerateAI();
+                    }
+                  }}
                   placeholder="AI Instruction: e.g. Make hook sharper, add 3 bullet points, keep under 120 words…"
                   style={{ ...inputStyle, flex: 1, fontSize: 12 }}
                 />
@@ -602,7 +723,7 @@ export function ContentEditorModal({
 
               <button
                 type="button"
-                onClick={onClose}
+                onClick={requestClose}
                 style={{
                   fontFamily: FONT,
                   fontSize: 13,
@@ -620,6 +741,7 @@ export function ContentEditorModal({
 
               <button
                 type="submit"
+                disabled={isSaving}
                 style={{
                   fontFamily: FONT,
                   fontSize: 13,
@@ -629,14 +751,64 @@ export function ContentEditorModal({
                   border: "none",
                   borderRadius: 8,
                   padding: "8px 20px",
-                  cursor: "pointer",
+                  cursor: isSaving ? "default" : "pointer",
+                  opacity: isSaving ? 0.6 : 1,
                   boxShadow: "0 2px 8px rgba(0, 81, 132, 0.25)"
                 }}
               >
-                {isEditing ? "Save Changes" : "Create Post"}
+                {isSaving ? "Saving…" : isEditing ? "Save Changes" : "Create Post"}
               </button>
             </div>
           </div>
+
+          {saveError && (
+            <div style={{ fontSize: 12, color: "#B4442E", fontWeight: 600, marginTop: 10 }}>{saveError}</div>
+          )}
+
+          {confirmDiscard && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: "10px 12px",
+                borderRadius: 8,
+                background: "#FFF4E5",
+                border: "1px solid #FFD8A8",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap"
+              }}
+            >
+              <span style={{ fontSize: 12.5, color: "#9A5B13" }}>
+                You have unsaved changes{undoStack.length > 0 ? ", including AI-written copy" : ""}. Discard them?
+              </span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDiscard(false)}
+                  style={{
+                    fontFamily: FONT, fontSize: 12, fontWeight: 700, padding: "6px 12px",
+                    borderRadius: 7, border: `1px solid ${C.line}`, background: C.white,
+                    cursor: "pointer", color: C.ink
+                  }}
+                >
+                  Keep editing
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setConfirmDiscard(false); onClose(); }}
+                  style={{
+                    fontFamily: FONT, fontSize: 12, fontWeight: 700, padding: "6px 12px",
+                    borderRadius: 7, border: "none", background: "#B4442E",
+                    cursor: "pointer", color: "#fff"
+                  }}
+                >
+                  Discard
+                </button>
+              </div>
+            </div>
+          )}
         </form>
       </div>
     </div>

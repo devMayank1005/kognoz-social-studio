@@ -12,7 +12,7 @@ import {
   type ContentItem,
   type ContentStatus
 } from "./types";
-import { formatDisplayDate } from "./calendarUtils";
+import { formatDisplayDate, buildStudioHref } from "./calendarUtils";
 
 interface CalendarListViewProps {
   items: ContentItem[];
@@ -31,6 +31,7 @@ export function CalendarListView({
 }: CalendarListViewProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
   // Group items by date sorted ascending
   const groupedItems = useMemo(() => {
@@ -41,23 +42,24 @@ export function CalendarListView({
     });
 
     const groups: { dateKey: string; items: ContentItem[] }[] = [];
-    let currentKey = "";
+    let currentKey: string | null = null;
     let currentList: ContentItem[] = [];
 
+    // `currentKey` seeded as "" meant a leading run of date-less items was collected
+    // and then thrown away by the truthiness test below, so those posts existed in the
+    // store and in the header's count but appeared in no view at all. They now group
+    // under an explicit "Unscheduled" heading, which is the only place they show up.
     for (const it of sorted) {
-      if (it.date !== currentKey) {
-        if (currentKey) {
-          groups.push({ dateKey: currentKey, items: currentList });
-        }
-        currentKey = it.date;
+      const key = it.date || "";
+      if (key !== currentKey) {
+        if (currentKey !== null) groups.push({ dateKey: currentKey, items: currentList });
+        currentKey = key;
         currentList = [it];
       } else {
         currentList.push(it);
       }
     }
-    if (currentKey) {
-      groups.push({ dateKey: currentKey, items: currentList });
-    }
+    if (currentKey !== null) groups.push({ dateKey: currentKey, items: currentList });
     return groups;
   }, [items]);
 
@@ -67,7 +69,12 @@ export function CalendarListView({
       await navigator.clipboard.writeText(it.content || it.topic || "");
       setCopiedId(it.id);
       setTimeout(() => setCopiedId(null), 1500);
-    } catch {}
+    } catch {
+      // An empty catch left the button completely inert on a denied permission or an
+      // insecure origin — no tick, no error, no way to tell it had failed.
+      setCopyError(it.id);
+      setTimeout(() => setCopyError(null), 2600);
+    }
   }
 
   if (items.length === 0) {
@@ -126,7 +133,7 @@ export function CalendarListView({
                 margin: 0
               }}
             >
-              {formatDisplayDate(group.dateKey)}
+              {group.dateKey ? formatDisplayDate(group.dateKey) : "Unscheduled"}
             </h3>
             <button
               type="button"
@@ -156,18 +163,6 @@ export function CalendarListView({
               const pillarCol = PILLAR_COLORS[it.pillar] || C.blue;
               const isStudioFmt = (STUDIO_FORMATS as readonly string[]).includes(it.contentType);
               const author = getAuthorInfo(it.authorName, it.authorEmail || it.platform);
-
-              function createStudioHref(): string {
-                const p = new URLSearchParams({
-                  topic: it.topic || it.title,
-                  format: it.contentType,
-                  pillar: it.pillar,
-                  n: String(it.n || it.id)
-                });
-                if (it.set) p.set("set", it.set);
-                if (it.style) p.set("style", it.style);
-                return `/?${p.toString()}`;
-              }
 
               return (
                 <div
@@ -238,7 +233,7 @@ export function CalendarListView({
                     {/* Quick Studio Action */}
                     {isStudioFmt && (
                       <a
-                        href={createStudioHref()}
+                        href={buildStudioHref(it)}
                         onClick={(e) => e.stopPropagation()}
                         style={{
                           fontSize: 11.5,
@@ -353,7 +348,7 @@ export function CalendarListView({
                             cursor: "pointer"
                           }}
                         >
-                          {copiedId === it.id ? "✓ Copied" : "Copy text"}
+                          {copiedId === it.id ? "✓ Copied" : copyError === it.id ? "Copy blocked" : "Copy text"}
                         </button>
 
                         <button
@@ -370,7 +365,7 @@ export function CalendarListView({
                             cursor: "pointer"
                           }}
                         >
-                          ✨ Generate / Rewrite with Claude
+                          ✨ Write with Claude — opens the editor
                         </button>
 
                         <button

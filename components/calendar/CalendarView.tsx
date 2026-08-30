@@ -18,6 +18,7 @@ import {
 } from "./types";
 import {
   migrateLegacyPlan,
+  stepCalendarDate,
   filterContentItems,
   formatDateKey,
   dateToKey,
@@ -47,68 +48,132 @@ export function CalendarView() {
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  /** The server could not be read. We are NOT looking at a calendar we can trust. */
+  const [loadFailed, setLoadFailed] = useState(false);
 
-  // Load from Supabase Store API on mount
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const { value, stale } = await storeGet<unknown>(STORAGE_KEY);
-        if (stale) throw new Error("store unreachable");
-        setItems(migrateLegacyPlan(value));
-      } catch (e) {
-        console.warn("Falling back to local calendar initialization:", e);
-        // Try localStorage fallback
-        try {
-          const local = localStorage.getItem(STORAGE_KEY);
-          if (local) {
-            const parsed = JSON.parse(local);
-            setItems(migrateLegacyPlan(parsed));
-          } else {
-            setItems(migrateLegacyPlan(null));
-          }
-        } catch {
-          setItems(migrateLegacyPlan(null));
-        }
-      } finally {
-        setLoading(false);
-      }
-    })();
+  // Mutations read the current items from here rather than from a setState updater.
+  // Updaters must be pure: React StrictMode double-invokes them, so a network write
+  // inside one fired twice per edit and the two PUTs then conflicted with each other.
+  const itemsRef = React.useRef<ContentItem[]>([]);
+  // Writes run one after another. Two quick edits used to race, both send the version
+  // they read before either landed, and the second came back 409 — telling the user
+  // that they themselves had changed the calendar while they were editing.
+  const saveChain = React.useRef<Promise<unknown>>(Promise.resolve());
+
+  const applyItems = useCallback((next: ContentItem[]) => {
+    itemsRef.current = next;
+    setItems(next);
   }, []);
 
-  // Save to /api/store and localStorage
-  const persistItems = useCallback(async (nextItems: ContentItem[]) => {
-    setIsSaving(true);
-    const payload: DynamicCalendarStore = {
-      version: 3,
-      items: nextItems,
-      updatedAt: new Date().toISOString()
-    };
-
+  /**
+   * Load the calendar.
+   *
+   * On failure this used to seed PLAN_TEMPLATE — a demo calendar — and render it as
+   * if it were real. The first edit then persisted that template over the team's
+   * actual data. A calendar we could not read is now an error state with a retry,
+   * never a guess. `migrateLegacyPlan(null)` still seeds the template on a genuine
+   * empty-but-successful read, which is the intended first-run experience.
+   */
+  const loadCalendar = useCallback(async () => {
+    setLoading(true);
+    setError("");
     try {
-      const saved = await storeSet<unknown>(STORAGE_KEY, payload);
-      if (saved.ok) {
-        setError("");
-      } else if (saved.reason === "conflict") {
-        // Someone else saved while this tab was editing. Overwriting them is what
-        // the old blind PUT did, and it destroyed work silently. Take the server's
-        // copy and tell the user their change did not stick.
-        setItems(migrateLegacyPlan(saved.serverValue));
+      const { value, stale } = await storeGet<unknown>(STORAGE_KEY);
+      if (!stale) {
+        applyItems(migrateLegacyPlan(value));
+        setLoadFailed(false);
+        return;
+      }
+      let local: unknown = null;
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        local = raw ? JSON.parse(raw) : null;
+      } catch {
+        local = null;
+      }
+      setLoadFailed(true);
+      if (local) {
+        applyItems(migrateLegacyPlan(local));
         setError(
-          `${saved.updatedBy || "Someone else"} changed the calendar while you were editing. ` +
-            `Their version is now shown — please redo your change.`
+          "Showing the copy cached in this browser — the server is unreachable. " +
+            "Edits will not be saved until it is back."
         );
       } else {
-        setError("Note: Changes saved locally. Server sync pending.");
+        applyItems([]);
       }
-    } catch (e) {
-      console.warn("Failed to persist calendar to server:", e);
-      setError("Note: Changes saved locally. Server sync pending.");
     } finally {
-      setIsSaving(false);
+      setLoading(false);
     }
-  }, []);
+  }, [applyItems]);
+
+  useEffect(() => {
+    void loadCalendar();
+  }, [loadCalendar]);
+
+  /**
+   * Save to /api/store. Writes are chained so they can never overlap: two edits a
+   * moment apart both used to send the version they read before either landed, and
+   * the second came back 409 naming the user as their own conflicting editor.
+   *
+   * Returns whether the write reached the server, so callers (the editor modal) can
+   * keep the user's work on screen instead of closing over a failure.
+   */
+  const persistItems = useCallback(async (nextItems: ContentItem[]): Promise<boolean> => {
+    const run = saveChain.current.then(async (): Promise<boolean> => {
+      setIsSaving(true);
+      const payload: DynamicCalendarStore = {
+        version: 3,
+        items: nextItems,
+        updatedAt: new Date().toISOString()
+      };
+      try {
+        const saved = await storeSet<unknown>(STORAGE_KEY, payload);
+        if (saved.ok) {
+          setError("");
+          return true;
+        }
+        if (saved.reason === "conflict") {
+          // Someone else saved while this tab was editing. Overwriting them is what
+          // the old blind PUT did, and it destroyed work silently. Take the server's
+          // copy and tell the user their change did not stick.
+          applyItems(migrateLegacyPlan(saved.serverValue));
+          setError(
+            `${saved.updatedBy || "Someone else"} changed the calendar while you were editing. ` +
+              `Their version is now shown — please redo your change.`
+          );
+          return false;
+        }
+        // "Saved locally, sync pending" was a promise the app could not keep: there
+        // is no retry queue, and the next load takes the server's copy. Say what is
+        // actually true so the user knows the change is still theirs to protect.
+        setError(
+          "Could not reach the server — this change exists only in this browser and " +
+            "will be lost when you reload. Check your connection and edit again."
+        );
+        return false;
+      } catch (e) {
+        console.warn("Failed to persist calendar to server:", e);
+        setError(
+          "Could not reach the server — this change exists only in this browser and " +
+            "will be lost when you reload. Check your connection and edit again."
+        );
+        return false;
+      } finally {
+        setIsSaving(false);
+      }
+    });
+    saveChain.current = run.catch(() => undefined);
+    return run;
+  }, [applyItems]);
+
+  /** Apply a new item list and save it. The single path every mutation goes through. */
+  const commit = useCallback(
+    (next: ContentItem[]): Promise<boolean> => {
+      applyItems(next);
+      return persistItems(next);
+    },
+    [applyItems, persistItems]
+  );
 
   // Filtered items
   const filteredItems = useMemo(() => {
@@ -127,27 +192,11 @@ export function CalendarView() {
 
   // Navigation handlers
   function handlePrev() {
-    setCurrentDate((prev) => {
-      const d = new Date(prev);
-      if (viewMode === "week") {
-        d.setDate(d.getDate() - 7);
-      } else {
-        d.setMonth(d.getMonth() - 1);
-      }
-      return d;
-    });
+    setCurrentDate((prev) => stepCalendarDate(prev, -1, viewMode));
   }
 
   function handleNext() {
-    setCurrentDate((prev) => {
-      const d = new Date(prev);
-      if (viewMode === "week") {
-        d.setDate(d.getDate() + 7);
-      } else {
-        d.setMonth(d.getMonth() + 1);
-      }
-      return d;
-    });
+    setCurrentDate((prev) => stepCalendarDate(prev, 1, viewMode));
   }
 
   function handleToday() {
@@ -179,53 +228,40 @@ export function CalendarView() {
     setIsModalOpen(true);
   }
 
-  function handleSaveItem(savedItem: ContentItem) {
-    setItems((prev) => {
-      const exists = prev.some((it) => it.id === savedItem.id);
-      const next = exists
-        ? prev.map((it) => (it.id === savedItem.id ? savedItem : it))
-        : [savedItem, ...prev];
-      persistItems(next);
-      return next;
-    });
+  function handleSaveItem(savedItem: ContentItem): Promise<boolean> {
+    const prev = itemsRef.current;
+    const exists = prev.some((it) => it.id === savedItem.id);
+    const next = exists
+      ? prev.map((it) => (it.id === savedItem.id ? savedItem : it))
+      : [savedItem, ...prev];
+    return commit(next);
   }
 
   function handleDeleteItem(id: string) {
-    setItems((prev) => {
-      const next = prev.filter((it) => it.id !== id);
-      persistItems(next);
-      return next;
-    });
+    void commit(itemsRef.current.filter((it) => it.id !== id));
   }
 
   function handleStatusChange(id: string, nextStatus: ContentStatus) {
-    setItems((prev) => {
-      const next = prev.map((it) =>
+    void commit(
+      itemsRef.current.map((it) =>
         it.id === id ? { ...it, status: nextStatus, updatedAt: new Date().toISOString() } : it
-      );
-      persistItems(next);
-      return next;
-    });
+      )
+    );
   }
 
   function handleDropItem(itemId: string, targetDateKey: string) {
-    setItems((prev) => {
-      const target = prev.find((it) => it.id === itemId);
-      if (!target || target.date === targetDateKey) return prev;
-      const next = prev.map((it) =>
+    const prev = itemsRef.current;
+    const target = prev.find((it) => it.id === itemId);
+    if (!target || target.date === targetDateKey) return;
+    void commit(
+      prev.map((it) =>
         it.id === itemId ? { ...it, date: targetDateKey, updatedAt: new Date().toISOString() } : it
-      );
-      persistItems(next);
-      return next;
-    });
+      )
+    );
   }
 
   function handleQuickAdd(newItem: ContentItem) {
-    setItems((prev) => {
-      const next = [newItem, ...prev];
-      persistItems(next);
-      return next;
-    });
+    void commit([newItem, ...itemsRef.current]);
   }
 
   if (loading) {
@@ -233,6 +269,39 @@ export function CalendarView() {
       <div style={{ padding: "60px 0", textAlign: "center", fontFamily: FONT, color: C.inkSoft }}>
         <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
         <div>Loading your content calendar…</div>
+      </div>
+    );
+  }
+
+  // Nothing to show and no way to check what should be there. Previously this
+  // rendered the seed template, which looked like a real (wrong) calendar and got
+  // written back over the real one on the first edit.
+  if (loadFailed && items.length === 0) {
+    return (
+      <div style={{ padding: "60px 20px", textAlign: "center", fontFamily: FONT, color: C.ink }}>
+        <div style={{ fontSize: 24, marginBottom: 10 }}>⚠️</div>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>Couldn&apos;t load your calendar</div>
+        <div style={{ color: C.inkSoft, fontSize: 13, maxWidth: 420, margin: "0 auto 16px", lineHeight: 1.55 }}>
+          The server did not answer. Your calendar is safe — this browser just can&apos;t reach it
+          right now. Nothing will be saved until it can.
+        </div>
+        <button
+          type="button"
+          onClick={() => void loadCalendar()}
+          style={{
+            fontFamily: FONT,
+            fontSize: 13,
+            fontWeight: 700,
+            padding: "9px 18px",
+            borderRadius: 8,
+            border: `1px solid ${C.line}`,
+            background: C.white,
+            cursor: "pointer",
+            color: C.ink
+          }}
+        >
+          Try again
+        </button>
       </div>
     );
   }

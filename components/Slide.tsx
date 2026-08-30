@@ -477,6 +477,20 @@ export const Slide = React.memo(function Slide({
           {renderLines(stand)}
         </p>
       ) : null;
+    // The photo slot used to exist only in variant 1, so an imported picture silently
+    // vanished on two looks out of three and "Next look" made it blink in and out.
+    // Every look now has one, revealed by the same "Add photo" toggle as everywhere else.
+    const showArticlePhoto = photoOn || Boolean(images.article);
+    const articleSlot = (dark?: boolean) => (
+      <ImageSlot
+        img={images.article}
+        onPick={(u) => setImg("article", u)}
+        label="Add article photo"
+        dark={dark}
+        style={{ flex: 1 }}
+      />
+    );
+
     if (variant === 1) {
       return (
         <div id={id} style={{ ...wrap, background: C.off }}>
@@ -493,7 +507,7 @@ export const Slide = React.memo(function Slide({
                 <div style={{ fontFamily: font, fontSize: 24, color: C.inkMute }}>{dz.url}</div>
               </div>
             </div>
-            <ImageSlot img={images.article} onPick={(u) => setImg("article", u)} label="Add article photo" style={{ flex: 1 }} />
+            {showArticlePhoto && articleSlot()}
           </div>
         </div>
       );
@@ -503,16 +517,19 @@ export const Slide = React.memo(function Slide({
         <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
           {dz.petals && <Petal w={980} o={0.6} style={{ position: "absolute", top: -300, right: -300 }} />}
           {dz.petals && <Petal w={520} o={0.35} style={{ position: "absolute", bottom: -180, left: -160 }} />}
-          <div style={{ position: "absolute", inset: 0, padding: "88px 100px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <div style={{ ...GLASS_DARKBG, borderRadius: 30, padding: "70px 80px", maxWidth: 1500 }}>
-              <Eyebrow dark />
-              <h1 style={{ fontFamily: displayFont, fontSize: fit(96, cover, 55), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: "26px 0 0" }}>{renderEm(cover)}</h1>
-              <Standfirst dark max={1320} />
+          <div style={{ position: "absolute", inset: 0, display: "flex" }}>
+            <div style={{ flex: showArticlePhoto ? 1.15 : 1, padding: "88px 100px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <div style={{ ...GLASS_DARKBG, borderRadius: 30, padding: "70px 80px", maxWidth: 1500 }}>
+                <Eyebrow dark />
+                <h1 style={{ fontFamily: displayFont, fontSize: fit(showArticlePhoto ? 78 : 96, cover, 55), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: "26px 0 0" }}>{renderEm(cover)}</h1>
+                <Standfirst dark max={showArticlePhoto ? 900 : 1320} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 44 }}>
+                <Logo h={78} white />
+                <div style={{ fontFamily: font, fontSize: 26, color: "rgba(255,255,255,0.65)" }}>{dz.url}</div>
+              </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 44 }}>
-              <Logo h={78} white />
-              <div style={{ fontFamily: font, fontSize: 26, color: "rgba(255,255,255,0.65)" }}>{dz.url}</div>
-            </div>
+            {showArticlePhoto && articleSlot(true)}
           </div>
         </div>
       );
@@ -521,16 +538,19 @@ export const Slide = React.memo(function Slide({
       <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
         {dz.petals && <Petal w={900} o={0.5} style={{ position: "absolute", top: -260, right: -260 }} />}
         {dz.petals && <Petal w={460} o={0.32} style={{ position: "absolute", bottom: -160, left: -140 }} />}
-        <div style={{ position: "absolute", inset: 0, padding: "88px 100px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-          <Eyebrow dark />
-          <div>
-            <h1 style={{ fontFamily: displayFont, fontSize: fit(108, cover, 58), fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.015em", color: "#fff", margin: 0, maxWidth: 1460 }}>{renderEm(cover)}</h1>
-            <Standfirst dark max={1460} />
+        <div style={{ position: "absolute", inset: 0, display: "flex" }}>
+          <div style={{ flex: showArticlePhoto ? 1.15 : 1, padding: "88px 100px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <Eyebrow dark />
+            <div>
+              <h1 style={{ fontFamily: displayFont, fontSize: fit(showArticlePhoto ? 86 : 108, cover, 58), fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.015em", color: "#fff", margin: 0, maxWidth: showArticlePhoto ? 1000 : 1460 }}>{renderEm(cover)}</h1>
+              <Standfirst dark max={showArticlePhoto ? 1000 : 1460} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <Logo h={82} white />
+              <div style={{ fontFamily: font, fontSize: 26, color: "rgba(255,255,255,0.65)" }}>{dz.url}</div>
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <Logo h={82} white />
-            <div style={{ fontFamily: font, fontSize: 26, color: "rgba(255,255,255,0.65)" }}>{dz.url}</div>
-          </div>
+          {showArticlePhoto && articleSlot(true)}
         </div>
       </div>
     );
@@ -699,33 +719,98 @@ export const Slide = React.memo(function Slide({
 
   if (kind === "montage") {
     const pts = [slides[0] || { title: "", body: "" }, slides[1] || { title: "", body: "" }, slides[2] || { title: "", body: "" }];
-    // One renderer, six surfaces. Previously this was two hardcoded branches, so
-    // four of the six design sets produced an identical light montage.
+    const showMontagePhoto = photoOn || [0, 1, 2].some((i) => Boolean(images[`m${i}`]));
+
+    // This exports as three separate carousel frames (frames: 3 in lib/formats.ts), so
+    // the old single padded row was wrong twice over. The cards froze at maxWidth 900
+    // and landed at x=100/1120/2140 against cuts at 1080 and 2160, which sliced 20px off
+    // card three and welded that sliver onto frame two; and the headline, eyebrow, CTA
+    // and logo all sat in one band across the full 3240, so frame two exported with no
+    // branding at all and a long headline split a word across the first cut.
+    //
+    // Each frame is now an exact 1080-wide column that carries its own logo and stands
+    // on its own as a slide. The headline belongs to frame one, the CTA closes frame
+    // three, and nothing crosses a cut.
+    const frameW = baseW / 3;
+    const accentOf = [C.cyan, C.teal, C.green];
+
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
-        {dz.petals && <Petal w={760} o={S.petal} style={{ position: "absolute", top: -260, left: 780 }} />}
-        {dz.petals && <Petal w={680} o={S.petal * 0.8} style={{ position: "absolute", bottom: -260, left: 2040 }} />}
-        <div style={{ position: "absolute", inset: 0, padding: "88px 100px", display: "flex", flexDirection: "column" }}>
-          <Eyebrow dark={onDark} />
-          <h1 style={{ fontFamily: displayFont, fontSize: fit(154, cover, 62), fontWeight: 600, lineHeight: 1.04, letterSpacing: "-0.015em", color: S.heading, margin: "30px 0 0", maxWidth: 3000 }}>{renderEm(cover)}</h1>
-          {/* Was `flex: 1`, which handed every spare pixel to empty space and left a
-              ~505px band across a 3240px canvas. Fixed gap; the cards take the slack. */}
-          <div style={{ height: 40 }} />
-          {/* Cards hug their copy and the row centres in the leftover height. Stretching
-              them just moved the empty band from above the cards to inside them. */}
-          <div style={{ display: "flex", gap: 120, flex: 1, alignItems: "center" }}>
-            {pts.map((p, i) => (
-              <div key={i} style={{ flex: 1, maxWidth: 900, ...S.panel, borderRadius: surfaceId === "press" ? 0 : 22, padding: "44px 46px" }}>
-                <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, letterSpacing: "0.14em", color: [C.cyan, C.teal, C.green][i], marginBottom: 14 }}>{String(i + 1).padStart(2, "0")}</div>
-                <div style={{ fontFamily: font, fontSize: fit(31, p.title, 40), fontWeight: 800, color: S.heading, marginBottom: 12 }}>{p.title}</div>
-                <p style={{ fontFamily: font, fontSize: fit(27, p.body, 200), lineHeight: 1.5, color: S.body, margin: 0 }}>{renderLines(p.body)}</p>
+        {dz.petals && <Petal w={760} o={S.petal} style={{ position: "absolute", top: -260, left: 60 }} />}
+        {dz.petals && <Petal w={680} o={S.petal * 0.8} style={{ position: "absolute", bottom: -260, left: 2260 }} />}
+        <div style={{ position: "absolute", inset: 0, display: "flex" }}>
+          {pts.map((p, i) => (
+            <div
+              key={i}
+              style={{
+                width: frameW,
+                flexShrink: 0,
+                boxSizing: "border-box",
+                padding: "80px 72px",
+                display: "flex",
+                flexDirection: "column",
+                position: "relative"
+              }}
+            >
+              {i === 0 ? (
+                <>
+                  <Eyebrow dark={onDark} />
+                  <h1
+                    style={{
+                      fontFamily: displayFont,
+                      fontSize: fit(74, cover, 90),
+                      fontWeight: 600,
+                      lineHeight: 1.05,
+                      letterSpacing: "-0.015em",
+                      color: S.heading,
+                      margin: "22px 0 0"
+                    }}
+                  >
+                    {renderEm(cover)}
+                  </h1>
+                </>
+              ) : null}
+
+              <div
+                style={{
+                  ...S.panel,
+                  borderRadius: surfaceId === "press" ? 0 : 22,
+                  padding: "38px 40px",
+                  marginTop: i === 0 ? 34 : 0,
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  minHeight: 0
+                }}
+              >
+                <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.14em", color: accentOf[i], marginBottom: 12 }}>
+                  {String(i + 1).padStart(2, "0")}
+                </div>
+                <div style={{ fontFamily: font, fontSize: fit(i === 0 ? 34 : 40, p.title, 40), fontWeight: 800, color: S.heading, marginBottom: 12 }}>{p.title}</div>
+                <p style={{ fontFamily: font, fontSize: fit(i === 0 ? 27 : 31, p.body, 200), lineHeight: 1.5, color: S.body, margin: 0 }}>{renderLines(p.body)}</p>
+                {showMontagePhoto && (
+                  <ImageSlot
+                    img={images[`m${i}`]}
+                    onPick={(u) => setImg(`m${i}`, u)}
+                    dark={onDark}
+                    label={`Add photo · frame ${i + 1}`}
+                    style={{ marginTop: 26, flex: 1, minHeight: 240, borderRadius: surfaceId === "press" ? 0 : 14 }}
+                  />
+                )}
               </div>
-            ))}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 64 }}>
-            <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, color: S.label }}>{plain(cta)}</div>
-            <Logo h={72} white={onDark} />
-          </div>
+
+              {/* Every frame carries the mark: each one is a standalone slide in the
+                  carousel, and frame two used to export with no branding whatsoever. */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 30, gap: 16 }}>
+                {i === 2 ? (
+                  <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, color: S.label }}>{plain(cta)}</div>
+                ) : (
+                  <span />
+                )}
+                <Logo h={58} white={onDark} />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -760,8 +845,11 @@ export const Slide = React.memo(function Slide({
           <Eyebrow dark={onDark} />
           <h1 style={{ fontFamily: displayFont, fontSize: fit(90, cover, 42), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: S.heading, margin: "36px 0 44px" }}>{renderEm(cover)}</h1>
           {/* Only shown once a photo is wanted — it was unconditional, so a text-only
-              Story carried a 560px empty box down the middle of the frame. */}
-          {photoOn && (
+              Story carried a 560px empty box down the middle of the frame. An imported
+              picture also counts as wanting one: the URL importer wrote images.story
+              while the toggle that reveals this slot was still deck-only, so the import
+              reported success and the canvas never changed. */}
+          {(photoOn || images.story) && (
             <ImageSlot dark={onDark} img={images.story} onPick={(u) => setImg("story", u)} label="Add photo" style={{ height: 560, borderRadius: surfaceId === "press" ? 0 : 24 }} />
           )}
           {/* fit(), not sz(): this was the one body with no auto-shrink, so long copy
@@ -769,7 +857,7 @@ export const Slide = React.memo(function Slide({
           {/* 37px on a 1080px canvas is small for a format read full-screen on a phone,
               and it left the lower half of a 9:16 frame empty. fit() still shrinks
               long copy, so this raises the ceiling without risking an overflow. */}
-          <p style={{ fontFamily: font, fontSize: fit(photoOn ? 37 : 50, s0.body, 260), lineHeight: 1.5, color: S.body, margin: photoOn ? "44px 0 0" : "8px 0 0", flex: 1 }}>{renderLines(s0.body)}</p>
+          <p style={{ fontFamily: font, fontSize: fit(photoOn || images.story ? 37 : 50, s0.body, 260), lineHeight: 1.5, color: S.body, margin: photoOn || images.story ? "44px 0 0" : "8px 0 0", flex: 1 }}>{renderLines(s0.body)}</p>
         </div>
         <Foot dark={onDark} right={SINGLE_R} />
       </div>

@@ -248,3 +248,52 @@ export function filterContentItems(
     return true;
   });
 }
+
+/**
+ * The Studio link for a calendar item.
+ *
+ * This existed three times — in ContentCard, CalendarListView and ContentEditorModal —
+ * and the copies had drifted: two opened in the same tab, one in a new one, and the
+ * modal built its link from unsaved form state so the link and the stored row disagreed.
+ *
+ * `n` carries the legacy numeric key when the row has one and the string id otherwise.
+ * Studio matches on both, so it must NOT be coerced to a number: Number("item_lz3k9")
+ * is NaN, which is why generating from a calendar link never marked the item as Draft.
+ */
+export function buildStudioHref(item: {
+  topic?: string;
+  title?: string;
+  contentType?: string;
+  pillar?: string;
+  n?: number;
+  id?: string;
+  set?: string;
+  style?: string;
+}): string {
+  const p = new URLSearchParams({
+    topic: item.topic || item.title || "",
+    format: item.contentType || "",
+    pillar: item.pillar || "",
+    n: item.n != null ? String(item.n) : item.id || "new"
+  });
+  if (item.set) p.set("set", item.set);
+  if (item.style) p.set("style", item.style);
+  return `/?${p.toString()}`;
+}
+
+/**
+ * Step the calendar by one month or one week.
+ *
+ * `d.setMonth(d.getMonth() + 1)` keeps the day-of-month, so from a 31st it asks for a
+ * date the next month does not have and JavaScript rolls it forward: Jan 31 becomes
+ * "Feb 31" becomes Mar 3, and February is skipped entirely. Anchoring to the first of
+ * the target month is the only way to step months without losing one.
+ */
+export function stepCalendarDate(prev: Date, delta: number, mode: "month" | "week" | "list"): Date {
+  if (mode === "week") {
+    const d = new Date(prev);
+    d.setDate(d.getDate() + delta * 7);
+    return d;
+  }
+  return new Date(prev.getFullYear(), prev.getMonth() + delta, 1);
+}

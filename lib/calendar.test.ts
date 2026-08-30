@@ -4,7 +4,9 @@ import {
   getWeekDays,
   formatDateKey,
   migrateLegacyPlan,
-  filterContentItems
+  filterContentItems,
+  stepCalendarDate,
+  buildStudioHref
 } from "../components/calendar/calendarUtils";
 import type { ContentItem } from "../components/calendar/types";
 
@@ -150,5 +152,82 @@ describe("Calendar Utilities", () => {
       const result = filterContentItems(mockItems, "", "all", "all", "all", "all");
       expect(result.length).toBe(2);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Month navigation.
+//
+// setMonth() preserves the day-of-month, so stepping from a 31st asks for a date the
+// target month does not have and JS rolls it forward — Jan 31 → "Feb 31" → Mar 3.
+// Opening the calendar on the 31st and clicking ▶ once skipped February entirely.
+// ---------------------------------------------------------------------------
+describe("stepCalendarDate", () => {
+  const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+
+  it("does not skip February when stepping forward from the 31st", () => {
+    expect(iso(stepCalendarDate(new Date(2026, 0, 31), 1, "month"))).toBe("2026-02");
+  });
+
+  it("does not skip a month stepping backward from the 31st", () => {
+    expect(iso(stepCalendarDate(new Date(2026, 2, 31), -1, "month"))).toBe("2026-02");
+  });
+
+  it("lands on the first, so the next step cannot overflow either", () => {
+    expect(stepCalendarDate(new Date(2026, 0, 31), 1, "month").getDate()).toBe(1);
+  });
+
+  it("walks twelve months without losing one", () => {
+    let d = new Date(2026, 0, 31);
+    const seen: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      d = stepCalendarDate(d, 1, "month");
+      seen.push(iso(d));
+    }
+    expect(seen).toEqual([
+      "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07",
+      "2026-08", "2026-09", "2026-10", "2026-11", "2026-12", "2027-01"
+    ]);
+  });
+
+  it("crosses the year boundary in both directions", () => {
+    expect(iso(stepCalendarDate(new Date(2026, 11, 31), 1, "month"))).toBe("2027-01");
+    expect(iso(stepCalendarDate(new Date(2026, 0, 1), -1, "month"))).toBe("2025-12");
+  });
+
+  it("steps exactly seven days in week mode, keeping the day-of-month arithmetic", () => {
+    const d = stepCalendarDate(new Date(2026, 0, 29), 1, "week");
+    expect(iso(d)).toBe("2026-02");
+    expect(d.getDate()).toBe(5);
+  });
+});
+
+// The Studio link carries the calendar row's identity. Number("item_lz3k9_ab12") is
+// NaN, so coercing it meant Studio could never match the row and generating from a
+// calendar link never moved the item to Draft.
+describe("buildStudioHref", () => {
+  const q = (href: string) => new URLSearchParams(href.split("?")[1]);
+
+  it("passes a modern string id through intact", () => {
+    const href = buildStudioHref({ topic: "AI at work", contentType: "Carousel", pillar: "Behavioral Signal", id: "item_lz3k9_ab12" });
+    expect(q(href).get("n")).toBe("item_lz3k9_ab12");
+    expect(Number.isNaN(Number(q(href).get("n")))).toBe(true); // the exact value that used to be discarded
+  });
+
+  it("prefers the legacy numeric key when the row has one", () => {
+    expect(q(buildStudioHref({ n: 12, id: "item_x" })).get("n")).toBe("12");
+  });
+
+  it("keeps n=0 rather than falling through to the id", () => {
+    expect(q(buildStudioHref({ n: 0, id: "item_x" })).get("n")).toBe("0");
+  });
+
+  it("says 'new' for an unsaved slot", () => {
+    expect(q(buildStudioHref({ topic: "t" })).get("n")).toBe("new");
+  });
+
+  it("carries the design set and idea style only when present", () => {
+    expect(q(buildStudioHref({ id: "a" })).has("set")).toBe(false);
+    expect(q(buildStudioHref({ id: "a", set: "magazine", style: "bold" })).get("set")).toBe("magazine");
   });
 });
