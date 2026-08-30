@@ -646,6 +646,11 @@ export default function Studio() {
 
   // -------------------- export handlers --------------------
   const elIds = deck.map((_, i) => `exp-${i}`);
+  // Anything that is genuinely a multi-page document: the decks, and Montage, whose
+  // one wide canvas is posted as `frames` separate slides.
+  const docCapable = Boolean(fmt.deck || fmt.frames);
+  const docPages = fmt.frames || deck.length;
+  const pngFiles = exportFileCount(deck.length, fmt.frames);
   // The same per-page bundle the hidden export copies get, so the feed preview shows
   // the identical artwork rather than a second interpretation of it.
   const previewPages: PreviewPage[] = deck.map((d, i) => ({
@@ -725,37 +730,42 @@ export default function Studio() {
     }
   }
   /**
-   * Montage's LinkedIn-ready export: the 3-page PDF for a document post AND the three
-   * numbered PNGs for a native image carousel, from one click.
+   * The LinkedIn document PDF, for whichever shape this format is.
    *
-   * Montage is the only single format that is genuinely a multi-page document, but the
-   * deck PDF button is gated on `fmt.deck`, so it was the one format that could not
-   * produce the file LinkedIn uploads directly.
-   *
-   * The PDF is written first: it is the artefact most likely to be wanted, so if the
-   * run is interrupted the useful file is already on disk.
+   * Decks are one element per page. Montage is the opposite: ONE element sliced into
+   * `frames` pages, which exportPdf cannot express — hence the separate path.
    */
-  async function handleExportLinkedIn() {
-    if (exportBusy || pdfBusy) return;
-    const frames = fmt.frames;
-    if (!frames) return;
-    setExportBusy(true);
+  async function handleExportDocPdf() {
+    if (pdfBusy || exportBusy) return;
     setError("");
     const base = `kognoz-${format.toLowerCase().replace(/\s+/g, "-")}`;
     try {
-      await exportFramesPdf("exp-0", baseW, baseH, frames, `${base}-linkedin`, (k) => setPdfBusy(k));
-      setPdfBusy(0);
-      await exportPNG({ elId: "exp-0", baseW, baseH, frames, filenameBase: base });
-      saveStyleExample();
+      if (fmt.frames) {
+        await exportFramesPdf("exp-0", baseW, baseH, fmt.frames, `${base}-linkedin`, (k) => setPdfBusy(k));
+      } else {
+        await exportPdf(elIds, baseW, baseH, (k) => setPdfBusy(k), `${base}-deck`);
+      }
     } catch (e) {
-      setError(
-        `LinkedIn export failed (${e instanceof Error ? e.name + ": " + e.message : e}). ` +
-          `"Download ${frames} frames" still works, and a screenshot of the preview always does.`
-      );
+      setError(`LinkedIn PDF failed (${e instanceof Error ? e.name + ": " + e.message : e}). The PNGs still work; tell me this message if it repeats.`);
     } finally {
       setPdfBusy(0);
-      setExportBusy(false);
     }
+  }
+
+  /**
+   * The same content as PNGs, for a native image carousel.
+   *
+   * Paired with the PDF button rather than folded into it: which one you want depends
+   * on how you are posting, and doing both every time writes files you did not ask for.
+   */
+  async function handleExportPngSet() {
+    if (exportBusy || pdfBusy) return;
+    if (fmt.frames) {
+      // One element, N frame slices.
+      await handleExportPNG(0);
+      return;
+    }
+    await handleExportAll();
   }
 
   async function handleExportPanorama() {
@@ -1711,35 +1721,44 @@ export default function Studio() {
               {format} has a single fixed look
             </div>
           )}
-          <button onClick={() => handleExportPNG(current)} disabled={exportBusy} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy ? "default" : "pointer", border: "none", color: "#fff", background: C.blue, opacity: exportBusy ? 0.6 : 1 }}>
-            {fmt.frames ? `Download ${fmt.frames} frames` : fmt.single === "video" ? "Download poster PNG" : "Download this slide"}
-          </button>
-          {fmt.deck && (
-            <button onClick={handleExportPdf} disabled={!!pdfBusy} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: pdfBusy ? "default" : "pointer", border: "none", color: "#fff", background: GRAD, opacity: pdfBusy ? 0.7 : 1 }}>
-              {pdfBusy ? `Building PDF · slide ${pdfBusy}/${deck.length}…` : "⬇ Deck PDF · LinkedIn-ready"}
+          {/* A multi-page format ships two ways, and which one you want depends on how
+              you are posting: a document post takes the PDF, a native image carousel
+              takes the PNGs. They were one button doing both, which wrote files nobody
+              asked for. Every format that can produce the PDF now offers both. */}
+          {docCapable && (
+            <button
+              onClick={handleExportDocPdf}
+              disabled={!!pdfBusy || exportBusy}
+              title={`A ${docPages}-page PDF — the file LinkedIn document posts upload directly`}
+              style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: pdfBusy || exportBusy ? "default" : "pointer", border: "none", color: "#fff", background: GRAD, opacity: pdfBusy || exportBusy ? 0.7 : 1 }}
+            >
+              {pdfBusy ? `Building PDF · ${fmt.frames ? "frame" : "slide"} ${pdfBusy}/${docPages}…` : `⬇ LinkedIn PDF · ${docPages} pages`}
+            </button>
+          )}
+          {docCapable && (
+            <button
+              onClick={handleExportPngSet}
+              disabled={exportBusy || !!pdfBusy}
+              title={`The same ${docPages} ${fmt.frames ? "frames" : "slides"} as separate PNGs, for a native image carousel`}
+              style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy || pdfBusy ? "default" : "pointer", border: "none", color: "#fff", background: C.blue, opacity: exportBusy || pdfBusy ? 0.6 : 1 }}
+            >
+              {exportBusy ? "Saving PNGs…" : `⬇ LinkedIn PNGs · ${pngFiles} files`}
+            </button>
+          )}
+          {/* Framed formats have no single slide to download — the frames button above
+              already writes every one of them. */}
+          {!fmt.frames && (
+            <button
+              onClick={() => handleExportPNG(current)}
+              disabled={exportBusy}
+              style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy ? "default" : "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent", opacity: exportBusy ? 0.6 : 1 }}
+            >
+              {fmt.single === "video" ? "Download poster PNG" : docCapable ? "Download this slide only" : "Download this slide"}
             </button>
           )}
           {fmt.deck && (
             <button onClick={handleExportStrip} disabled={exportBusy} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy ? "default" : "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent", opacity: exportBusy ? 0.6 : 1 }}>
               🧵 Review strip
-            </button>
-          )}
-          {fmt.frames && (
-            <button
-              onClick={handleExportLinkedIn}
-              disabled={exportBusy || !!pdfBusy}
-              title={`A ${fmt.frames}-page PDF for a LinkedIn document post, plus the ${fmt.frames} frames as PNGs for an image carousel`}
-              style={{
-                fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8,
-                cursor: exportBusy || pdfBusy ? "default" : "pointer", border: "none", color: "#fff",
-                background: GRAD, opacity: exportBusy || pdfBusy ? 0.7 : 1
-              }}
-            >
-              {pdfBusy
-                ? `Building PDF · frame ${pdfBusy}/${fmt.frames}…`
-                : exportBusy
-                ? "Saving frames…"
-                : `⬇ LinkedIn-ready · PDF + ${fmt.frames} PNGs`}
             </button>
           )}
           {fmt.frames && (
@@ -1750,21 +1769,13 @@ export default function Studio() {
           <button
             onClick={() => setPreviewOpen(true)}
             title="See this in a LinkedIn, Instagram or X feed before you post it"
-            style={{
-              fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8,
-              cursor: "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent"
-            }}
+            style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent" }}
           >
             👁 Preview in feed
           </button>
-          {deck.length > 1 && (
-            <button onClick={handleExportAll} disabled={exportBusy} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: exportBusy ? "default" : "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent", opacity: exportBusy ? 0.6 : 1 }}>
-              {exportBusy ? "Downloading…" : `Download all (${exportFileCount(deck.length, fmt.frames)})`}
-            </button>
-          )}
         </div>
         <div style={{ fontFamily: font, fontSize: 11, color: C.inkMute, marginTop: 12, maxWidth: 380, textAlign: "center", lineHeight: 1.5 }}>
-          PNGs export at full size, with the Fraunces/Open Sans font files embedded so they render correctly outside the browser. A Design set holds ONE layout across the whole deck. &quot;Next look&quot; cycles 30 uniform looks (6 sets × 5 accent tones); pick a set or accent directly in Design elements to pin it. Photo slots appear on Carousel, Square, Article, Story and Montage — click “Add photo”, then click the slot to upload or use “Image URL”. Montage slices into carousel frames (dashed lines show the cuts). &quot;Deck PDF&quot; is the file LinkedIn document posts upload directly, one slide per page; on Montage, &quot;LinkedIn-ready&quot; does the same with one frame per page and hands you the PNGs too. &quot;Review strip&quot; is a half-size single image for quick sharing.
+          PNGs export at full size, with the Fraunces/Open Sans font files embedded so they render correctly outside the browser. A Design set holds ONE layout across the whole deck. &quot;Next look&quot; cycles 30 uniform looks (6 sets × 5 accent tones); pick a set or accent directly in Design elements to pin it. Photo slots appear on Carousel, Square, Article, Story and Montage — click “Add photo”, then click the slot to upload or use “Image URL”. Montage slices into carousel frames (dashed lines show the cuts). Multi-page formats — Carousel, Square, Idea Deck and Montage — offer the same content two ways: &quot;LinkedIn PDF&quot; is the file a document post uploads directly, one page per slide (per frame on Montage), and &quot;LinkedIn PNGs&quot; is the same set as separate images for a native carousel. &quot;Review strip&quot; is a half-size single image for quick sharing.
         </div>
       </div>
 
