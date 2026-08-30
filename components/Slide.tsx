@@ -459,6 +459,24 @@ export const Slide = React.memo(function Slide({
 
   /* ======================== ARTICLE COVER (2 designs) ======================== */
   if (kind === "article") {
+    // This renderer read NO slide content — three variants of headline + logo on a
+    // 1920px canvas. The standfirst is the body copy that makes the width work.
+    const stand = String((slides[0] || {}).body || "").trim();
+    const Standfirst = ({ dark, max }: { dark?: boolean; max?: number }) =>
+      stand ? (
+        <p
+          style={{
+            fontFamily: font,
+            fontSize: fit(38, stand, 220),
+            lineHeight: 1.5,
+            color: dark ? "rgba(255,255,255,0.85)" : C.inkSoft,
+            margin: "26px 0 0",
+            maxWidth: max || 1180
+          }}
+        >
+          {renderLines(stand)}
+        </p>
+      ) : null;
     if (variant === 1) {
       return (
         <div id={id} style={{ ...wrap, background: C.off }}>
@@ -466,7 +484,10 @@ export const Slide = React.memo(function Slide({
             <div style={{ flex: 1.15, padding: "88px 84px", display: "flex", flexDirection: "column", justifyContent: "space-between", position: "relative" }}>
               {dz.petals && <Petal w={380} o={0.4} style={{ position: "absolute", bottom: -110, left: -110 }} />}
               <Eyebrow />
-              <h1 style={{ fontFamily: displayFont, fontSize: fit(90, cover, 50), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: C.ink, margin: 0, position: "relative" }}>{renderEm(cover)}</h1>
+              <div style={{ position: "relative" }}>
+                <h1 style={{ fontFamily: displayFont, fontSize: fit(90, cover, 50), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: C.ink, margin: 0 }}>{renderEm(cover)}</h1>
+                <Standfirst max={860} />
+              </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}>
                 <Logo h={78} />
                 <div style={{ fontFamily: font, fontSize: 24, color: C.inkMute }}>{dz.url}</div>
@@ -486,6 +507,7 @@ export const Slide = React.memo(function Slide({
             <div style={{ ...GLASS_DARKBG, borderRadius: 30, padding: "70px 80px", maxWidth: 1500 }}>
               <Eyebrow dark />
               <h1 style={{ fontFamily: displayFont, fontSize: fit(96, cover, 55), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: "26px 0 0" }}>{renderEm(cover)}</h1>
+              <Standfirst dark max={1320} />
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 44 }}>
               <Logo h={78} white />
@@ -501,7 +523,10 @@ export const Slide = React.memo(function Slide({
         {dz.petals && <Petal w={460} o={0.32} style={{ position: "absolute", bottom: -160, left: -140 }} />}
         <div style={{ position: "absolute", inset: 0, padding: "88px 100px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
           <Eyebrow dark />
-          <h1 style={{ fontFamily: displayFont, fontSize: fit(108, cover, 58), fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.015em", color: "#fff", margin: 0, maxWidth: 1460 }}>{renderEm(cover)}</h1>
+          <div>
+            <h1 style={{ fontFamily: displayFont, fontSize: fit(108, cover, 58), fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.015em", color: "#fff", margin: 0, maxWidth: 1460 }}>{renderEm(cover)}</h1>
+            <Standfirst dark max={1460} />
+          </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <Logo h={82} white />
             <div style={{ fontFamily: font, fontSize: 26, color: "rgba(255,255,255,0.65)" }}>{dz.url}</div>
@@ -683,13 +708,17 @@ export const Slide = React.memo(function Slide({
         <div style={{ position: "absolute", inset: 0, padding: "88px 100px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark={onDark} />
           <h1 style={{ fontFamily: displayFont, fontSize: fit(154, cover, 62), fontWeight: 600, lineHeight: 1.04, letterSpacing: "-0.015em", color: S.heading, margin: "30px 0 0", maxWidth: 3000 }}>{renderEm(cover)}</h1>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", gap: 120 }}>
+          {/* Was `flex: 1`, which handed every spare pixel to empty space and left a
+              ~505px band across a 3240px canvas. Fixed gap; the cards take the slack. */}
+          <div style={{ height: 40 }} />
+          {/* Cards hug their copy and the row centres in the leftover height. Stretching
+              them just moved the empty band from above the cards to inside them. */}
+          <div style={{ display: "flex", gap: 120, flex: 1, alignItems: "center" }}>
             {pts.map((p, i) => (
               <div key={i} style={{ flex: 1, maxWidth: 900, ...S.panel, borderRadius: surfaceId === "press" ? 0 : 22, padding: "44px 46px" }}>
                 <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, letterSpacing: "0.14em", color: [C.cyan, C.teal, C.green][i], marginBottom: 14 }}>{String(i + 1).padStart(2, "0")}</div>
                 <div style={{ fontFamily: font, fontSize: fit(31, p.title, 40), fontWeight: 800, color: S.heading, marginBottom: 12 }}>{p.title}</div>
-                <p style={{ fontFamily: font, fontSize: fit(27, p.body, 150), lineHeight: 1.5, color: S.body, margin: 0 }}>{p.body}</p>
+                <p style={{ fontFamily: font, fontSize: fit(27, p.body, 200), lineHeight: 1.5, color: S.body, margin: 0 }}>{renderLines(p.body)}</p>
               </div>
             ))}
           </div>
@@ -730,8 +759,17 @@ export const Slide = React.memo(function Slide({
         <div style={{ position: "absolute", inset: 0, padding: "112px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark={onDark} />
           <h1 style={{ fontFamily: displayFont, fontSize: fit(90, cover, 42), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: S.heading, margin: "36px 0 44px" }}>{renderEm(cover)}</h1>
-          <ImageSlot dark={onDark} img={images.story} onPick={(u) => setImg("story", u)} label="Add photo" style={{ height: 560, borderRadius: surfaceId === "press" ? 0 : 24 }} />
-          <p style={{ fontFamily: font, fontSize: sz(37), lineHeight: 1.55, color: S.body, margin: "44px 0 0", flex: 1 }}>{renderLines(s0.body)}</p>
+          {/* Only shown once a photo is wanted — it was unconditional, so a text-only
+              Story carried a 560px empty box down the middle of the frame. */}
+          {photoOn && (
+            <ImageSlot dark={onDark} img={images.story} onPick={(u) => setImg("story", u)} label="Add photo" style={{ height: 560, borderRadius: surfaceId === "press" ? 0 : 24 }} />
+          )}
+          {/* fit(), not sz(): this was the one body with no auto-shrink, so long copy
+              ran under the footer and was silently clipped. */}
+          {/* 37px on a 1080px canvas is small for a format read full-screen on a phone,
+              and it left the lower half of a 9:16 frame empty. fit() still shrinks
+              long copy, so this raises the ceiling without risking an overflow. */}
+          <p style={{ fontFamily: font, fontSize: fit(photoOn ? 37 : 50, s0.body, 260), lineHeight: 1.5, color: S.body, margin: photoOn ? "44px 0 0" : "8px 0 0", flex: 1 }}>{renderLines(s0.body)}</p>
         </div>
         <Foot dark={onDark} right={SINGLE_R} />
       </div>
@@ -740,9 +778,17 @@ export const Slide = React.memo(function Slide({
 
   /* ====================== VIDEO (kinetic headline) ====================== */
   if (kind === "video") {
-    const s0 = slides[0] || { title: "", body: "" };
     const words = plainWords(cover);
     const bodyDelay = 0.7 + words.length * 0.14 + 0.4;
+    // Every beat that carries copy. The canvas cannot scroll, so type steps down as
+    // beats are added rather than any beat being dropped — losing the final turn
+    // would break the sequence.
+    const beats = slides.filter((b) => String(b.body || "").trim());
+    // Each beat is multi-line, and renderLines adds 0.55em between lines — so a beat
+    // is much taller than one line of type. Four three-line beats overran the footer
+    // and collided with the logo, so the headline yields space as beats are added.
+    const beatScale = beats.length <= 2 ? 1 : beats.length === 3 ? 0.8 : 0.62;
+    const headScale = beats.length >= 4 ? 0.78 : beats.length === 3 ? 0.88 : 1;
     // The keyframes live in app/globals.css, NOT in an inline <style> here:
     // lib/exportPipeline.ts strips <style> blocks from the cloned node, and the
     // SVG it rebuilds carries only the font CSS. Every animation below therefore
@@ -757,7 +803,7 @@ export const Slide = React.memo(function Slide({
           <div style={{ animation: "kvFade .6s ease .25s backwards" }}>
             <Eyebrow dark={onDark} />
           </div>
-          <h1 style={{ fontFamily: displayFont, fontSize: fit(94, cover, 46), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: S.heading, margin: "50px 0 46px" }}>
+          <h1 style={{ fontFamily: displayFont, fontSize: fit(Math.round(94 * headScale), cover, 46), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: S.heading, margin: `${Math.round(50 * headScale)}px 0 ${Math.round(46 * headScale)}px` }}>
             {words.map((w, i) => (
               <span
                 key={i}
@@ -774,19 +820,27 @@ export const Slide = React.memo(function Slide({
               </span>
             ))}
           </h1>
-          <p
-            style={{
-              fontFamily: font,
-              fontSize: fit(40, s0.body, 170),
-              lineHeight: 1.55,
-              color: S.body,
-              margin: 0,
-              flex: 1,
-              animation: `kvFade .9s ease ${bodyDelay}s backwards`
-            }}
-          >
-            {renderLines(s0.body)}
-          </p>
+          {/* A sequence, not a card: each beat is revealed in turn, continuing the
+              stagger the headline started. Was a single <p> bound to slides[0].body,
+              which is why the frame sat ~500px empty. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: Math.round(30 * beatScale * scale), flex: 1, minHeight: 0, overflow: "hidden" }}>
+            {beats.map((b, i) => (
+              <p
+                key={i}
+                style={{
+                  fontFamily: font,
+                  fontSize: fit(Math.round(40 * beatScale), b.body, 150),
+                  lineHeight: 1.5,
+                  color: i === 0 ? S.heading : S.body,
+                  fontWeight: i === 0 ? 600 : 400,
+                  margin: 0,
+                  animation: `kvFade .9s ease ${bodyDelay + i * 0.5}s backwards`
+                }}
+              >
+                {renderLines(b.body)}
+              </p>
+            ))}
+          </div>
         </div>
         <div style={{ animation: `kvFade .8s ease ${bodyDelay + 1.2}s backwards` }}>
           <Foot dark={onDark} right={SINGLE_R} />

@@ -94,20 +94,46 @@ export interface RawParsed {
   cta?: unknown;
 }
 
-export function coerceContent(parsed: RawParsed, keepCount?: number): CoercedContent {
+/**
+ * Character budgets applied after the model replies. These are a silent ceiling:
+ * asking a prompt for a 400-character body is pointless if this cuts it to 230,
+ * which is exactly why Video Kinetic and Story looked empty no matter what the
+ * prompt said. Defaults match the historical values so existing callers are
+ * unchanged; formats that genuinely need more copy pass their own.
+ */
+export interface ContentBudget {
+  title?: number;
+  body?: number;
+  cover?: number;
+  cta?: number;
+  slides?: number;
+}
+
+export const DEFAULT_BUDGET: Required<ContentBudget> = {
+  title: 64,
+  body: 230,
+  cover: 95,
+  // Founder Video asks for a ~280-char LinkedIn caption in `cta`; the old 110 was
+  // throwing away roughly 60% of it before anyone could read it.
+  cta: 300,
+  slides: 8
+};
+
+export function coerceContent(parsed: RawParsed, keepCount?: number, budget: ContentBudget = {}): CoercedContent {
+  const b = { ...DEFAULT_BUDGET, ...budget };
   const raw = Array.isArray(parsed.slides) ? parsed.slides : [];
   const out: CoercedSlide[] = raw
     .map((x) => ({
-      title: scrubInline(clampText(stripUrl(x && x.title), 64)),
-      body: structureBody(clampText(stripUrl(x && x.body), 230))
+      title: scrubInline(clampText(stripUrl(x && x.title), b.title)),
+      body: structureBody(clampText(stripUrl(x && x.body), b.body))
     }))
     .filter((x) => x.title || x.body);
   if (!out.length) throw new Error("no slides");
   return {
     eyebrow: scrubInline(clampText(stripUrl(parsed.eyebrow), 40)),
-    cover: ensureEm(scrubInline(clampText(stripWrapQuotes(stripUrl(parsed.cover)), 95))),
-    slides: keepCount ? out.slice(0, keepCount) : out.slice(0, 8),
-    cta: scrubInline(clampText(stripUrl(parsed.cta), 110))
+    cover: ensureEm(scrubInline(clampText(stripWrapQuotes(stripUrl(parsed.cover)), b.cover))),
+    slides: out.slice(0, keepCount || b.slides),
+    cta: scrubInline(clampText(stripUrl(parsed.cta), b.cta))
   };
 }
 

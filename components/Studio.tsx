@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
-import { FORMATS, SLIDE_SLOTS, DECK_SLIDE_LIMITS, type FormatId } from "@/lib/formats";
+import { FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, DECK_SLIDE_LIMITS, bodyBudgetFor, type FormatId } from "@/lib/formats";
 import { PILLARS } from "@/lib/pillars";
 import { DESIGN_SETS, SURFACE_LABELS, surfaceFor, lookLever, nextCardSet, type DesignSetId } from "@/lib/designSets";
 import {
@@ -132,6 +132,9 @@ export default function Studio() {
 
   // A regenerate used to silently delete the article and verify pass the user had
   // already paid for, forcing them to buy both again. Keep them, flag them stale.
+  // Content is written FOR a format. Switching afterwards used to leave Carousel copy
+  // sitting in a Story frame with no signal at all; now it says so.
+  const [staleFormat, setStaleFormat] = useState(false);
   const [staleArticle, setStaleArticle] = useState(false);
   const [staleVerify, setStaleVerify] = useState(false);
 
@@ -210,6 +213,15 @@ export default function Studio() {
   const addSlide = () =>
     setSlides((s) => (s.length >= slideCap ? s : [...s, { title: "New point", body: "One clear idea for this slide." }]));
   const rmSlide = (i: number) => setSlides((s) => (s.length > 1 ? s.filter((_, j) => j !== i) : s));
+
+  const selectFormat = (f: FormatId) => {
+    if (f === format) return;
+    // Only stale if there is real generated content to mismatch — the seeded default
+    // deck is not worth warning about.
+    if (slides !== DEFAULT_SLIDES) setStaleFormat(true);
+    setFormat(f);
+    setCurrent(0);
+  };
 
   const accent = design.accent || PILLARS[pillar] || C.blue;
   const fmt = FORMATS[format];
@@ -308,7 +320,11 @@ export default function Studio() {
         fresh,
         grounded: gGrounded
       });
-      const parsed = coerceContent(await callClaudeJSON("generate", prompt, { useSearch }));
+      // Per-format body budget: without it, a Story asking for three paragraphs gets
+      // cut to 230 characters on arrival and the page looks unchanged.
+      const parsed = coerceContent(await callClaudeJSON("generate", prompt, { useSearch }), undefined, {
+        body: bodyBudgetFor(gFormat)
+      });
       if (gFormat === "Idea Deck") parsed.slides = applyIdeaDeckKickers(parsed.slides, ideaStyle);
       if (gFormat === "Stat Card" && parsed.slides[0]) parsed.slides[0] = applyStatCardHygiene(parsed.slides[0]);
 
@@ -320,6 +336,7 @@ export default function Studio() {
       setScales({});
       setImgOn({});
       snapshotDeck("previous deck");
+      setStaleFormat(false);
       setStaleArticle(Boolean(article));
       setStaleVerify(Boolean(verifyRes || verifyFixed));
       setCurrent(0);
@@ -348,7 +365,9 @@ export default function Studio() {
     setError("");
     try {
       const prompt = buildModifyPrompt({ eyebrow, cover, slides, cta, instruction: modTxt, housePrefs });
-      const parsed = coerceContent(await callClaudeJSON("revise", prompt, { model: FAST_MODEL }));
+      const parsed = coerceContent(await callClaudeJSON("revise", prompt, { model: FAST_MODEL }), undefined, {
+        body: bodyBudgetFor(format)
+      });
       snapshotDeck("revision");
       setEyebrow(parsed.eyebrow || eyebrow);
       setCover(parsed.cover || cover);
@@ -738,13 +757,31 @@ export default function Studio() {
           <div style={{ fontFamily: font, fontSize: 12, color: C.inkMute }}>→</div>
         </a>
 
-        <span style={label}>Format</span>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 20 }}>
-          {(Object.keys(FORMATS) as FormatId[]).map((f) => (
-            <div key={f} onClick={() => { setFormat(f); setCurrent(0); }} style={chip(format === f, C.blue)}>
-              {FORMATS[f].hint}
-            </div>
-          ))}
+        {/* Step one, and deliberately the heaviest control on the panel. Generation is
+            format-specific — the prompt, the slide count and what a "slide" even means
+            all differ — so choosing afterwards means paying for a second run. */}
+        <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, padding: "14px 16px 16px", marginBottom: 20, background: C.off }}>
+          <span style={{ ...label, marginBottom: 10 }}>Step 1 · Choose the format first</span>
+          <div role="radiogroup" aria-label="Content format" style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {(Object.keys(FORMATS) as FormatId[]).map((f) => (
+              <button
+                key={f}
+                type="button"
+                role="radio"
+                aria-checked={format === f}
+                onClick={() => selectFormat(f)}
+                style={{ ...chip(format === f, C.blue), font: "inherit", ...chip(format === f, C.blue) }}
+              >
+                {FORMATS[f].hint}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkSoft, marginTop: 11, lineHeight: 1.5 }}>
+            <b style={{ color: C.ink }}>{format}</b> · {FORMAT_BRIEF[format]}.{" "}
+            <span style={{ color: C.inkMute }}>
+              Claude writes for this format specifically, so switching afterwards means generating again.
+            </span>
+          </div>
         </div>
 
         {format === "Idea Deck" && (
@@ -810,8 +847,15 @@ export default function Studio() {
           disabled={loading}
           style={btn(true)}
         >
-          {loading ? "Writing & designing…" : grounded ? "Generate with Claude · grounded" : "Generate with Claude"}
+          {loading
+            ? "Writing & designing…"
+            : `Generate ${format}${grounded ? " · grounded" : ""}`}
         </button>
+        {staleFormat && !loading && (
+          <div style={{ fontFamily: font, fontSize: 11.5, color: "#B4442E", marginTop: 8, lineHeight: 1.5 }}>
+            This text was written for a different format. Generate again so Claude writes it for {format} · {FORMAT_BRIEF[format]}.
+          </div>
+        )}
         {primedFromCalendar && !loading && (
           <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginTop: 8, lineHeight: 1.5 }}>
             Loaded from the calendar and ready. Nothing has been generated yet — press Generate when the brief looks right.
@@ -1111,7 +1155,7 @@ export default function Studio() {
                 type="button"
                 onClick={() => generate()}
                 disabled={loading || !topic.trim()}
-                title="Regenerate with Claude"
+                title={`Regenerate with Claude · writes for ${format}`}
                 style={{
                   fontFamily: font,
                   fontSize: isMobile ? 11 : 12,
