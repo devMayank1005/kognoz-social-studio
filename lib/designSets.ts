@@ -66,8 +66,10 @@ export function lookLever(spec: { deck?: true; idea?: true; single?: string }): 
       // the stat card always did. Story is the odd one: it ships dark, so its
       // second register is the light one.
       return "cards";
+    case "video":
+      return "cards";                    // kinetic headline, surface-driven like the rest
     default:
-      return "none";                     // video: poster frame only, no look to cycle
+      return "none";
   }
 }
 

@@ -25,10 +25,16 @@ describe("lookLever", () => {
     expect(lookLever(FORMATS["Idea Deck"])).toBe("cards");
   });
 
-  it("leaves only Video without a look to cycle", () => {
-    expect(lookLever(FORMATS.Video)).toBe("none");
+  it("gives every studio format a look to cycle", () => {
+    // This test previously asserted Video had NO look — which quietly documented
+    // a deleted renderer as intended behaviour and hid the bug from review.
+    // Video is surface-driven like the rest now, so nothing should be stuck.
     const stuck = STUDIO_FORMATS.filter((f) => lookLever(FORMATS[f]) === "none");
-    expect(stuck).toEqual(["Video"]);
+    expect(stuck).toEqual([]);
+  });
+
+  it("gives Video the card register, like the other single-asset formats", () => {
+    expect(lookLever(FORMATS.Video)).toBe("cards");
   });
 
   it("classifies every studio format", () => {

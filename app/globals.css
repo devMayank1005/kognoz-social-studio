@@ -48,3 +48,37 @@ h3,
     transform: scale(1.05);
   }
 }
+
+/* Kinetic video headline. These live here, not in an inline <style> inside the
+   slide, because lib/exportPipeline.ts strips <style> blocks out of the cloned
+   node before rasterising — and the rebuilt SVG only carries the font CSS.
+   Every animation using these must therefore use `backwards`, never `forwards`,
+   and must NOT set an inline opacity:0. With the keyframes absent at export time
+   the element then simply renders at full opacity instead of exporting blank. */
+@keyframes kvRise {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes kvFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes kvDrift {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-14px) scale(1.03);
+  }
+}

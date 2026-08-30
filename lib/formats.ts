@@ -48,6 +48,20 @@ export const FORMATS: Record<FormatId, FormatSpec> = {
 // no visual asset, so they're deliberately not in FORMATS above.
 export const CALENDAR_ONLY_FORMATS = ["Text post", "Poll"] as const;
 
+// How many slides each single-asset renderer actually DRAWS. Anything past this is
+// silently dropped by <Slide>, so the editor must not offer to add it. Counts are
+// read straight off the renderers in components/Slide.tsx.
+export const SLIDE_SLOTS: Record<SingleKind, number> = {
+  article: 0, // renders `cover` only
+  stat: 1, // slides[0]
+  story: 1, // slides[0]
+  video: 1, // slides[0]
+  split: 2, // slides[0..1]
+  montage: 3, // slides[0..2]
+  dialogue: 8, // maps all
+  script: 8 // maps all
+};
+
 export const STUDIO_FORMATS: FormatId[] = [
   "Carousel",
   "Square",

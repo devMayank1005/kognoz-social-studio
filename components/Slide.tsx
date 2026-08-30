@@ -266,6 +266,11 @@ export const Slide = React.memo(function Slide({
     }
   };
   const S = SURFACES[surfaceId];
+  // `press` states itself with a 6px top rule. That is a page-level device: repeated
+  // down a stack of chat bubbles or script beats it adds real height to a canvas that
+  // cannot scroll, and reads as noise. Flatten it to a hairline for repeated items.
+  const stackPanel: React.CSSProperties =
+    surfaceId === "press" ? { background: C.white, border: "none", borderTop: `2px solid ${C.line}` } : S.panel;
   // GRAD_DARK is built from C.blue, so an accent of blue is invisible on a dark
   // register — label and background are the same colour. The lighter tones read
   // fine as-is. Mirrors what <Eyebrow dark> already does at the top of this file.
@@ -511,6 +516,14 @@ export const Slide = React.memo(function Slide({
     const s0 = slides[0] || { title: "", body: "" };
     // The number is the design. On light surfaces it takes the brand gradient; on
     // dark ones it goes solid white inside a panel, which reads far better there.
+    //
+    // But nothing stops the title being a sentence — a Carousel claim read through
+    // this format is ~36 chars, and fit(220, …, 8) bottoms out at its 58% floor and
+    // bursts the card. Pick the base off length instead of assuming a figure; the
+    // floor then does the right thing either way, and prose gets a lineHeight that
+    // does not clip descenders.
+    const figure = String(s0.title || "");
+    const isFigure = figure.length <= 12;
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
         {dz.petals && <Petal w={onDark ? 620 : 560} o={S.petal} style={{ position: "absolute", ...(onDark ? { top: -200, right: -200 } : { bottom: -170, right: -170 }) }} />}
@@ -519,7 +532,7 @@ export const Slide = React.memo(function Slide({
           {onDark ? (
             <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
               <div style={{ ...S.panel, width: "100%", borderRadius: 28, padding: "70px 60px", textAlign: "center" }}>
-                <div style={{ fontFamily: displayFont, fontSize: fit(220, s0.title, 8), fontWeight: 600, lineHeight: 0.95, letterSpacing: "-0.02em", color: "#fff", paddingBottom: "0.1em" }}>{s0.title}</div>
+                <div style={{ fontFamily: displayFont, fontSize: isFigure ? fit(220, figure, 8) : fit(88, figure, 44), fontWeight: 600, lineHeight: isFigure ? 0.95 : 1.12, letterSpacing: "-0.02em", color: "#fff", paddingBottom: "0.1em" }}>{figure}</div>
                 <p style={{ fontFamily: font, fontSize: fit(38, s0.body, 150), lineHeight: 1.5, color: S.body, fontWeight: 600, margin: 0 }}>{renderLines(s0.body)}</p>
               </div>
             </div>
@@ -528,9 +541,9 @@ export const Slide = React.memo(function Slide({
               <div
                 style={{
                   fontFamily: displayFont,
-                  fontSize: fit(240, s0.title, 8),
+                  fontSize: isFigure ? fit(240, figure, 8) : fit(96, figure, 44),
                   fontWeight: 600,
-                  lineHeight: 0.95,
+                  lineHeight: isFigure ? 0.95 : 1.12,
                   letterSpacing: "-0.02em",
                   ...(surfaceId === "press"
                     ? { color: C.ink }
@@ -539,7 +552,7 @@ export const Slide = React.memo(function Slide({
                   marginBottom: "-0.02em"
                 }}
               >
-                {s0.title}
+                {figure}
               </div>
               {surfaceId === "press" && <div style={{ height: 6, background: C.ink, width: 220, margin: "0 0 30px" }} />}
               <p style={{ fontFamily: font, fontSize: fit(40, s0.body, 150), lineHeight: 1.5, color: S.heading, fontWeight: 600, margin: 0, maxWidth: 820 }}>{renderLines(s0.body)}</p>
@@ -570,7 +583,7 @@ export const Slide = React.memo(function Slide({
           <div style={{ flex: 1, display: "flex" }}>
             <div style={{ flex: 1, background: claimBg, padding: "58px 60px", display: "flex", flexDirection: "column" }}>
               <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: claimLabel, marginBottom: 30 }}>{L.title}</div>
-              <p style={{ fontFamily: displayFont, fontSize: sz(45), lineHeight: 1.28, color: claimBody, margin: 0, fontStyle: "italic" }}>&ldquo;{renderLines(L.body)}&rdquo;</p>
+              <p style={{ fontFamily: displayFont, fontSize: fit(45, L.body, 150), lineHeight: 1.28, color: claimBody, margin: 0, fontStyle: "italic" }}>&ldquo;{renderLines(L.body)}&rdquo;</p>
             </div>
             <div
               style={{
@@ -587,7 +600,7 @@ export const Slide = React.memo(function Slide({
             >
               {dz.petals && <Petal w={340} o={0.42} style={{ position: "absolute", bottom: -100, right: -100 }} />}
               <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: C.green, marginBottom: 30, position: "relative" }}>{Rt.title}</div>
-              <p style={{ fontFamily: displayFont, fontSize: sz(45), lineHeight: 1.28, color: "#fff", margin: 0, position: "relative" }}>{Rt.body}</p>
+              <p style={{ fontFamily: displayFont, fontSize: fit(45, Rt.body, 150), lineHeight: 1.28, color: "#fff", margin: 0, position: "relative" }}>{Rt.body}</p>
             </div>
           </div>
           <div style={{ padding: "36px 96px 84px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${S.rule}` }}>
@@ -603,13 +616,19 @@ export const Slide = React.memo(function Slide({
   if (kind === "dialogue") {
     // One renderer across all six surfaces. Kognoz's turn always sits right and
     // carries the accent; the other speaker sits left and stays quieter.
+    //
+    // The canvas cannot scroll, and dropping the last turn would destroy the
+    // exchange — the punchline is always final. So density is the only honest
+    // lever: type, gap and padding shrink together as turns are added.
+    const dn = Math.max(slides.length, 1);
+    const d = Math.min(1, Math.max(0.5, 3.5 / dn));
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
         {dz.petals && <Petal w={onDark ? 520 : 460} o={S.petal} style={{ position: "absolute", top: -150, right: -150 }} />}
         <div style={{ position: "absolute", inset: 0, padding: "80px 96px 190px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark={onDark} />
-          <h1 style={{ fontFamily: displayFont, fontSize: fit(56, cover, 62), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: S.heading, margin: "22px 0 50px" }}>{renderEm(cover)}</h1>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 28 }}>
+          <h1 style={{ fontFamily: displayFont, fontSize: fit(56, cover, 62), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: S.heading, margin: `22px 0 ${Math.round(50 * d)}px` }}>{renderEm(cover)}</h1>
+          <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: Math.round(28 * d) }}>
             {slides.map((m, i) => {
               const isK = /kognoz/i.test(m.title);
               return (
@@ -618,10 +637,10 @@ export const Slide = React.memo(function Slide({
                     <div
                       style={{
                         fontFamily: font,
-                        fontSize: 20,
+                        fontSize: Math.round(20 * d),
                         fontWeight: 700,
                         color: isK ? (onDark ? C.green : C.blue) : S.label,
-                        marginBottom: 8,
+                        marginBottom: Math.round(8 * d),
                         textAlign: isK ? "right" : "left",
                         letterSpacing: "0.06em",
                         textTransform: "uppercase"
@@ -631,11 +650,11 @@ export const Slide = React.memo(function Slide({
                     </div>
                     <div
                       style={{
-                        ...S.panel,
+                        ...stackPanel,
                         fontFamily: font,
-                        fontSize: sz(32),
+                        fontSize: fit(Math.round(32 * d), m.body, 110),
                         lineHeight: 1.45,
-                        padding: "26px 32px",
+                        padding: `${Math.round(26 * d)}px ${Math.round(32 * d)}px`,
                         borderRadius: surfaceId === "press" ? (isK ? "0 0 0 0" : "0") : isK ? "22px 22px 6px 22px" : "22px 22px 22px 6px",
                         color: S.heading
                       }}
@@ -669,8 +688,8 @@ export const Slide = React.memo(function Slide({
             {pts.map((p, i) => (
               <div key={i} style={{ flex: 1, maxWidth: 900, ...S.panel, borderRadius: surfaceId === "press" ? 0 : 22, padding: "44px 46px" }}>
                 <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, letterSpacing: "0.14em", color: [C.cyan, C.teal, C.green][i], marginBottom: 14 }}>{String(i + 1).padStart(2, "0")}</div>
-                <div style={{ fontFamily: font, fontSize: sz(31), fontWeight: 800, color: S.heading, marginBottom: 12 }}>{p.title}</div>
-                <p style={{ fontFamily: font, fontSize: sz(27), lineHeight: 1.5, color: S.body, margin: 0 }}>{p.body}</p>
+                <div style={{ fontFamily: font, fontSize: fit(31, p.title, 40), fontWeight: 800, color: S.heading, marginBottom: 12 }}>{p.title}</div>
+                <p style={{ fontFamily: font, fontSize: fit(27, p.body, 150), lineHeight: 1.5, color: S.body, margin: 0 }}>{p.body}</p>
               </div>
             ))}
           </div>
@@ -695,7 +714,9 @@ export const Slide = React.memo(function Slide({
           <div style={{ position: "absolute", top: 112, left: 96, right: 96 }}>
             <Eyebrow dark />
           </div>
-          <div style={{ position: "absolute", left: 84, right: 84, bottom: 210, ...GLASS_DARKBG, borderRadius: 26, padding: "52px 54px" }}>
+          {/* auto height meant long copy grew UPWARD over the eyebrow; both children
+              already use fit(), so this is a backstop rather than the mechanism. */}
+          <div style={{ position: "absolute", left: 84, right: 84, bottom: 210, maxHeight: baseH - 420, overflow: "hidden", ...GLASS_DARKBG, borderRadius: 26, padding: "52px 54px" }}>
             <h1 style={{ fontFamily: displayFont, fontSize: fit(74, cover, 42), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: "#fff", margin: "0 0 22px" }}>{renderEm(cover)}</h1>
             <p style={{ fontFamily: font, fontSize: fit(33, s0.body, 180), lineHeight: 1.5, color: "rgba(255,255,255,0.9)", margin: 0 }}>{renderLines(s0.body)}</p>
           </div>
@@ -717,10 +738,72 @@ export const Slide = React.memo(function Slide({
     );
   }
 
+  /* ====================== VIDEO (kinetic headline) ====================== */
+  if (kind === "video") {
+    const s0 = slides[0] || { title: "", body: "" };
+    const words = plainWords(cover);
+    const bodyDelay = 0.7 + words.length * 0.14 + 0.4;
+    // The keyframes live in app/globals.css, NOT in an inline <style> here:
+    // lib/exportPipeline.ts strips <style> blocks from the cloned node, and the
+    // SVG it rebuilds carries only the font CSS. Every animation below therefore
+    // uses `backwards` and sets no inline opacity — with the keyframes missing at
+    // export time the element renders at full opacity instead of exporting blank.
+    return (
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        <div style={{ position: "absolute", top: -170, right: -190, animation: "kvDrift 9s ease-in-out infinite" }}>
+          {dz.petals && <Petal w={600} o={S.petal} />}
+        </div>
+        <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
+          <div style={{ animation: "kvFade .6s ease .25s backwards" }}>
+            <Eyebrow dark={onDark} />
+          </div>
+          <h1 style={{ fontFamily: displayFont, fontSize: fit(94, cover, 46), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: S.heading, margin: "50px 0 46px" }}>
+            {words.map((w, i) => (
+              <span
+                key={i}
+                style={{
+                  display: "inline-block",
+                  marginRight: "0.26em",
+                  animation: `kvRise .8s cubic-bezier(.2,.75,.2,1) ${0.7 + i * 0.14}s backwards`,
+                  // EM_STYLE is the brand gradient clipped to text, built from
+                  // C.blue — invisible on a dark page, same as the stat card.
+                  ...(w.em ? (onDark ? { color: accentOnDark } : EM_STYLE) : {})
+                }}
+              >
+                {w.t}
+              </span>
+            ))}
+          </h1>
+          <p
+            style={{
+              fontFamily: font,
+              fontSize: fit(40, s0.body, 170),
+              lineHeight: 1.55,
+              color: S.body,
+              margin: 0,
+              flex: 1,
+              animation: `kvFade .9s ease ${bodyDelay}s backwards`
+            }}
+          >
+            {renderLines(s0.body)}
+          </p>
+        </div>
+        <div style={{ animation: `kvFade .8s ease ${bodyDelay + 1.2}s backwards` }}>
+          <Foot dark={onDark} right={SINGLE_R} />
+        </div>
+      </div>
+    );
+  }
+
   if (kind === "script") {
     // Shoot script: one surface-driven sheet. The accent has to survive a dark page,
     // where C.blue is the same colour as the background.
     const cue = onDark ? accentOnDark : accent;
+    // A shoot script missing its closing beat is useless on set, so beats are never
+    // dropped — density shrinks instead. At 5 beats the old fixed sizing needed
+    // ~925px in ~824px of column, which is the reported "slide 5 not aligned".
+    const bn = Math.max(slides.length, 1);
+    const d = Math.min(1, Math.max(0.55, 4.5 / bn));
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
         {onDark && dz.petals && <Petal w={520} o={S.petal} style={{ position: "absolute", top: -170, right: -170 }} />}
@@ -729,18 +812,21 @@ export const Slide = React.memo(function Slide({
             <div style={{ fontFamily: font, fontSize: 21, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: cue }}>Founder video · shoot script</div>
             <div style={{ fontFamily: font, fontSize: 19, fontWeight: 700, color: S.label, letterSpacing: "0.1em", textTransform: "uppercase" }}>{eyebrow}</div>
           </div>
-          <h1 style={{ fontFamily: displayFont, fontSize: 52, fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: S.heading, margin: "0 0 34px" }}>{renderEm(cover)}</h1>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 20 }}>
+          <h1 style={{ fontFamily: displayFont, fontSize: fit(52, cover, 60), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: S.heading, margin: `0 0 ${Math.round(34 * d)}px` }}>{renderEm(cover)}</h1>
+          <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: Math.round(20 * d) }}>
             {slides.map((b, i) => (
-              <div key={i} style={{ display: "flex", gap: 22, padding: "24px 26px", ...S.panel, borderRadius: surfaceId === "press" ? 0 : 14 }}>
-                <div style={{ flexShrink: 0, width: 132, fontFamily: font, fontSize: 18, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: cue, paddingTop: 4 }}>{b.title}</div>
-                <p style={{ fontFamily: font, fontSize: 27, lineHeight: 1.5, color: S.heading, margin: 0 }}>{b.body}</p>
+              <div key={i} style={{ display: "flex", gap: 22, padding: `${Math.round(24 * d)}px 26px`, ...stackPanel, borderRadius: surfaceId === "press" ? 0 : 14 }}>
+                <div style={{ flexShrink: 0, width: Math.round(132 * d) + 60, fontFamily: font, fontSize: Math.round(18 * d), fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: cue, paddingTop: 4 }}>{b.title}</div>
+                {/* was a bare literal 27 — neither sz() nor the A+/A- control could reach it */}
+                <p style={{ fontFamily: font, fontSize: fit(Math.round(27 * d), b.body, 110), lineHeight: 1.5, color: S.heading, margin: 0 }}>{b.body}</p>
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 26, padding: "18px 26px", borderLeft: `3px solid ${cue}`, ...S.panel, borderRadius: surfaceId === "press" ? 0 : "0 14px 14px 0" }}>
+          {/* borderLeft AFTER the spread: every surface's S.panel sets the `border`
+              shorthand, which resets all four sides and silently wiped this rule. */}
+          <div style={{ marginTop: 26, padding: "18px 26px", ...S.panel, borderLeft: `3px solid ${cue}`, borderRadius: surfaceId === "press" ? 0 : "0 14px 14px 0" }}>
             <div style={{ fontFamily: font, fontSize: 17, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: S.label, marginBottom: 8 }}>Post caption</div>
-            <p style={{ fontFamily: font, fontSize: 23, lineHeight: 1.45, color: S.body, margin: 0 }}>{plain(cta)}</p>
+            <p style={{ fontFamily: font, fontSize: fit(23, cta, 130), lineHeight: 1.45, color: S.body, margin: 0 }}>{plain(cta)}</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 26 }}>
             <Logo h={78} white={onDark} />

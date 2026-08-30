@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
-import { FORMATS, type FormatId } from "@/lib/formats";
+import { FORMATS, SLIDE_SLOTS, DECK_SLIDE_LIMITS, type FormatId } from "@/lib/formats";
 import { PILLARS } from "@/lib/pillars";
 import { DESIGN_SETS, SURFACE_LABELS, surfaceFor, lookLever, nextCardSet, type DesignSetId } from "@/lib/designSets";
 import {
@@ -207,11 +207,16 @@ export default function Studio() {
 
   const updSlide = (i: number, key: "title" | "body", val: string) =>
     setSlides((s) => s.map((x, j) => (j === i ? { ...x, [key]: val } : x)));
-  const addSlide = () => setSlides((s) => [...s, { title: "New point", body: "One clear idea for this slide." }]);
+  const addSlide = () =>
+    setSlides((s) => (s.length >= slideCap ? s : [...s, { title: "New point", body: "One clear idea for this slide." }]));
   const rmSlide = (i: number) => setSlides((s) => (s.length > 1 ? s.filter((_, j) => j !== i) : s));
 
   const accent = design.accent || PILLARS[pillar] || C.blue;
   const fmt = FORMATS[format];
+  // How many slides THIS format will actually draw. Single-asset renderers read a
+  // fixed number and silently ignore the rest, so the editor must not offer more.
+  const slideCap = fmt.deck ? DECK_SLIDE_LIMITS.max : fmt.single ? SLIDE_SLOTS[fmt.single] : 1;
+  const atCap = slides.length >= slideCap;
   const baseW = fmt.w;
   const baseH = fmt.h;
   const isMobile = winW < 768;
@@ -1202,8 +1207,18 @@ export default function Studio() {
         {/* Horizontal Slide Deck Cards in Center */}
         <div style={{ width: "100%", maxWidth: 840, marginTop: 20, padding: "16px 20px", background: C.white, borderRadius: 14, boxShadow: "0 4px 20px rgba(0,40,70,0.08)", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <span style={{ ...label, marginBottom: 0, fontSize: 13 }}>Deck Cards (Cover · Slides · Closing)</span>
-            <div onClick={addSlide} style={{ fontFamily: font, fontSize: 12.5, fontWeight: 700, color: C.blue, cursor: "pointer", background: C.mist, padding: "5px 12px", borderRadius: 6 }}>
+            <span style={{ ...label, marginBottom: 0, fontSize: 13 }}>
+              Deck Cards · {slides.length} of {slideCap}
+              {slides.length > slideCap && (
+                <span style={{ color: "#B4442E", fontWeight: 700 }}> · {format} draws only the first {slideCap}</span>
+              )}
+              {slides.length > 3 && <span style={{ color: C.inkMute, fontWeight: 400 }}> · scroll for more →</span>}
+            </span>
+            <div
+              onClick={atCap ? undefined : addSlide}
+              title={atCap ? `${format} renders ${slideCap} ${slideCap === 1 ? "slide" : "slides"} — anything more would not be drawn.` : undefined}
+              style={{ fontFamily: font, fontSize: 12.5, fontWeight: 700, color: atCap ? C.inkMute : C.blue, cursor: atCap ? "default" : "pointer", background: C.mist, padding: "5px 12px", borderRadius: 6, opacity: atCap ? 0.55 : 1 }}
+            >
               + Add slide
             </div>
           </div>
@@ -1353,7 +1368,7 @@ export default function Studio() {
         )}
 
         <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap", justifyContent: "center", flexShrink: 0 }}>
-          {fmt.single !== "video" && lever !== "none" && (
+          {lever !== "none" && (
             <button onClick={cycleLook} style={{ fontFamily: font, fontSize: 13, fontWeight: 700, padding: "10px 18px", borderRadius: 8, cursor: "pointer", border: "none", color: "#fff", background: GRAD }}>
               🎲 Next look ·{" "}
               {lever === "cards"
@@ -1371,7 +1386,7 @@ export default function Studio() {
               {design.accent ? " · tinted" : ""}
             </button>
           )}
-          {fmt.single !== "video" && lever === "none" && (
+          {lever === "none" && (
             <div
               title="This format renders one fixed layout, so there are no alternative looks to cycle."
               style={{ fontFamily: font, fontSize: 12, color: C.inkMute, alignSelf: "center", padding: "10px 4px", lineHeight: 1.4 }}

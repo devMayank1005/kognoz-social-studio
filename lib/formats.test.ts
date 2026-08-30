@@ -36,3 +36,36 @@ describe("design sets", () => {
     expect(DESIGN_SETS.mixed).toEqual({ label: "Mixed · max variety", cover: null, contents: null, cards: null });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Guard: every format the picker offers must have a renderer.
+//
+// The `video` renderer was deleted by an unrelated edit and shipped to
+// production. `FORMATS.Video` stayed selectable, so choosing it fell through
+// every `kind ===` guard in <Slide> to the default content renderer and drew an
+// empty card. Nothing tied the format list to the renderer's dispatch, so no
+// test could fail. This is that tie.
+// ---------------------------------------------------------------------------
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+describe("every format has a renderer", () => {
+  const slideSrc = readFileSync(join(process.cwd(), "components/Slide.tsx"), "utf8");
+  const branches = new Set(Array.from(slideSrc.matchAll(/kind === "(\w+)"/g), (m) => m[1]));
+
+  it("has a `kind ===` branch in Slide.tsx for every single-asset format", () => {
+    const missing = STUDIO_FORMATS
+      .map((f) => FORMATS[f].single)
+      .filter((k): k is NonNullable<typeof k> => Boolean(k))
+      .filter((k) => !branches.has(k));
+    expect(missing).toEqual([]);
+  });
+
+  it("renders video specifically — the one that regressed", () => {
+    expect(branches.has("video")).toBe(true);
+  });
+
+  it("covers the deck kinds too", () => {
+    for (const k of ["cover", "content", "end"]) expect(branches.has(k)).toBe(true);
+  });
+});
