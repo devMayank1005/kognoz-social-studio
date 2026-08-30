@@ -9,7 +9,7 @@ import React, { useRef } from "react";
 import { C, GRAD, GRAD_DARK, FONT, DISPLAY_FONT, GLASS_DARKBG, GLASS_LIGHTBG } from "@/lib/tokens";
 import { DESIGN_SETS, isDarkSurface, surfaceFor, type DesignSetId, type SurfaceId } from "@/lib/designSets";
 import { plainWords, type CoercedSlide } from "@/lib/coerce";
-import { splitAcrossFrames, frameRoles } from "@/lib/montage";
+import { splitAcrossFrames, frameRoles, headlineAlign, longestPhrase } from "@/lib/montage";
 import { Logo } from "./Logo";
 
 const font = FONT;
@@ -744,6 +744,15 @@ export const Slide = React.memo(function Slide({
     const phrases = splitAcrossFrames(cover, FRAMES);
     const accentOf = [C.cyan, C.teal, C.green];
 
+    // ONE size for the whole headline, driven by the widest phrase so that one still
+    // fits its frame. Sizing each phrase on its own — which is what fit() does when
+    // called per frame — gave three different sizes on an uneven split, and different
+    // sizes are the most obvious tell that these are three headlines rather than one.
+    const headSize = fit(92, longestPhrase(phrases), 24);
+    // Room for two lines, fixed on every frame, so a phrase that wraps does not push
+    // its own card down while the others stay put.
+    const headBandH = Math.round(headSize * 1.04 * 2);
+
     // One wide photo across the whole strip rather than three separate ones: a single
     // image panned across three swipes is the strongest continuity device there is. As
     // on Story, a photo wins the surface outright.
@@ -803,6 +812,7 @@ export const Slide = React.memo(function Slide({
         <div style={{ position: "absolute", inset: 0, display: "flex", pointerEvents: "none" }}>
           {pts.map((p, i) => {
             const role = frameRoles(i, FRAMES);
+            const align = headlineAlign(i, FRAMES);
             return (
               <div
                 key={i}
@@ -816,30 +826,58 @@ export const Slide = React.memo(function Slide({
                   position: "relative"
                 }}
               >
-                {role.eyebrow ? <Eyebrow dark={darkType} /> : <div style={{ height: 30 }} />}
+                {/* Fixed height whether or not the eyebrow renders, so the headline
+                    band below starts at exactly the same y on all three frames. The old
+                    30px spacer only approximated the eyebrow's own height. */}
+                <div style={{ height: 30, display: "flex", alignItems: "flex-start" }}>
+                  {role.eyebrow ? <Eyebrow dark={darkType} /> : null}
+                </div>
 
-                {phrases[i] ? (
-                  <h1
-                    style={{
-                      fontFamily: displayFont,
-                      fontSize: fit(92, phrases[i], 24),
-                      fontWeight: 600,
-                      lineHeight: 1.04,
-                      letterSpacing: "-0.015em",
-                      color: heading,
-                      margin: "22px 0 0"
-                    }}
-                  >
-                    {renderEm(phrases[i])}
-                  </h1>
-                ) : null}
+                {/* The line spreads across the strip: frame one opens at the left
+                    margin, the last closes at the right, the middle is centred. Every
+                    word still stays inside its own frame — the spread is what makes it
+                    read as one line, not type running over the cuts. Bottom-aligned in a
+                    fixed band so a wrapped phrase shares a baseline with its neighbours. */}
+                <div
+                  style={{
+                    height: headBandH,
+                    marginTop: 22,
+                    display: "flex",
+                    alignItems: "flex-end",
+                    justifyContent: align === "start" ? "flex-start" : align === "end" ? "flex-end" : "center"
+                  }}
+                >
+                  {phrases[i] ? (
+                    <h1
+                      style={{
+                        fontFamily: displayFont,
+                        fontSize: headSize,
+                        fontWeight: 600,
+                        lineHeight: 1.04,
+                        letterSpacing: "-0.015em",
+                        color: heading,
+                        margin: 0,
+                        textAlign: align === "start" ? "left" : align === "end" ? "right" : "center",
+                        // fit() shrinks on character count, which cannot save a single
+                        // unbreakable token wider than the frame — a long product name,
+                        // a URL, a compound word. Without this it overflows the column
+                        // and is sliced by the cut, which is the one thing that must
+                        // never happen. Breaking it inside its own frame is the lesser
+                        // evil and the standard typographic answer.
+                        overflowWrap: "anywhere"
+                      }}
+                    >
+                      {renderEm(phrases[i])}
+                    </h1>
+                  ) : null}
+                </div>
 
                 <div
                   style={{
                     ...panelStyle,
                     borderRadius: surfaceId === "press" && !onPhoto ? 0 : 22,
                     padding: "38px 40px",
-                    marginTop: 34,
+                    marginTop: 30,
                     flex: 1,
                     display: "flex",
                     flexDirection: "column",
@@ -849,7 +887,7 @@ export const Slide = React.memo(function Slide({
                   <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.14em", color: accentOf[i], marginBottom: 12 }}>
                     {String(i + 1).padStart(2, "0")}
                   </div>
-                  <div style={{ fontFamily: font, fontSize: fit(36, p.title, 40), fontWeight: 800, color: heading, marginBottom: 12 }}>{p.title}</div>
+                  <div style={{ fontFamily: font, fontSize: fit(36, p.title, 40), fontWeight: 800, color: heading, marginBottom: 12, overflowWrap: "anywhere" }}>{p.title}</div>
                   <p style={{ fontFamily: font, fontSize: fit(29, p.body, 200), lineHeight: 1.5, color: bodyCol, margin: 0 }}>{renderLines(p.body)}</p>
                 </div>
 

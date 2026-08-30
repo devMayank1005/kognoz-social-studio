@@ -134,6 +134,28 @@ describe("Montage exports as whole frames", () => {
     expect(montage).not.toContain("renderEm(cover)");
   });
 
+  it("the three phrases share one size and one baseline", () => {
+    // Sizing each phrase on its own gave three different font sizes on an uneven split,
+    // which reads as three headlines rather than one line across the strip. The size is
+    // computed once, from the widest phrase, outside the per-frame loop.
+    const montage = branch("montage");
+    expect(montage).toContain("fit(92, longestPhrase(phrases), 24)");
+    expect(montage).not.toMatch(/fit\(\s*92\s*,\s*phrases\[i\]/);
+    expect(montage).toContain("fontSize: headSize");
+    // A fixed band, bottom-aligned, so a wrapped phrase does not shift its own card.
+    expect(montage).toContain("height: headBandH");
+    expect(montage).toContain('alignItems: "flex-end"');
+  });
+
+  it("the line opens at the left margin and closes at the right", () => {
+    const montage = branch("montage");
+    expect(montage).toContain("headlineAlign(i, FRAMES)");
+    // Alignment drives both the block and the text inside it, so a wrapped phrase
+    // aligns the same way its box does.
+    expect(montage).toContain("justifyContent: align ===");
+    expect(montage).toContain("textAlign: align ===");
+  });
+
   it("carries continuity devices that are designed to cross the cuts", () => {
     const montage = branch("montage");
     // Petals centred on the cuts at 1080 and 2160 — decoration, so a half of one is a

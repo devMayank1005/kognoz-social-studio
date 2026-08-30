@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tokenise, splitAcrossFrames, frameRoles } from "./montage";
+import { tokenise, splitAcrossFrames, frameRoles, headlineAlign, longestPhrase } from "./montage";
 
 // The headline runs across the three Montage frames so a swipe reveals it a phrase at
 // a time. Where it breaks is therefore visible on the finished asset, and two failures
@@ -124,5 +124,50 @@ describe("frameRoles", () => {
     // Repeating the mark on every frame is what broke the continuous read.
     const logos = [0, 1, 2].filter((i) => frameRoles(i, 3).logo);
     expect(logos).toEqual([2]);
+  });
+});
+
+// The headline is three phrases that have to read as one line spanning the strip.
+// Two things do that: one size for all of them, and a spread that opens at the left
+// margin and closes at the right instead of resetting in each frame's own gutter.
+describe("headlineAlign", () => {
+  it("opens the line, closes it, and centres the middle", () => {
+    expect(headlineAlign(0, 3)).toBe("start");
+    expect(headlineAlign(1, 3)).toBe("center");
+    expect(headlineAlign(2, 3)).toBe("end");
+  });
+
+  it("spreads across any frame count, not just three", () => {
+    expect([0, 1, 2, 3].map((i) => headlineAlign(i, 4))).toEqual(["start", "center", "center", "end"]);
+    // A single frame both opens and closes the line; opening wins, so it is not
+    // right-aligned against nothing.
+    expect(headlineAlign(0, 1)).toBe("start");
+  });
+
+  it("clamps rather than returning something unusable out of range", () => {
+    expect(headlineAlign(-1, 3)).toBe("start");
+    expect(headlineAlign(9, 3)).toBe("end");
+  });
+});
+
+describe("longestPhrase", () => {
+  it("picks the phrase the shared size has to fit", () => {
+    expect(longestPhrase(["Culture is", "what your people", "do"])).toBe("what your people");
+  });
+
+  it("returns the first of equals rather than flip-flopping", () => {
+    expect(longestPhrase(["aaa", "bbb"])).toBe("aaa");
+  });
+
+  it("survives empty and sparse input", () => {
+    expect(longestPhrase([])).toBe("");
+    expect(longestPhrase(["", "", ""])).toBe("");
+    expect(longestPhrase(["", "two words", ""])).toBe("two words");
+  });
+
+  it("pairs with splitAcrossFrames, so one size covers every frame", () => {
+    const phrases = splitAcrossFrames("The survey and the behaviour disagree every quarter", 3);
+    const widest = longestPhrase(phrases);
+    for (const p of phrases) expect(p.length).toBeLessThanOrEqual(widest.length);
   });
 });

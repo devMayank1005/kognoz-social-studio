@@ -66,6 +66,31 @@ export function splitAcrossFrames(text: string, n: number): string[] {
 }
 
 /**
+ * Where a frame's phrase sits so the headline spreads across the whole strip.
+ *
+ * Left-aligning every phrase in its own gutter reset the line hard at each cut and left
+ * the right-hand third of the strip empty. Opening at the left margin, closing at the
+ * right and centring what is between spreads the same words edge to edge, which is what
+ * makes three phrases read as one line — without any word leaving its frame.
+ */
+export function headlineAlign(frameIndex: number, frames: number): "start" | "center" | "end" {
+  if (frameIndex <= 0) return "start";
+  if (frameIndex >= frames - 1) return "end";
+  return "center";
+}
+
+/**
+ * The phrase the shared font size must be computed from.
+ *
+ * One size across all three frames is the difference between one headline and three.
+ * It has to be driven by the widest phrase, so that one still fits its frame and the
+ * shorter ones match it rather than growing to fill their own space.
+ */
+export function longestPhrase(phrases: string[]): string {
+  return phrases.reduce((longest, p) => ((p || "").length > longest.length ? p : longest), "");
+}
+
+/**
  * Which frame carries the eyebrow, the closing line and the mark.
  *
  * The logo appears once, on the last frame, so the strip reads as one piece signed at
