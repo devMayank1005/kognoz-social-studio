@@ -41,6 +41,7 @@ import { callClaudeJSON, callClaudeText, FAST_MODEL } from "@/lib/claudeClient";
 import { storeGet, storeSet, storePeek } from "@/lib/storeClient";
 import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG, saveBlobAs } from "@/lib/exportPipeline";
 import { SocialPreview, type PreviewPage } from "@/components/SocialPreview";
+import { ARTICLE_DRAFT_KEY, isWorthSaving, makeDraft, serialiseDraft, parseDraft, sameTopic } from "@/lib/articleDraft";
 import { Slide, type SlideDesign, type SlideKind } from "./Slide";
 import { Logo } from "./Logo";
 
@@ -142,6 +143,8 @@ export default function Studio() {
   // sitting in a Story frame with no signal at all; now it says so.
   const [staleFormat, setStaleFormat] = useState(false);
   const [staleArticle, setStaleArticle] = useState(false);
+  /** The topic a restored draft was written for, so a mismatch can be spotted later. */
+  const [draftTopic, setDraftTopic] = useState<string | null>(null);
   const [staleVerify, setStaleVerify] = useState(false);
 
   // Called whenever the deck changes underneath a completed fact-check. The verdicts
@@ -299,6 +302,11 @@ export default function Studio() {
   // frame with the mismatch warning explicitly suppressed.
   const busy = loading || modLoading;
 
+  // A restored draft written for a different topic than the one now in the box. Derived
+  // rather than stored: the topic can arrive after the draft does (a calendar link), so a
+  // value computed once on mount would always say "no mismatch".
+  const draftTopicMismatch = Boolean(article && draftTopic && topic.trim() && !sameTopic(draftTopic, topic));
+
   const accent = design.accent || PILLARS[pillar] || C.blue;
   const fmt = FORMATS[format];
   // How many slides THIS format will actually draw. Single-asset renderers read a
@@ -366,6 +374,44 @@ export default function Studio() {
     // The cover carries *emphasis* markers for the renderer; a caption is plain text.
     if (!captionTouched.current) setPreviewCaption(String(cover || "").replace(/\*/g, ""));
   }, [cover]);
+
+  /**
+   * The article is the one expensive thing in the app a refresh used to destroy: it was
+   * component state only, so a reload lost a 900-1200 word piece that cost about $0.02.
+   * localStorage rather than /api/store on purpose — the store blobs are shared team-wide,
+   * and a half-written draft belongs to the person writing it.
+   */
+  const saveArticleDraft = (text: string) => {
+    if (typeof window === "undefined") return;
+    try {
+      if (!isWorthSaving(text)) {
+        localStorage.removeItem(ARTICLE_DRAFT_KEY);
+        return;
+      }
+      localStorage.setItem(ARTICLE_DRAFT_KEY, serialiseDraft(makeDraft(topic, pillar, text, new Date().toISOString())));
+    } catch {
+      /* private mode or quota — the draft is still on screen, which is the common case */
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(ARTICLE_DRAFT_KEY);
+    } catch {
+      return;
+    }
+    const draft = parseDraft(raw);
+    if (!draft) return;
+    setArticle(draft.text);
+    // Only record WHICH topic it was written for. Deciding staleness here would compare
+    // against an empty topic every time: this runs on mount, and the calendar priming
+    // effect that puts ?topic= into state has not run yet. The comparison is derived at
+    // render instead, so it settles whenever the topic does.
+    setDraftTopic(draft.topic);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once, on mount
+  }, []);
 
   async function markDrafted(itemN: number | string) {
     // Calendar Create-> sets the item to Draft on successful generation
@@ -489,6 +535,8 @@ export default function Studio() {
       const text = await callClaudeText("article", prompt, { model: instruction && instruction.trim() ? FAST_MODEL : undefined, maxTokens: 2600 });
       setArticleUndo(article ? { text: article, label: instruction?.trim() ? "revision" : "rewrite" } : null);
       setArticle(text.trim());
+      saveArticleDraft(text.trim());
+      setDraftTopic(topic);
       setStaleArticle(false);
       setArtInstr("");
     } catch (e) {
@@ -1151,21 +1199,43 @@ export default function Studio() {
                 </button>
               </div>
             )}
-            {staleArticle && (
+            {(staleArticle || draftTopicMismatch) && (
               <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginBottom: 8, lineHeight: 1.5 }}>
                 Written for the previous version of this deck. Still yours to edit — rewrite only if it no longer fits.
               </div>
             )}
-            <button onClick={() => writeArticle()} disabled={artBusy || loading || !topic.trim()} style={{ ...btn(true), opacity: artBusy || loading || !topic.trim() ? 0.6 : 1, marginBottom: 10 }}>
+            <button
+              onClick={() => writeArticle()}
+              disabled={artBusy || loading || !topic.trim()}
+              // It sat greyed out with no explanation, which reads as broken rather than
+              // as waiting for input. Same wording as the main Generate button.
+              title={!topic.trim() ? "Type a topic first" : undefined}
+              style={{ ...btn(true), opacity: artBusy || loading || !topic.trim() ? 0.6 : 1, marginBottom: 10 }}
+            >
               {artBusy ? "Writing the article…" : article ? "Rewrite from scratch" : "Write the full article"}
             </button>
             {article && (
               <>
-                <textarea value={article} onChange={(e) => setArticle(e.target.value)} rows={16} style={{ ...inputStyle, fontFamily: font, fontSize: 12.5, lineHeight: 1.6, marginBottom: 8 }} />
+                <textarea
+                  value={article}
+                  onChange={(e) => setArticle(e.target.value)}
+                  // Saved on blur rather than on every keystroke — the same pattern House
+                  // style already uses for its textarea.
+                  onBlur={(e) => saveArticleDraft(e.target.value)}
+                  rows={16}
+                  style={{ ...inputStyle, fontFamily: font, fontSize: 12.5, lineHeight: 1.6, marginBottom: 8 }}
+                />
                 <div style={{ fontFamily: font, fontSize: 11, color: C.inkMute, marginBottom: 8 }}>{article.split(/\s+/).filter(Boolean).length} words · markdown headings paste cleanly into LinkedIn's article editor</div>
                 <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
                   <input value={artInstr} onChange={(e) => setArtInstr(e.target.value)} placeholder="Revise: e.g. sharpen the hook, shorten section 3, add a Gulf example" style={{ ...inputStyle, flex: 1, marginBottom: 0 }} />
-                  <button onClick={() => writeArticle(artInstr)} disabled={artBusy || loading || !artInstr.trim()} style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "0 14px", borderRadius: 8, cursor: artBusy || loading || !artInstr.trim() ? "default" : "pointer", border: "none", color: "#fff", background: GRAD, opacity: artBusy || loading || !artInstr.trim() ? 0.55 : 1 }}>
+                  <button
+                    onClick={() => writeArticle(artInstr)}
+                    disabled={artBusy || loading || !artInstr.trim()}
+                    // A bare glyph with no accessible name and no tooltip.
+                    title="Revise the article with this instruction"
+                    aria-label="Revise the article with this instruction"
+                    style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "0 14px", borderRadius: 8, cursor: artBusy || loading || !artInstr.trim() ? "default" : "pointer", border: "none", color: "#fff", background: GRAD, opacity: artBusy || loading || !artInstr.trim() ? 0.55 : 1 }}
+                  >
                     ↻
                   </button>
                 </div>
