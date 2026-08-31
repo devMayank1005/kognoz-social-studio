@@ -175,6 +175,16 @@ export interface SlideProps {
   scale?: number;
   ideaMode?: boolean;
   photoOn?: boolean;
+  /**
+   * Bumped whenever the content is replaced wholesale, to replay the kinetic video.
+   *
+   * A CSS animation runs once, when its element mounts. New copy re-renders the SAME
+   * nodes, so the headline and beats kept the end state of an animation that had
+   * already finished and the sequence never played again — the only way to see it was
+   * to switch format and back, which remounts everything. Changing this key remounts
+   * just the animated subtree.
+   */
+  replay?: number;
 }
 
 export const Slide = React.memo(function Slide({
@@ -196,7 +206,8 @@ export const Slide = React.memo(function Slide({
   design = {},
   scale = 1,
   ideaMode = false,
-  photoOn = false
+  photoOn = false,
+  replay = 0
 }: SlideProps) {
   const wrap: React.CSSProperties = { position: "relative", width: baseW, height: baseH, overflow: "hidden", fontFamily: font, boxSizing: "border-box" };
   const dz: Required<SlideDesign> = {
@@ -977,7 +988,7 @@ export const Slide = React.memo(function Slide({
         <div style={{ position: "absolute", top: -170, right: -190, animation: "kvDrift 9s ease-in-out infinite" }}>
           {dz.petals && <Petal w={600} o={S.petal} />}
         </div>
-        <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
+        <div key={`kv-${replay}`} style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <div style={{ animation: "kvFade .6s ease .25s backwards" }}>
             <Eyebrow dark={onDark} />
           </div>
@@ -1020,7 +1031,7 @@ export const Slide = React.memo(function Slide({
             ))}
           </div>
         </div>
-        <div style={{ animation: `kvFade .8s ease ${bodyDelay + 1.2}s backwards` }}>
+        <div key={`kv-foot-${replay}`} style={{ animation: `kvFade .8s ease ${bodyDelay + 1.2}s backwards` }}>
           <Foot dark={onDark} right={SINGLE_R} />
         </div>
       </div>

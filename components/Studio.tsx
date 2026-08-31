@@ -130,6 +130,7 @@ export default function Studio() {
     setSlides(deckUndo.slides);
     setCta(deckUndo.cta);
     setDeckUndo(null);
+    bumpReplay();
     // The verdicts describe text that is no longer on screen. Leaving "Apply
     // corrections" live against them let one click silently undo the undo.
     markVerifyStale();
@@ -157,6 +158,12 @@ export default function Studio() {
   // One flag for every download path. Without it a second click started a second
   // interleaved run writing the same filenames.
   const [exportBusy, setExportBusy] = useState(false);
+  // Replaying the kinetic video. A CSS animation only runs when its element mounts,
+  // so replacing the copy re-rendered the same nodes and the sequence never played
+  // again — switching format and back was the only way to see it. Bumped wherever the
+  // deck is replaced wholesale.
+  const [replay, setReplay] = useState(0);
+  const bumpReplay = () => setReplay((r) => r + 1);
   const [copied, setCopied] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   // Seeded from the cover, since that is the hook, and overwritten by the calendar
@@ -414,6 +421,7 @@ export default function Studio() {
       setCover(parsed.cover);
       setSlides(parsed.slides);
       setCta(parsed.cta || "Start the conversation");
+      bumpReplay();
       setImages({});
       setScales({});
       setImgOn({});
@@ -456,6 +464,7 @@ export default function Studio() {
       setSlides(parsed.slides);
       setCta(parsed.cta || cta);
       setModTxt("");
+      bumpReplay();
       markVerifyStale();
     } catch {
       setError("Couldn't revise this time. Try again, or edit the fields directly.");
@@ -512,6 +521,7 @@ export default function Studio() {
     setCover(parsed.cover || cover);
     setSlides(parsed.slides && parsed.slides.length ? parsed.slides : slides);
     setCta(parsed.cta || cta);
+    bumpReplay();
     setVerifyRes(null);
     setVerifyFixed(null);
   }
@@ -557,6 +567,7 @@ export default function Studio() {
       const nextAccent = LOOK_ACCENTS[i % LOOK_ACCENTS.length];
       saveDesign({ ...design, accent: nextAccent });
       setSeed((x) => x + 1);
+      bumpReplay();
       return;
     }
 
@@ -568,6 +579,7 @@ export default function Studio() {
       const nextAccent = LOOK_ACCENTS[i % LOOK_ACCENTS.length];
       saveDesign({ ...design, set: nextSet, accent: nextAccent });
       setSeed((x) => x + 1);
+      bumpReplay();
       return;
     }
 
@@ -582,6 +594,8 @@ export default function Studio() {
       : LOOK_ACCENTS[Math.floor(i / LOOK_SETS.length) % LOOK_ACCENTS.length];
     saveDesign({ ...design, set: nextSet, accent: nextAccent });
     setSeed((x) => x + 1);
+    // A new look should play in, not cut to the end of a sequence already finished.
+    bumpReplay();
   };
 
   /**
@@ -1503,6 +1517,7 @@ export default function Studio() {
               scale={scales[current] || 1}
               ideaMode={!!fmt.idea}
               photoOn={!!imgOn[current]}
+              replay={replay}
             />
           </div>
         </div>
@@ -1829,6 +1844,7 @@ export default function Studio() {
             scale={scales[i] || 1}
             ideaMode={!!fmt.idea}
             photoOn={!!imgOn[i]}
+            replay={replay}
           />
         ))}
       </div>

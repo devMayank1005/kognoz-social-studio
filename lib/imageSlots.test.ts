@@ -99,6 +99,39 @@ describe("formats that offer no photo do not claim to", () => {
   });
 });
 
+// A CSS animation runs once, when its element mounts. Replacing the copy re-rendered
+// the SAME nodes, so the kinetic sequence kept the end state of an animation that had
+// already finished — generating again while Video was selected showed no motion at all,
+// and switching format and back was the only way to see it. The keys below remount the
+// animated subtree so it replays.
+describe("Video Kinetic replays when the content is replaced", () => {
+  const video = () => {
+    const start = slideSrc.indexOf('if (kind === "video")');
+    expect(start).toBeGreaterThan(-1);
+    const next = [...slideSrc.matchAll(/if \(kind === "/g)].map((m) => m.index as number).find((i) => i > start);
+    return slideSrc.slice(start, next ?? slideSrc.length);
+  };
+
+  it("keys the animated subtree on the replay counter", () => {
+    expect(video()).toContain("key={`kv-${replay}`}");
+    expect(video()).toContain("key={`kv-foot-${replay}`}");
+  });
+
+  it("Studio bumps that counter wherever the deck is replaced wholesale", () => {
+    // generate, revise, undo, apply-corrections and each cycleLook branch.
+    expect(studioSrc).toContain("const bumpReplay =");
+    expect((studioSrc.match(/bumpReplay\(\)/g) || []).length).toBeGreaterThanOrEqual(6);
+    expect(studioSrc).toContain("replay={replay}");
+  });
+
+  it("still sets no inline opacity, so a stripped-keyframe export is not blank", () => {
+    // The export pipeline removes <style>, so the keyframes are absent at export time.
+    // `backwards` with no inline opacity is what makes the PNG render at full opacity.
+    expect(video()).toContain("backwards");
+    expect(video()).not.toMatch(/opacity:\s*0/);
+  });
+});
+
 describe("Montage exports as whole frames", () => {
   it("is declared as a 3-frame format that divides evenly", () => {
     expect(FORMATS.Montage.frames).toBe(3);
