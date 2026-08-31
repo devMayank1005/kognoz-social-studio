@@ -74,7 +74,13 @@ no local run needed. Quick reference if you do run locally:
 2. Create a Supabase project, run `supabase/schema.sql` against it
 3. Copy `.env.example` to `.env.local`, fill in Anthropic key, Supabase URL/service
    key, `NEXTAUTH_SECRET` (`openssl rand -base64 32`)
-4. Add each team member: `npm run add-user "name@kognozconsulting.com" "Their Name" "a-strong-password"`
+4. Add each team member: `npm run add-user "name@kognozconsulting.com" "Their Name"` —
+   omit the password and a strong one is generated and shown once. Pass a third argument
+   to set a specific one, though it then lands in your shell history.
+
+   The email domain does not matter here. The company-domain check applies only to Azure
+   AD sign-ins, so this is also how you give access to someone outside the Microsoft
+   tenant — they use the password form on `/login` rather than the Microsoft button.
 5. `npm run dev`
 
 **No keys or secrets are committed anywhere in this repo** — `.env.local` is
