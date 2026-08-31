@@ -284,6 +284,13 @@ export default function Studio() {
     if (slides !== DEFAULT_SLIDES) setStaleFormat(true);
     setFormat(f);
     setCurrent(0);
+    // Photo intent must not travel between formats. `imgOn` is keyed by DECK index, and
+    // index 0 is the cover on a deck but the whole asset on a single format — so turning
+    // a photo on for Story left Carousel opening with an empty "Add cover photo" slot on
+    // a format the user never touched. `images` is deliberately kept: those keys are
+    // format-specific apart from "cover", and dropping an imported picture on a format
+    // switch would be worse than the bug being fixed.
+    setImgOn({});
   };
 
   // Anything that changes what the model was asked for must be inert while it is

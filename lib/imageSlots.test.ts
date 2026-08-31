@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FORMATS, type FormatId } from "./formats";
+import { DESIGN_SETS } from "./designSets";
 
 // ---------------------------------------------------------------------------
 // The photo controls and the renderers have to agree.
@@ -60,9 +61,15 @@ describe("photoKeyFor offers no key the renderers cannot read", () => {
     expect(studioSrc).toMatch(/\{photoKeyFor\(\) && \(\s*\n\s*<div onClick=\{\(\) => setImgOn/);
   });
 
-  it("Story's slot appears for an imported photo, not only for the toggle", () => {
+  it("Story shows a photo only while the toggle is on", () => {
+    // Was `photoOn || images.story`, which meant that once a picture existed the toggle
+    // could no longer hide it. Turning the photo off now hides it and KEEPS it, so
+    // toggling back on restores the same image.
     const story = branch("story");
-    expect(story).toMatch(/\(photoOn \|\| images\.story\)/);
+    expect(story).not.toMatch(/photoOn \|\| images\.story/);
+    expect(story).toContain("{photoOn && (");
+    // The full-bleed photo Story is an early return, and it needs the same gate.
+    expect(story).toContain("if (photoOn && images.story)");
   });
 
   it("every Article look can show a photo, so Next look cannot hide one", () => {
@@ -72,6 +79,66 @@ describe("photoKeyFor offers no key the renderers cannot read", () => {
     const gated = article.match(/showArticlePhoto && articleSlot\(/g) || [];
     expect(gated.length, "each of the three article variants needs its own slot").toBe(3);
     expect(article).not.toMatch(/if \(variant === 1\)[\s\S]{0,400}<ImageSlot img=\{images\.article\}/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The rule this file exists to defend:
+//
+//   A photo slot appears ONLY because the user asked for one — never because of a
+//   design set, a seed, or state left behind by another format.
+//
+// It was broken three ways at once. `magazine` pins `cover: 99` and `contents: [8]`,
+// both photo compositions, so Carousel and Square opened with an empty photo box on
+// every slide — and because BOTH arms of `photoOn ? 99 : dset.cover` returned 99, the
+// "Add photo" toggle had nothing to act on and did literally nothing. `mixed` reached
+// the same content layout by seed on roughly one slide in eight, moving on every
+// "Next look". And variant 8 rendered its slot as the EMPTY STATE of the image check,
+// so the box appeared precisely because no picture existed.
+// ---------------------------------------------------------------------------
+describe("no photo slot without the user asking", () => {
+  it("every ImageSlot sits behind a condition derived from photoOn", () => {
+    const positions: number[] = [];
+    for (let i = slideSrc.indexOf("<ImageSlot"); i !== -1; i = slideSrc.indexOf("<ImageSlot", i + 1)) positions.push(i);
+    expect(positions.length, "expected the renderer to still have image slots").toBeGreaterThan(3);
+
+    for (const at of positions) {
+      const before = slideSrc.slice(Math.max(0, at - 900), at);
+      const line = slideSrc.slice(0, at).split("\n").length;
+      expect(before, `ImageSlot at Slide.tsx:${line} is not guarded by photoOn`).toMatch(/photoOn|showPhoto|showArticlePhoto/);
+    }
+  });
+
+  it("the guard variables resolve to the toggle and nothing else", () => {
+    // `photoOn || Boolean(images.x)` is the shape that let an existing image force a
+    // slot back on after the user had switched it off.
+    expect(slideSrc).toContain("const showArticlePhoto = photoOn;");
+    expect(slideSrc).toContain("const showPhoto = photoOn;");
+    expect(slideSrc).not.toMatch(/photoOn \|\| Boolean\(/);
+  });
+
+  it("no slot is rendered as the empty state of an image check", () => {
+    // `bgImg ? <img/> : <ImageSlot/>` put a box on screen BECAUSE there was no picture.
+    expect(slideSrc).not.toMatch(/\)\s*:\s*\(?\s*\n?\s*<ImageSlot/);
+  });
+
+  it("the design sets that pin photo compositions are gated inside them", () => {
+    // magazine deliberately still pins 99 and [8] — those are its compositions, and
+    // collapsing it to a text set would lose the look. What changed is that the photo
+    // ELEMENT inside each is conditional, so magazine renders text-only until asked.
+    expect(DESIGN_SETS.magazine.cover).toBe(99);
+    expect(DESIGN_SETS.magazine.contents).toEqual([8]);
+    const cover99 = slideSrc.slice(slideSrc.indexOf("if (variant === 99)"));
+    expect(cover99.slice(0, 900)).toContain("{photoOn && (");
+    const content8 = slideSrc.slice(slideSrc.indexOf("if (variant === 8)"));
+    expect(content8.slice(0, 1200)).toContain("const bgImg = photoOn ? stored : null;");
+  });
+
+  it("photo intent does not travel between formats", () => {
+    // imgOn is keyed by DECK index: index 0 is the cover on a deck and the whole asset
+    // on a single format, so carrying it across revealed slots on untouched formats.
+    const fn = studioSrc.slice(studioSrc.indexOf("const selectFormat"), studioSrc.indexOf("const accent ="));
+    expect(fn).toContain("setImgOn({})");
   });
 });
 

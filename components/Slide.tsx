@@ -410,12 +410,38 @@ export const Slide = React.memo(function Slide({
       );
     }
     if (variant === 99) {
+      // Reached two ways: the user asked for a photo, OR a design set pinned this
+      // composition — `magazine` is `cover: 99`. Only the first should produce an image
+      // area. Because both arms of the variant test already yield 99 under magazine, the
+      // "Add photo" toggle had nothing left to act on and was a literal no-op; it has to
+      // act HERE. With no photo the type takes the whole frame, which keeps magazine a
+      // distinct cover rather than an empty box.
       return (
         <div id={id} style={{ ...wrap, background: C.white }}>
-          <ImageSlot img={images.cover} onPick={(u) => setImg("cover", u)} label="Add cover photo" style={{ position: "absolute", top: 0, left: 0, right: 0, height: "52%" }} />
-          <div style={{ position: "absolute", top: "52%", left: 0, right: 0, bottom: 0, padding: "56px 96px 180px", display: "flex", flexDirection: "column" }}>
+          {photoOn && (
+            <ImageSlot img={images.cover} onPick={(u) => setImg("cover", u)} label="Add cover photo" style={{ position: "absolute", top: 0, left: 0, right: 0, height: "52%" }} />
+          )}
+          <div style={{ position: "absolute", top: photoOn ? "52%" : 0, left: 0, right: 0, bottom: 0, padding: photoOn ? "56px 96px 180px" : "96px 96px 196px", display: "flex", flexDirection: "column" }}>
             <Eyebrow />
-            <h1 style={{ fontFamily: displayFont, fontSize: fit(66, cover, 56), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.01em", color: C.ink, margin: "26px 0 0", flex: 1 }}>{renderEm(cover)}</h1>
+            <h1
+              style={{
+                fontFamily: displayFont,
+                fontSize: fit(photoOn ? 66 : 104, cover, photoOn ? 56 : 44),
+                fontWeight: 600,
+                lineHeight: photoOn ? 1.08 : 1.04,
+                letterSpacing: photoOn ? "-0.01em" : "-0.02em",
+                color: C.ink,
+                margin: "26px 0 0",
+                flex: 1,
+                // Without the image there is a whole frame to fill, so the headline
+                // centres in it rather than hanging off the top of a half-empty page.
+                display: "flex",
+                alignItems: photoOn ? "flex-start" : "center",
+                maxWidth: photoOn ? undefined : 820
+              }}
+            >
+              {renderEm(cover)}
+            </h1>
           </div>
           <Foot right={COVER_R} />
         </div>
@@ -492,7 +518,10 @@ export const Slide = React.memo(function Slide({
     // The photo slot used to exist only in variant 1, so an imported picture silently
     // vanished on two looks out of three and "Next look" made it blink in and out.
     // Every look now has one, revealed by the same "Add photo" toggle as everywhere else.
-    const showArticlePhoto = photoOn || Boolean(images.article);
+    // photoOn alone. Reading `|| images.article` meant that once a picture existed the
+    // toggle could no longer hide it, which contradicts "off hides, image kept" and made
+    // the single formats behave differently from the decks.
+    const showArticlePhoto = photoOn;
     const articleSlot = (dark?: boolean) => (
       <ImageSlot
         img={images.article}
@@ -767,8 +796,9 @@ export const Slide = React.memo(function Slide({
     // One wide photo across the whole strip rather than three separate ones: a single
     // image panned across three swipes is the strongest continuity device there is. As
     // on Story, a photo wins the surface outright.
-    const wide = images.montage;
-    const showPhoto = photoOn || Boolean(wide);
+    // Hidden when the toggle is off, but kept in state so switching back on restores it.
+    const wide = photoOn ? images.montage : undefined;
+    const showPhoto = photoOn;
     const onPhoto = Boolean(wide);
     const heading = onPhoto ? "#fff" : S.heading;
     const bodyCol = onPhoto ? "rgba(255,255,255,0.92)" : S.body;
@@ -920,8 +950,10 @@ export const Slide = React.memo(function Slide({
   /* ============================ STORY (9:16 vertical) ============================ */
   if (kind === "story") {
     const s0 = slides[0] || { title: "", body: "" };
-    // A photo always wins the surface — the image is the design at 9:16.
-    if (images.story) {
+    // A photo always wins the surface — the image is the design at 9:16. Gated on the
+    // toggle as well, or an image left in state renders a photo Story the user has
+    // switched off.
+    if (photoOn && images.story) {
       return (
         <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
           <img src={images.story} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
@@ -950,7 +982,7 @@ export const Slide = React.memo(function Slide({
               picture also counts as wanting one: the URL importer wrote images.story
               while the toggle that reveals this slot was still deck-only, so the import
               reported success and the canvas never changed. */}
-          {(photoOn || images.story) && (
+          {photoOn && (
             <ImageSlot dark={onDark} img={images.story} onPick={(u) => setImg("story", u)} label="Add photo" style={{ height: 560, borderRadius: surfaceId === "press" ? 0 : 24 }} />
           )}
           {/* fit(), not sz(): this was the one body with no auto-shrink, so long copy
@@ -958,7 +990,7 @@ export const Slide = React.memo(function Slide({
           {/* 37px on a 1080px canvas is small for a format read full-screen on a phone,
               and it left the lower half of a 9:16 frame empty. fit() still shrinks
               long copy, so this raises the ceiling without risking an overflow. */}
-          <p style={{ fontFamily: font, fontSize: fit(photoOn || images.story ? 37 : 50, s0.body, 260), lineHeight: 1.5, color: S.body, margin: photoOn || images.story ? "44px 0 0" : "8px 0 0", flex: 1 }}>{renderLines(s0.body)}</p>
+          <p style={{ fontFamily: font, fontSize: fit(photoOn ? 37 : 50, s0.body, 260), lineHeight: 1.5, color: S.body, margin: photoOn ? "44px 0 0" : "8px 0 0", flex: 1 }}>{renderLines(s0.body)}</p>
         </div>
         <Foot dark={onDark} right={SINGLE_R} />
       </div>
@@ -1128,13 +1160,19 @@ export const Slide = React.memo(function Slide({
     );
   }
   if (variant === 99) {
+    // Today this is only reachable via `photoOn && !ideaMode`, so the gate below is
+    // redundant — but that is a condition several hundred lines away, and relying on a
+    // distant one is exactly what let the COVER version of this slot ship a box nobody
+    // asked for. Kept local so the invariant is readable here and enforceable by test.
     return (
       <div id={id} style={{ ...wrap, background: C.white }}>
-        <ImageSlot img={images[imgKey]} onPick={(u) => setImg(imgKey, u)} label="Add photo" style={{ position: "absolute", top: 0, left: 0, right: 0, height: "44%" }} />
-        <div style={{ position: "absolute", top: "44%", left: 0, right: 0, bottom: 0, padding: "50px 96px 180px", display: "flex", flexDirection: "column" }}>
+        {photoOn && (
+          <ImageSlot img={images[imgKey]} onPick={(u) => setImg(imgKey, u)} label="Add photo" style={{ position: "absolute", top: 0, left: 0, right: 0, height: "44%" }} />
+        )}
+        <div style={{ position: "absolute", top: photoOn ? "44%" : 0, left: 0, right: 0, bottom: 0, padding: photoOn ? "50px 96px 180px" : "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow n={nn} />
-          <h2 style={{ fontFamily: displayFont, fontSize: fit(58, data.title, 56), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: C.ink, margin: "26px 0 24px" }}>{data.title}</h2>
-          <p style={{ fontFamily: font, fontSize: fit(33, data.body, 220), lineHeight: 1.5, color: C.inkSoft, margin: 0, flex: 1 }}>{renderLines(data.body)}</p>
+          <h2 style={{ fontFamily: displayFont, fontSize: fit(photoOn ? 58 : 74, data.title, 56), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: C.ink, margin: photoOn ? "26px 0 24px" : "40px 0 28px" }}>{data.title}</h2>
+          <p style={{ fontFamily: font, fontSize: fit(photoOn ? 33 : 38, data.body, 220), lineHeight: 1.5, color: C.inkSoft, margin: 0, flex: 1 }}>{renderLines(data.body)}</p>
         </div>
         <Foot right={CONTENT_R} />
       </div>
@@ -1162,12 +1200,20 @@ export const Slide = React.memo(function Slide({
   if (variant === 8) {
     // Photo-glass magazine: full-bleed image (or deep gradient when no photo
     // yet) with a frosted caption panel. Click the background to add the photo.
-    const bgImg = images[imgKey];
+    // The slot used to be the EMPTY STATE of the image check, so it appeared precisely
+    // because there was no picture — on every magazine slide, and on roughly one Mixed
+    // slide in eight, moving as the seed changed. The gradient this comment already
+    // describes is the photoless design; it just never got a chance to render.
+    // The stored image is kept when the photo is switched off, so toggling back on
+    // restores it rather than losing it.
+    const stored = images[imgKey];
+    const bgImg = photoOn ? stored : null;
     return (
       <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-        {bgImg ? (
+        {bgImg && (
           <img src={bgImg} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-        ) : (
+        )}
+        {photoOn && !bgImg && (
           <ImageSlot dark img={null} onPick={(u) => setImg(imgKey, u)} label="Add full-bleed photo" style={{ position: "absolute", inset: 0 }} />
         )}
         {bgImg && (
