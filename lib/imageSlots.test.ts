@@ -142,6 +142,42 @@ describe("no photo slot without the user asking", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// renderEm() returns text interleaved with <span>s for the *emphasised* words. Making
+// the heading itself a flex container turns those into flex items — the plain text
+// becomes one anonymous item and each emphasised word a separate one beside it — so the
+// emphasised word is thrown out of the line with a gap in front of it. It looks like a
+// spacing bug and is actually a display-mode bug, and it is invisible until a headline
+// happens to contain an emphasis marker.
+//
+// Centring belongs on a wrapper. Every cover in the renderer already does it that way.
+// ---------------------------------------------------------------------------
+describe("headings that render emphasis stay in normal text flow", () => {
+  it("no h1 or h2 is itself a flex container", () => {
+    for (const tag of ["h1", "h2"]) {
+      let i = slideSrc.indexOf(`<${tag}`);
+      while (i !== -1) {
+        // The element's own style block: from the tag to the ">" that opens its content.
+        const head = slideSrc.slice(i, slideSrc.indexOf(">", slideSrc.indexOf("}}", i)) + 1);
+        const line = slideSrc.slice(0, i).split("\n").length;
+        expect(head, `<${tag}> at Slide.tsx:${line} is display:flex — emphasis spans will break out of the line`).not.toMatch(
+          /display:\s*"flex"/
+        );
+        i = slideSrc.indexOf(`<${tag}`, i + 1);
+      }
+    }
+  });
+
+  it("the magazine cover centres via a wrapper, not the heading", () => {
+    // Bound the branch properly rather than guessing a character window.
+    const start = slideSrc.indexOf("if (variant === 99)");
+    const end = slideSrc.indexOf("if (variant === 2)", start);
+    const cover99 = slideSrc.slice(start, end > start ? end : start + 3000);
+    expect(cover99).toMatch(/<div style=\{\{ flex: 1, display: "flex", alignItems: photoOn/);
+    expect(cover99).toContain("{renderEm(cover)}");
+  });
+});
+
 describe("formats that offer no photo do not claim to", () => {
   const noPhoto: FormatId[] = ["Stat Card", "Says vs Does", "Dialogue", "Video", "Founder Video", "Idea Deck"];
 

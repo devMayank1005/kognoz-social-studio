@@ -423,25 +423,28 @@ export const Slide = React.memo(function Slide({
           )}
           <div style={{ position: "absolute", top: photoOn ? "52%" : 0, left: 0, right: 0, bottom: 0, padding: photoOn ? "56px 96px 180px" : "96px 96px 196px", display: "flex", flexDirection: "column" }}>
             <Eyebrow />
-            <h1
-              style={{
-                fontFamily: displayFont,
-                fontSize: fit(photoOn ? 66 : 104, cover, photoOn ? 56 : 44),
-                fontWeight: 600,
-                lineHeight: photoOn ? 1.08 : 1.04,
-                letterSpacing: photoOn ? "-0.01em" : "-0.02em",
-                color: C.ink,
-                margin: "26px 0 0",
-                flex: 1,
-                // Without the image there is a whole frame to fill, so the headline
-                // centres in it rather than hanging off the top of a half-empty page.
-                display: "flex",
-                alignItems: photoOn ? "flex-start" : "center",
-                maxWidth: photoOn ? undefined : 820
-              }}
-            >
-              {renderEm(cover)}
-            </h1>
+            {/* The centring lives on a WRAPPER, never on the heading itself. renderEm
+                returns text interleaved with <span>s for the *emphasised* words, so
+                making the h1 a flex container turns those into flex items: the plain
+                text becomes one anonymous item and each emphasised word a separate one
+                beside it, which threw "do" out to the right of its own line. Every
+                other cover in this file already uses this wrapper pattern. */}
+            <div style={{ flex: 1, display: "flex", alignItems: photoOn ? "flex-start" : "center", marginTop: 26 }}>
+              <h1
+                style={{
+                  fontFamily: displayFont,
+                  fontSize: fit(photoOn ? 66 : 104, cover, photoOn ? 56 : 44),
+                  fontWeight: 600,
+                  lineHeight: photoOn ? 1.08 : 1.04,
+                  letterSpacing: photoOn ? "-0.01em" : "-0.02em",
+                  color: C.ink,
+                  margin: 0,
+                  maxWidth: photoOn ? undefined : 820
+                }}
+              >
+                {renderEm(cover)}
+              </h1>
+            </div>
           </div>
           <Foot right={COVER_R} />
         </div>
