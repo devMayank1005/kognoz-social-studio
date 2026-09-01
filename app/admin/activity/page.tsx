@@ -17,7 +17,6 @@ import { describeActivity, describeDevice } from "@/lib/activityEvents";
 // A flat reverse-chronological list makes you reconstruct that by eye.
 
 interface Row {
-  source: string;
   created_at: string;
   who: string | null;
   actor_name: string | null;
@@ -59,7 +58,6 @@ export default function ActivityPage() {
   const [people, setPeople] = useState<string[]>([]);
   const [who, setWho] = useState("");
   const [days, setDays] = useState(7);
-  const [source, setSource] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [nextBefore, setNextBefore] = useState<string | null>(null);
@@ -69,11 +67,10 @@ export default function ActivityPage() {
     (before?: string) => {
       const p = new URLSearchParams({ days: String(days), limit: "100" });
       if (who) p.set("who", who);
-      if (source) p.set("source", source);
       if (before) p.set("before", before);
       return `/api/admin/activity?${p.toString()}`;
     },
-    [days, who, source]
+    [days, who]
   );
 
   useEffect(() => {
@@ -127,9 +124,9 @@ export default function ActivityPage() {
   /**
    * Group into days, then into visits.
    *
-   * A visit is one session_id. Rows without one — Team Pulse's, and anything from
-   * before this shipped — are grouped by person for that day instead, so they still
-   * read as a block rather than scattering.
+   * A visit is one session_id. Rows without one — generations, which come from
+   * api_call_log and predate this trail — are grouped by person for that day instead,
+   * so they still read as a block rather than scattering.
    */
   const grouped = useMemo(() => {
     const byDay = new Map<string, Row[]>();
@@ -143,7 +140,7 @@ export default function ActivityPage() {
     return [...byDay.entries()].map(([day, dayRows]) => {
       const visits = new Map<string, Row[]>();
       for (const r of dayRows) {
-        const key = r.session_id || `${r.who || "unknown"}::${r.source}::no-session`;
+        const key = r.session_id || `${r.who || "unknown"}::no-session`;
         const list = visits.get(key);
         if (list) list.push(r);
         else visits.set(key, [r]);
@@ -243,8 +240,7 @@ export default function ActivityPage() {
       <div style={{ marginBottom: 18 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: C.ink, margin: "0 0 4px" }}>Activity</h1>
         <p style={{ fontSize: 13, color: C.inkMute, margin: 0, lineHeight: 1.5 }}>
-          Sign-ins, content changes, generations and downloads. Kognoz Social Studio and Team Pulse in one
-          timeline.
+          Sign-ins, content changes, generations and downloads across Kognoz Social Studio.
         </p>
       </div>
 
@@ -294,24 +290,6 @@ export default function ActivityPage() {
             </button>
           ))}
         </div>
-
-        <select
-          value={source}
-          onChange={(e) => setSource(e.target.value)}
-          style={{
-            fontFamily: FONT,
-            fontSize: 13,
-            padding: "7px 10px",
-            border: `1px solid ${C.line}`,
-            borderRadius: 8,
-            background: "#fff",
-            color: C.ink
-          }}
-        >
-          <option value="">Both apps</option>
-          <option value="studio">Social Studio</option>
-          <option value="team-pulse">Team Pulse</option>
-        </select>
 
         <span style={{ fontSize: 12, color: C.inkMute, marginLeft: "auto" }}>
           {loading ? "Loading…" : `${rows.length} event${rows.length === 1 ? "" : "s"}`}
@@ -393,20 +371,6 @@ export default function ActivityPage() {
                       {first.actor_name && first.who && (
                         <span style={{ fontSize: 12, color: C.inkMute }}>{first.who}</span>
                       )}
-                      <span
-                        style={{
-                          fontSize: 10.5,
-                          fontWeight: 700,
-                          textTransform: "uppercase",
-                          letterSpacing: 0.4,
-                          color: first.source === "studio" ? C.blue : "#7E22CE",
-                          background: first.source === "studio" ? C.mist : "#F3E8FF",
-                          padding: "2px 8px",
-                          borderRadius: 10
-                        }}
-                      >
-                        {first.source === "studio" ? "Social Studio" : "Team Pulse"}
-                      </span>
                       <span style={{ fontSize: 12, color: C.inkMute, marginLeft: "auto" }}>
                         {/* IP is the network, not the person: offices share one, phones change theirs. */}
                         {ip ? `${ip} · ` : ""}

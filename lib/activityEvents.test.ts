@@ -28,11 +28,10 @@ describe("the client cannot forge a session", () => {
     }
   });
 
-  it("refuses the rows the view synthesises", () => {
-    // Accepting these would double-count spend against api_call_log and let a browser
-    // fabricate Team Pulse history.
+  it("refuses the row the view synthesises", () => {
+    // `generate` rows come from api_call_log via v_all_activity. Accepting one from a
+    // browser would double-count spend against the table that bills it.
     expect(isClientAction("generate")).toBe(false);
-    expect(isClientAction("team_pulse_event")).toBe(false);
   });
 
   it("refuses anything not in the vocabulary", () => {
@@ -228,20 +227,13 @@ describe("describeActivity", () => {
     );
   });
 
-  it("passes a Team Pulse sentence through rather than re-wording it", () => {
-    expect(describeActivity({ action: "team_pulse_event", entity_label: 'Created task "TriLegal"' })).toBe(
-      'Created task "TriLegal"'
-    );
-  });
-
   it("never returns an empty string, however thin the row", () => {
     for (const row of [
       { action: "content_created" },
       { action: "download" },
       { action: "generate" },
       { action: "month_generated" },
-      { action: "something_new_we_added_later" },
-      { action: "team_pulse_event" }
+      { action: "something_new_we_added_later" }
     ]) {
       expect(describeActivity(row).length).toBeGreaterThan(0);
     }

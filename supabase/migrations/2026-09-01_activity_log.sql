@@ -2,23 +2,22 @@
 -- Safe to run more than once: every statement is idempotent.
 -- Paste into the Supabase SQL Editor and Run.
 --
--- ⚠  READ THIS FIRST — THIS PROJECT IS SHARED WITH ANOTHER APP.
+-- ⚠  THIS PROJECT IS SHARED WITH ANOTHER APP — DO NOT ASSUME A TABLE IS OURS.
 --
---    This Supabase project also backs "Team Pulse". Those tables are NOT ours:
+--    This Supabase project also backs "Team Pulse". These tables belong to it:
 --
 --      audit_log           Team Pulse's own activity trail, written continuously
 --      login_ip_throttle   Team Pulse's brute-force throttle
 --      tasks               Team Pulse's task board
 --      users               SHARED — both apps read it, Team Pulse also writes it
 --
---    This migration CREATES ONE NEW TABLE and one read-only VIEW. It does not
---    alter, drop or write to any table above. The view READS audit_log so you get
---    one timeline per person across both products; Team Pulse's rows are never
---    modified and its own screens are unaffected.
+--    This migration creates ONE NEW TABLE and one read-only VIEW. It does not
+--    alter, drop, read or write ANY table above. Social Studio's activity screen
+--    shows Social Studio only.
 --
---    That restraint is deliberate. Adding a column to audit_log would have been
---    tidier, but Team Pulse's code is not in this repository, so there is no way
---    to test what such a change does to its admin screens.
+--    If a future change here ever needs to touch one of those tables, stop: Team
+--    Pulse's code is not in this repository, so there is no way to test what the
+--    change does to it.
 
 
 -- ---------------------------------------------------------------------------
@@ -35,8 +34,8 @@ create table if not exists studio_activity (
   created_at   timestamptz not null default now(),
 
   -- Who. Email, because that is what NextAuth gives us for BOTH sign-in paths.
-  -- Microsoft SSO users have no row in `users`, so a uuid actor_id — the shape
-  -- audit_log uses — would be null for nearly every person here.
+  -- Microsoft SSO users have no row in `users`, so a uuid actor_id would be null
+  -- for nearly every person here.
   actor_email  text not null,
   actor_name   text,
 
@@ -74,20 +73,29 @@ alter table studio_activity enable row level security;
 
 
 -- ---------------------------------------------------------------------------
--- 2. One timeline out of three sources.
+-- 2. One timeline.
 --
--- Folds this app's activity, its API spend, and Team Pulse's audit trail into a
--- single shape so the admin route reads ONE relation and cannot accidentally
--- omit a source.
+-- Social Studio's own activity, plus its API spend, in a single shape — so the
+-- admin route reads ONE relation and cannot accidentally omit a source. A
+-- generation therefore sits in the timeline right beside the download it
+-- produced, which is the pairing that makes the trail worth reading.
 --
--- `who` is an email for Social Studio rows and a short handle ('mayank') for
--- Team Pulse rows, because that is what each app stores. Matching a person
--- across the two is therefore best-effort — the admin screen filters on text and
--- shows the source, rather than pretending the two identifier spaces are one.
+-- Reads nothing outside this app.
+--
+-- The DROP is required, not tidiness. An earlier version of this file shipped a
+-- view that also unioned Team Pulse's audit_log and carried an extra `source`
+-- column. `create or replace view` CANNOT remove a column — Postgres rejects it
+-- with "cannot change name of view column" — so replacing that shape in place is
+-- impossible. Dropping first also makes this file re-runnable from either
+-- starting state, which is the whole point of an idempotent migration.
+--
+-- Safe: this drops a VIEW this migration created, never a table, and nothing
+-- else in either app depends on it.
 -- ---------------------------------------------------------------------------
-create or replace view v_all_activity as
+drop view if exists v_all_activity;
+
+create view v_all_activity as
   select
-    'studio'::text        as source,
     sa.created_at,
     sa.actor_email        as who,
     sa.actor_name,
@@ -103,10 +111,10 @@ create or replace view v_all_activity as
 
   union all
 
-  -- Spend. Mapped into the same shape so a generation sits in the timeline
-  -- beside the download it produced.
+  -- Spend. api_call_log has no ip or session_id — it predates this trail and was
+  -- built to answer "what did we spend", not "who was where". The nulls are
+  -- honest: the row genuinely does not know.
   select
-    'studio'::text,
     l.created_at,
     l.user_email,
     null::text,
@@ -125,26 +133,7 @@ create or replace view v_all_activity as
       'output_tokens', l.output_tokens,
       'stop_reason', l.stop_reason
     )
-  from api_call_log l
-
-  union all
-
-  -- Team Pulse. Read-only. Its `action` is already a written sentence, so it
-  -- passes through as the label rather than being re-worded.
-  select
-    'team-pulse'::text,
-    a.created_at,
-    a.username,
-    null::text,
-    'team_pulse_event'::text,
-    a.entity,
-    a.action,
-    a.screen,
-    a.ip,
-    a.user_agent,
-    null::text,
-    null::jsonb
-  from audit_log a;
+  from api_call_log l;
 
 
 -- ---------------------------------------------------------------------------
@@ -162,12 +151,12 @@ create or replace view v_all_activity as
 
 
 -- ---------------------------------------------------------------------------
--- 4. Check it landed, and check we broke nothing.
+-- 4. Check it landed.
 --
--- The second and third counts are the point: they must match what they were
--- before this file ran. This migration must be invisible to Team Pulse.
+-- The last two counts are the point: they belong to Team Pulse and must match
+-- what they were before this file ran. This migration must be invisible to it.
 -- ---------------------------------------------------------------------------
-select 'studio_activity' as table_name, count(*) from studio_activity
+select 'studio_activity (new, empty)' as check, count(*) from studio_activity
+union all select 'v_all_activity (activity + spend)', count(*) from v_all_activity
 union all select 'audit_log (Team Pulse — must be unchanged)', count(*) from audit_log
-union all select 'tasks (Team Pulse — must be unchanged)', count(*) from tasks
-union all select 'v_all_activity (all three sources)', count(*) from v_all_activity;
+union all select 'tasks (Team Pulse — must be unchanged)', count(*) from tasks;

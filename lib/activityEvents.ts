@@ -35,10 +35,7 @@ export const ACTIONS = [
   "download",
 
   // Synthesised by v_all_activity from api_call_log — never inserted directly.
-  "generate",
-
-  // Synthesised by v_all_activity from Team Pulse's audit_log. Read-only.
-  "team_pulse_event"
+  "generate"
 ] as const;
 
 export type Action = (typeof ACTIONS)[number];
@@ -285,9 +282,6 @@ export function describeActivity(row: ActivityRow): string {
       const task = label || text(meta.task) || "content";
       return `Generated ${task}${cost !== null ? ` — $${cost.toFixed(4)}` : ""}${failed ? " (failed)" : ""}`;
     }
-
-    case "team_pulse_event":
-      return label || "Team Pulse activity";
 
     default:
       return label || row.action;

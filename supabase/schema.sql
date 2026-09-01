@@ -115,8 +115,8 @@ alter table api_call_log enable row level security;
 --
 -- NOTE this project is SHARED with another app ("Team Pulse"), which owns
 -- audit_log, login_ip_throttle and tasks, and co-owns users. Nothing here
--- writes to any of them. v_all_activity READS audit_log so one person's
--- activity across both products reads as a single timeline.
+-- reads or writes any of them: the activity screen is Social Studio only.
+-- v_all_activity unions this table with api_call_log and nothing else.
 -- ---------------------------------------------------------------------------
 create table if not exists studio_activity (
   id           bigint generated always as identity primary key,

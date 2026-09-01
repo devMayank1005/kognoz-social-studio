@@ -33,7 +33,6 @@ export async function GET(req: NextRequest) {
 
   const params = req.nextUrl.searchParams;
   const who = (params.get("who") || "").trim();
-  const source = (params.get("source") || "").trim();
   const days = Math.min(Math.max(Number(params.get("days")) || 7, 1), 365);
   const limit = Math.min(Math.max(Number(params.get("limit")) || DEFAULT_LIMIT, 1), MAX_LIMIT);
   const before = (params.get("before") || "").trim();
@@ -44,16 +43,14 @@ export async function GET(req: NextRequest) {
     const supabase = getSupabaseServerClient();
     let q = supabase
       .from("v_all_activity")
-      .select("source, created_at, who, actor_name, action, entity, entity_label, screen, ip, user_agent, session_id, meta")
+      .select("created_at, who, actor_name, action, entity, entity_label, screen, ip, user_agent, session_id, meta")
       .gte("created_at", since)
       .order("created_at", { ascending: false })
       .limit(limit);
 
-    // Substring, deliberately. Team Pulse stores a short handle ("mayank") where this
-    // app stores an email, so an exact match would silently hide half of a person's
-    // timeline the moment you filtered by either one.
+    // Substring rather than equality, so filtering by a partial address or a whole
+    // domain works as well as picking one person out of the dropdown.
     if (who) q = q.ilike("who", `%${who}%`);
-    if (source === "studio" || source === "team-pulse") q = q.eq("source", source);
     // Keyset pagination on the timestamp — cheap, and stable while new rows arrive,
     // which offset pagination on a growing table is not.
     if (before) q = q.lt("created_at", before);
