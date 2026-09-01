@@ -27,7 +27,10 @@
 // limiter or an Anthropic 529 silently doubled the bill.
 "use client";
 
-export type ClaudeTask = "generate" | "revise" | "caption" | "article" | "verify" | "designNote";
+// Hand-duplicated from costControls' `Task` rather than imported, because this file is
+// "use client" and that one is server-shared. The two can drift silently, so they are
+// changed together.
+export type ClaudeTask = "generate" | "revise" | "caption" | "article" | "verify" | "designNote" | "calendarPlan";
 
 export const FAST_MODEL = "claude-haiku-4-5";
 

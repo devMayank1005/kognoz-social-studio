@@ -2,6 +2,11 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { storeGet, storeSet } from "@/lib/storeClient";
+import { callClaudeJSON } from "@/lib/claudeClient";
+import { buildCalendarPlanPrompt } from "@/lib/promptBuilders";
+import { coercePlan, toContentItems, occupiedDates, daysInMonth } from "@/lib/calendarPlan";
+import { CADENCE } from "@/lib/founderProfiles";
+import { generateContentId } from "./calendarUtils";
 import { C, FONT } from "@/lib/tokens";
 import { CalendarHeader } from "./CalendarHeader";
 import { CalendarFilters } from "./CalendarFilters";
@@ -50,6 +55,8 @@ export function CalendarView() {
   const [error, setError] = useState("");
   /** The server could not be read. We are NOT looking at a calendar we can trust. */
   const [loadFailed, setLoadFailed] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const [planNote, setPlanNote] = useState("");
 
   // Mutations read the current items from here rather than from a setState updater.
   // Updaters must be pure: React StrictMode double-invokes them, so a network write
@@ -260,6 +267,76 @@ export function CalendarView() {
     );
   }
 
+  /**
+   * Plan the whole month on screen, in one call.
+   *
+   * The rule that matters: it writes ONLY into empty days. Occupied dates go into the
+   * prompt so the model plans around them, and coercePlan drops anything that lands on
+   * one anyway — belt and braces, because the calendar has no undo and a button that can
+   * overwrite scheduled work is worse than no button.
+   */
+  async function handlePlanMonth() {
+    if (planning) return;
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const monthName = currentDate.toLocaleString("en-GB", { month: "long" });
+
+    const occupied = occupiedDates(itemsRef.current, year, month);
+    const last = daysInMonth(year, month);
+    // Weekdays only, matching how the team already posts.
+    const availableDays: number[] = [];
+    for (let d = 1; d <= last; d++) {
+      const dow = new Date(year, month, d).getDay();
+      if (dow === 0 || dow === 6) continue;
+      if (occupied.has(formatDateKey(year, month, d))) continue;
+      availableDays.push(d);
+    }
+
+    if (!availableDays.length) {
+      setPlanNote(`Every weekday in ${monthName} already has a post. Nothing to fill.`);
+      return;
+    }
+
+    setPlanning(true);
+    setPlanNote("");
+    setError("");
+    try {
+      const prompt = buildCalendarPlanPrompt({
+        year,
+        monthName,
+        availableDays,
+        // Newest first: the builder keeps only the first 60, and a repeat of last
+        // month's subject matters more than a repeat of one from a year ago.
+        existingTopics: [...itemsRef.current]
+          .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+          .map((i) => i.topic)
+          .filter(Boolean),
+        // Never ask for more than there are days to put them on.
+        targetCount: Math.min(CADENCE.postsPerMonth, availableDays.length * 2)
+      });
+      const reply = await callClaudeJSON("calendarPlan", prompt);
+      const plan = coercePlan(reply, { year, month, occupied });
+      const stamp = new Date().toISOString();
+      const fresh = toContentItems(plan, () => generateContentId(), stamp);
+
+      const ok = await commit([...fresh, ...itemsRef.current]);
+      if (ok) {
+        const skipped = plan.skippedOccupied + plan.skippedInvalid;
+        setPlanNote(
+          `Added ${fresh.length} posts to ${monthName}.` +
+            (skipped ? ` ${skipped} were dropped — they landed on days already taken or could not be read.` : "") +
+            " Nothing already in the calendar was changed."
+        );
+      }
+    } catch (e) {
+      setError(
+        `Could not plan ${monthName} (${e instanceof Error ? e.message : e}). Nothing was added — the calendar is unchanged.`
+      );
+    } finally {
+      setPlanning(false);
+    }
+  }
+
   function handleQuickAdd(newItem: ContentItem) {
     void commit([newItem, ...itemsRef.current]);
   }
@@ -347,6 +424,72 @@ export function CalendarView() {
         postedCount={postedCount}
         totalCount={items.length}
       />
+
+      {/* Plan the whole month in one call. Sits above Quick Add because it is the
+          coarse tool: fill the month, then hand-add the exceptions. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+          padding: "10px 14px",
+          background: C.white,
+          border: `1px solid ${C.line}`,
+          borderRadius: 10
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => void handlePlanMonth()}
+          disabled={planning || isSaving}
+          title="Plans topics, authors and formats into this month's empty weekdays. Existing posts are never changed."
+          style={{
+            padding: "8px 16px",
+            background: planning ? C.line : C.ink,
+            color: planning ? C.inkMute : "#FFF",
+            border: "none",
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            fontFamily: FONT,
+            cursor: planning || isSaving ? "default" : "pointer"
+          }}
+        >
+          {planning ? "Planning the month…" : "✦ Generate this month"}
+        </button>
+        <span style={{ fontSize: 12, color: C.inkMute, lineHeight: 1.45 }}>
+          {planning
+            ? "Writing topics for Kognoz, Lokesh and Harpreet — about 30 seconds."
+            : "Fills empty weekdays only. Nothing already scheduled is touched."}
+        </span>
+      </div>
+
+      {planNote && (
+        <div
+          style={{
+            padding: "8px 14px",
+            background: "#EAF6EF",
+            border: "1px solid #BFE3CD",
+            borderRadius: 8,
+            color: "#1E6B41",
+            fontSize: 12.5,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12
+          }}
+        >
+          <span>{planNote}</span>
+          <button
+            type="button"
+            onClick={() => setPlanNote("")}
+            style={{ background: "transparent", border: "none", cursor: "pointer", color: "#1E6B41" }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Quick Add Bar */}
       <QuickAddBar

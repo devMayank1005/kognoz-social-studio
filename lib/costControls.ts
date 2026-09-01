@@ -10,8 +10,8 @@ export const MODEL_ALLOWLIST = [
 ] as const;
 export type AllowedModel = (typeof MODEL_ALLOWLIST)[number];
 
-export type Task = "generate" | "revise" | "caption" | "article" | "verify" | "designNote";
-export const TASKS: Task[] = ["generate", "revise", "caption", "article", "verify", "designNote"];
+export type Task = "generate" | "revise" | "caption" | "article" | "verify" | "designNote" | "calendarPlan";
+export const TASKS: Task[] = ["generate", "revise", "caption", "article", "verify", "designNote", "calendarPlan"];
 
 // claude-sonnet-5 is $2/$10 per MTok against claude-sonnet-4-6's $3/$15 — cheaper
 // and newer. 4.6 stays allowlisted purely as a rollback target.
@@ -21,7 +21,8 @@ export const DEFAULT_MODEL_FOR_TASK: Record<Task, AllowedModel> = {
   caption: "claude-sonnet-5",
   article: "claude-sonnet-5",
   verify: "claude-sonnet-5",
-  designNote: "claude-haiku-4-5"
+  designNote: "claude-haiku-4-5",
+  calendarPlan: "claude-sonnet-5"
 };
 
 /**
@@ -63,9 +64,19 @@ export const TOKENS: Record<Task, { def: number; cap: number; groundedDef?: numb
   caption: { def: 1000, cap: 1200 },
   article: { def: 3000, cap: 3500 },
   verify: { def: 2500, cap: 3000, groundedDef: 3000, groundedCap: 4500 },
-  designNote: { def: 800, cap: 1000 }
+  designNote: { def: 800, cap: 1000 },
+  // A month is ~36 entries at ~60 tokens each, so ~2,400 output tokens — which is
+  // EXACTLY the plain `generate` cap, and the reason this is its own task rather than a
+  // reuse of that one. On truncation claudeClient retries at def x 1.75, and that retry
+  // is only real if the cap leaves room for it: at generate's 2000/2400 the roomier
+  // retry gets clamped straight back to 2400 and truncates identically, buying a second
+  // call for nothing. 4000 x 1.75 = 7000, comfortably inside 8000.
+  calendarPlan: { def: 4000, cap: 8000 }
 };
 
+// calendarPlan is deliberately absent: the founder research is already done and written
+// down in lib/founderProfiles.ts, so grounding it again would cost roughly 3.5x per run
+// to rediscover facts nobody would review.
 export const SEARCH_ALLOWED_TASKS: Task[] = ["generate", "verify"];
 
 export const RATE_LIMIT_PER_HOUR = 60;

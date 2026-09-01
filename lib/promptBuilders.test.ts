@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { buildGeneratePrompt } from "./promptBuilders";
+import { CHANNEL_IDS, DO_NOT_ASSERT, CADENCE } from "./founderProfiles";
+import { PILLARS_LIST } from "../components/calendar/types";
+import { buildGeneratePrompt, buildCalendarPlanPrompt } from "./promptBuilders";
 import { DEFAULT_BUDGET } from "./coerce";
 import { STUDIO_FORMATS, FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, bodyBudgetFor } from "./formats";
 import type { FormatId } from "./formats";
@@ -108,5 +110,85 @@ describe("FORMAT_BRIEF — what the user is told before spending credit", () => 
       expect(FORMAT_BRIEF[f]).toBeTruthy();
       expect(FORMAT_BRIEF[f].length).toBeGreaterThan(10);
     }
+  });
+});
+
+// The calendar planner writes in the names of real co-founders, so this suite is mostly
+// about what the prompt is forbidden to let through — the facts research could not
+// confirm. A confident false claim about a real firm is not a style problem.
+describe("buildCalendarPlanPrompt", () => {
+  const prompt = buildCalendarPlanPrompt({
+    year: 2026,
+    monthName: "October",
+    availableDays: [1, 2, 5, 6, 7],
+    existingTopics: ["A topic already on the calendar"],
+    targetCount: 36
+  });
+
+  it("names all three publishing identities and their real names", () => {
+    for (const id of CHANNEL_IDS) expect(prompt).toContain(id);
+    expect(prompt).toContain("Lokesh Nigam");
+    expect(prompt).toContain("Harpreet Kaur Kapoor");
+  });
+
+  it("carries every do-not-assert line verbatim", () => {
+    // These are the guardrails; a paraphrase would weaken them.
+    for (const line of DO_NOT_ASSERT) expect(prompt).toContain(line);
+  });
+
+  it("forbids the unverifiable claims by name", () => {
+    expect(prompt).toContain("Immersion Index");
+    expect(prompt).toMatch(/never say Kognoz has "two co-founders"/i);
+    expect(prompt).toMatch(/never state a founding year/i);
+    expect(prompt).toMatch(/never claim a Middle East office/i);
+    expect(prompt).toMatch(/never name a client/i);
+  });
+
+  it("asks for the month as a campaign, with arcs that run in the right direction", () => {
+    expect(prompt).toMatch(/campaign, not a list/i);
+    expect(prompt).toContain("its day must come after the post it refers to");
+  });
+
+  it("states the cadence and the author split", () => {
+    expect(prompt).toContain("1, 2, 5, 6, 7");
+    expect(prompt).toContain(String(CADENCE.perChannel["Kognoz page"]));
+    expect(prompt).toContain(String(CADENCE.perChannel.Lokesh));
+    expect(prompt).toContain(String(CADENCE.perChannel.Harpreet));
+  });
+
+  it("passes existing topics through so a second month does not repeat the first", () => {
+    expect(prompt).toContain("A topic already on the calendar");
+    expect(prompt).toMatch(/do not repeat these subjects/i);
+  });
+
+  it("asks for an OBJECT, not a bare array", () => {
+    // claudeClient's extractJson brackets on { … }. A top-level array fails to parse and
+    // costs an extra corrective call.
+    expect(prompt).toContain('{"items": [');
+    expect(prompt).not.toMatch(/Return ONLY valid JSON[\s\S]{0,40}^\[/m);
+  });
+
+  it("enumerates every enum the coercer will snap onto", () => {
+    for (const p of PILLARS_LIST) expect(prompt).toContain(p);
+    for (const f of ["Carousel", "Text post", "Poll", "Founder Video"]) expect(prompt).toContain(f);
+  });
+
+  it("keeps the topic length request inside what the coercer will store", () => {
+    // The same trap promptBuilders already guards for slide bodies: asking for more than
+    // the coercer keeps means silent truncation nobody can see in the prompt.
+    const asked = [...prompt.matchAll(/(\d+) to (\d+) characters/g)].map((m) => Number(m[2]));
+    expect(asked.length).toBeGreaterThan(0);
+    for (const n of asked) expect(n).toBeLessThanOrEqual(110);
+  });
+
+  it("omits the avoid-list block entirely when nothing is scheduled yet", () => {
+    const fresh = buildCalendarPlanPrompt({
+      year: 2026,
+      monthName: "October",
+      availableDays: [1],
+      existingTopics: [],
+      targetCount: 4
+    });
+    expect(fresh).not.toMatch(/ALREADY SCHEDULED/);
   });
 });

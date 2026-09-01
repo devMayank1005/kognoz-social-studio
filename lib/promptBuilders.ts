@@ -4,6 +4,7 @@
 // React state management so the prompt text itself is reviewable and
 // (where it matters) testable on its own.
 import { BRAND_CORE, laneContext } from "./brandCore";
+import { FOUNDER_PROFILES, CHANNEL_IDS, DO_NOT_ASSERT, CADENCE, voiceFor } from "./founderProfiles";
 import type { FormatId } from "./formats";
 import type { CoercedSlide } from "./coerce";
 
@@ -186,12 +187,12 @@ export function buildCaptionPrompt(opts: {
     instruction && instruction.trim()
       ? `\nCURRENT DRAFT:\n${currentCopy || ""}\n\nREVISION INSTRUCTION FROM THE TEAM: "${instruction.trim()}"\nRevise the draft to follow the instruction. Keep what already works; do not start from scratch unless the instruction demands it.\n`
       : "";
-  const who =
-    channel === "Kognoz page"
-      ? "the Kognoz company page. Institutional voice: we/our, calm authority, evidence-led."
-      : channel === "Lokesh"
-      ? "Lokesh, Kognoz co-founder, writing in the first person. Home ground: behavioral science, AI, and technology, and how organizations actually change when you measure behavior and build AI around human judgment. Writes from the intersection: what people do, what the data shows, what the technology makes possible. I/we, direct, specific, never a brand account."
-      : "Harpreet, Kognoz co-founder, writing in the first person. Home ground: technology and HR transformation, specifically AI-led HR transformation: the HR function redesigned around AI, agentic workflows with human gates, HCM implementation, adoption that shows up in behavior not logins. An implementation-tested practitioner voice: what actually happened when we built it. I/we, direct, specific, never a brand account.";
+  // One definition per voice, shared with the calendar planner so the two cannot drift.
+  // This replaced a ternary whose final branch was the DEFAULT: every channel that was
+  // not "Kognoz page" or "Lokesh" got Harpreet's first-person voice, including
+  // "LinkedIn", which is the quick-add default. Posts nobody assigned to her were being
+  // written as her. voiceFor falls back to the company page instead.
+  const who = voiceFor(channel);
 
   return `Write the LinkedIn post text for ${who}
 
@@ -297,4 +298,82 @@ The system has these controls and no others:
 - "petals": whether the soft background circle motif shows: true | false
 - "set": the deck's visual family: "editorial" | "numeral" | "dark" | "glass" | "bloom" | "magazine" | "mixed"
 Return ONLY a JSON object containing just the keys the instruction actually addresses.`;
+}
+
+/**
+ * A whole month of the content calendar, in one call.
+ *
+ * The schedule only — who posts, what about, which day, which format, which pillar. No
+ * captions: those stay per-item, both because forty extra calls would burn most of the
+ * hourly budget and because you should not pay for copy on posts you are going to cut.
+ *
+ * Two things this prompt has to get right that a Studio prompt does not:
+ *
+ *   the people   It writes in the names of real co-founders. lib/founderProfiles.ts holds
+ *                what research could actually verify, and DO_NOT_ASSERT holds what it
+ *                could not — those lines go into the prompt as hard prohibitions, because
+ *                a confident false claim about a real firm is a reputational cost.
+ *   the shape    A month is a campaign, not 36 unrelated posts. The existing hand-written
+ *                plan builds callbacks (a poll, answered by a stat card five days later),
+ *                and that is most of why it reads as deliberate.
+ */
+export function buildCalendarPlanPrompt(opts: {
+  year: number;
+  monthName: string;
+  /** Weekday days-of-month still free, in order. */
+  availableDays: number[];
+  /** Topics already scheduled, so a second month does not repeat the first. */
+  existingTopics: string[];
+  targetCount: number;
+}): string {
+  const { year, monthName, availableDays, existingTopics, targetCount } = opts;
+
+  const profiles = CHANNEL_IDS.map((id) => {
+    const p = FOUNDER_PROFILES[id];
+    return `${id} — ${p.publicName}, ${p.role}
+Voice: ${p.voice}
+Writes credibly about: ${p.evidencedTopics.join("; ")}
+Formats that suit this identity: ${p.suitsFormats.join(", ")}`;
+  }).join("\n\n");
+
+  const avoid = existingTopics.length
+    ? `\nALREADY SCHEDULED — do not repeat these subjects or restate them from another angle:\n${existingTopics
+        .slice(0, 60)
+        .map((t) => `- ${t}`)
+        .join("\n")}\n`
+    : "";
+
+  return `Plan ${monthName} ${year} for Kognoz's LinkedIn presence: ${targetCount} posts across three publishing identities.
+
+${BRAND_CORE}
+
+THE THREE IDENTITIES. Each is a real person or a real company page, so write only what that identity can credibly say.
+
+${profiles}
+
+FACTUAL LIMITS, NON-NEGOTIABLE. Research could not verify these, so they must never appear:
+${DO_NOT_ASSERT.map((d) => `- ${d}`).join("\n")}
+
+THE MONTH IS A CAMPAIGN, NOT A LIST.
+- Build two or three deliberate arcs across the month: a poll early that a later post answers with what people chose; a deck that a follow-up post refers back to the next working day; a month-closing post that looks back at the month.
+- Where a post depends on an earlier one, the later post's topic must make the dependency obvious, and its day must come after the post it refers to.
+- No two posts may make the same argument. Vary the pillar and the format run to run — never three of the same format in a row.
+
+CADENCE. Post only on the days listed as available: ${availableDays.join(", ")}. Roughly half of them carry two posts. Aim for this split across the month: ${CADENCE.perChannel["Kognoz page"]} from the Kognoz page, ${CADENCE.perChannel.Lokesh} from Lokesh, ${CADENCE.perChannel.Harpreet} from Harpreet.
+
+TOPIC CRAFT. A topic is a compressed editorial description, not a headline and not a slug.
+- 40 to 95 characters. Sentence case. No title case, no colons, no questions, no hashtags.
+- State a tension or a claim, usually as two clauses: "The survey said empowered, while decisions travelled two levels up".
+- Behavioural language: name what people do, never how they feel. No "not just", "unlock", "leverage", "seamless", "journey", "game-changer", "delve", "holistic", "elevate". No em dashes. No exclamation marks.
+- Every topic must be specific enough that two different writers would produce recognisably the same post.
+${avoid}
+Return ONLY valid JSON in exactly this shape, with no commentary before or after:
+{"items": [{"day": 1, "channel": "Kognoz page", "format": "Carousel", "pillar": "Behavioral Signal", "topic": "the compressed description"}]}
+
+- "day" is a number from the available list above.
+- "channel" is exactly one of: ${CHANNEL_IDS.join(", ")}.
+- "pillar" is exactly one of: Behavioral Signal, Consulting POV, Market Intelligence, Human + AI, From the Work.
+- "format" is exactly one of: Carousel, Square, Idea Deck, Article Cover, Stat Card, Says vs Does, Dialogue, Montage, Story, Video, Founder Video, Text post, Poll.
+
+Return exactly ${targetCount} items, ordered by day.`;
 }

@@ -210,9 +210,38 @@ describe("clampMaxTokens — grounded headroom", () => {
   });
 
   it("leaves tasks that cannot search unaffected by the flag", () => {
-    for (const task of ["revise", "caption", "article", "designNote"] as const) {
+    // Derived from TASKS rather than listed by hand. The literal list this replaced would
+    // silently skip any task added later — the flag could then quietly change behaviour
+    // for a new task and no test would notice.
+    const cannotSearch = TASKS.filter((t) => !SEARCH_ALLOWED_TASKS.includes(t));
+    expect(cannotSearch.length).toBeGreaterThan(0);
+    for (const task of cannotSearch) {
       expect(clampMaxTokens(task, undefined, true)).toBe(clampMaxTokens(task, undefined, false));
       expect(clampMaxTokens(task, 999999, true)).toBe(TOKENS[task].cap);
     }
+  });
+});
+
+// A month of calendar entries is the one task whose reply is large enough to hit its own
+// ceiling, and the truncation retry only works if the cap leaves room for it.
+describe("calendarPlan has room for the retry that exists to save it", () => {
+  it("its cap clears def x 1.75, so the roomier retry is not clamped back", () => {
+    // claudeClient retries a truncated JSON reply at Math.round(def * 1.75). If the cap is
+    // below that, clampMaxTokens hands back the same ceiling that just truncated and the
+    // retry buys an identical failure. generate, caption and article all have this shape,
+    // which is exactly why this work did not reuse generate.
+    const t = TOKENS.calendarPlan;
+    expect(clampMaxTokens("calendarPlan", Math.round(t.def * 1.75))).toBe(Math.round(t.def * 1.75));
+    expect(t.cap).toBeGreaterThanOrEqual(Math.round(t.def * 1.75));
+  });
+
+  it("has headroom over a realistic month", () => {
+    // ~36 entries at ~60 tokens of minified JSON each, plus the wrapper.
+    expect(TOKENS.calendarPlan.def).toBeGreaterThan(36 * 60);
+  });
+
+  it("cannot search, so a month never becomes a grounded call by accident", () => {
+    expect(SEARCH_ALLOWED_TASKS).not.toContain("calendarPlan");
+    expect(clampMaxTokens("calendarPlan", undefined, true)).toBe(TOKENS.calendarPlan.def);
   });
 });
