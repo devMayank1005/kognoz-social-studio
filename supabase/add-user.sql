@@ -22,15 +22,25 @@
 create extension if not exists pgcrypto;
 
 
--- 2. Create the account. Replace the two values on the marked lines.
+-- 2. Create the account. Replace the three values on the marked lines.
 --
---    lower(trim(...)) matches the lookup in lib/auth.ts, which lowercases and trims
---    before querying — an address stored with different case would never be found.
+--    `username` is NOT NULL with no default, so it must be supplied. It is a short
+--    lowercase handle (existing rows use "mayank", "yashwant") and is NOT used to sign
+--    in — lib/auth.ts looks the account up by email. It just has to be present.
+--
+--    Everything else fills itself in: id, role ('member'), token_version,
+--    failed_attempts, lockout_level and created_at all have defaults.
+--
+--    lower(trim(...)) is not cosmetic. lib/auth.ts lowercases the typed address and
+--    does an exact match, so a row stored with ANY capital letter can never be found
+--    by the password form. Two existing rows are stored capitalised and would fail to
+--    sign in this way today; they use Microsoft SSO, which never reads this table.
 --
 --    gen_salt('bf', 12) produces a $2a$12$ hash. That is the same variant and cost
 --    bcryptjs writes, and bcrypt.compare in lib/auth.ts verifies it directly.
-insert into users (email, name, password_hash)
+insert into users (username, email, name, password_hash)
 values (
+  'theirhandle',                        -- <<< short handle, lowercase, e.g. "mayank"
   lower(trim('someone@example.com')),   -- <<< their email
   'Their Name',                         -- <<< their display name
   crypt('replace-with-a-strong-password', gen_salt('bf', 12))
@@ -55,15 +65,9 @@ limit 5;
 -- already exists. Come here if you actually intend to change it.
 -- ---------------------------------------------------------------------------
 
--- insert into users (email, name, password_hash)
--- values (
---   lower(trim('someone@example.com')),
---   'Their Name',
---   crypt('their-new-password', gen_salt('bf', 12))
--- )
--- on conflict (email) do update
---   set name = excluded.name,
---       password_hash = excluded.password_hash;
+-- update users
+--    set password_hash = crypt('their-new-password', gen_salt('bf', 12))
+--  where email = lower(trim('someone@example.com'));
 
 
 -- ---------------------------------------------------------------------------

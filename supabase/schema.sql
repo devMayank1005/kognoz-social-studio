@@ -5,6 +5,36 @@
 -- email service; admin-managed credentials instead). This table IS the allowlist:
 -- no row, no login. Passwords are bcrypt hashes, never plaintext — see
 -- scripts/add-user.mjs, the only supported way to create one.
+-- ⚠  OUT OF DATE — this does NOT match the live database.
+--
+--    The production `users` table has ELEVEN columns, not four. Verified against the
+--    live table on 1 Sep 2026:
+--
+--      id               uuid, default-generated, primary key
+--      username         text  NOT NULL, no default   <- an insert MUST supply this
+--      password_hash    text  NOT NULL               <- bcrypt, cost 12
+--      name             text  NOT NULL
+--      email            text  NOT NULL               <- what lib/auth.ts looks up by
+--      role             text  default 'member'       <- values seen: 'member', 'admin'
+--      token_version    int   default 0
+--      failed_attempts  int   default 0
+--      lockout_level    int   default 0
+--      locked_until     timestamptz, nullable
+--      created_at       timestamptz default now()
+--
+--    The exact DDL — constraints, indexes, the role check — was never committed, so it
+--    is not reproduced here rather than guessed at. Anyone standing up a fresh project
+--    must dump the real schema from the live database first; running the block below
+--    would create a table the app can still read but that no longer matches production.
+--
+--    Note also that `role`, `token_version`, `failed_attempts`, `lockout_level` and
+--    `locked_until` are written by nobody and read by nobody. Someone built the shape of
+--    roles, session revocation and login lockout; none of it is implemented in the app.
+--    There is no lockout despite the columns.
+--
+--    To add a user, use supabase/add-user.sql or `npm run add-user` — both supply
+--    `username` and are kept in step with the live table.
+
 create table if not exists users (
   email text primary key,
   name text not null,

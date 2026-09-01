@@ -6,6 +6,11 @@
 // Usage:
 //   npm run add-user "someone@example.com" "Their Name"                 <- generates a password
 //   npm run add-user "someone@example.com" "Their Name" "their-password" <- sets one you chose
+//   npm run add-user "someone@example.com" "Their Name" "" "handle"      <- pick the username
+//
+// The users table has a NOT NULL `username` with no default, so one is always written.
+// It defaults to the lowercased local part of the email; pass a fourth argument to
+// choose it. It is not used to sign in — lib/auth.ts looks accounts up by email.
 //
 // Prefer the first form. A password passed as an argument is written to your shell
 // history and is visible in the process table to anyone on the machine while the
@@ -23,7 +28,7 @@ import { createClient } from "@supabase/supabase-js";
 import { randomInt } from "node:crypto";
 import bcrypt from "bcryptjs";
 
-const [, , email, name, providedPassword] = process.argv;
+const [, , email, name, providedPassword, providedUsername] = process.argv;
 
 if (!email || !name) {
   console.error('Usage: npm run add-user "<email>" "<name>" ["<password>"]');
@@ -58,7 +63,10 @@ function generatePassword() {
   return groups.join("-");
 }
 
+// Lowercased to match authorize(), which lowercases the typed address and does an exact
+// match — a row stored with any capital letter can never be found by the password form.
 const normalisedEmail = email.toLowerCase().trim();
+const username = (providedUsername || normalisedEmail.split("@")[0]).toLowerCase().trim();
 const generated = !providedPassword;
 const password = providedPassword || generatePassword();
 
@@ -83,7 +91,11 @@ if (lookupError) {
 // them aligned so the intent stays obvious.
 const password_hash = await bcrypt.hash(password, 12);
 
-const { error } = await supabase.from("users").upsert({ email: normalisedEmail, name, password_hash });
+// `username` is required by the live table. Omitting it fails with a NOT NULL violation,
+// which is exactly what this script used to do — supabase/schema.sql in this repo is out
+// of date and shows only four of the eleven columns that actually exist.
+const row = { email: normalisedEmail, name, password_hash, username };
+const { error } = await supabase.from("users").upsert(row, { onConflict: "email" });
 
 if (error) {
   console.error("Failed:", error.message);
@@ -94,7 +106,8 @@ if (existing) {
   console.log(`\nUpdated an existing account — ${normalisedEmail}`);
   console.log("Their previous password no longer works.");
 } else {
-  console.log(`\nCreated ${normalisedEmail} — they can sign in with the password form at /login.`);
+  console.log(`\nCreated ${normalisedEmail} (username "${username}") — they can sign in with`);
+  console.log("the password form at /login, not the Microsoft button.");
 }
 
 if (generated) {
