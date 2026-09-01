@@ -140,10 +140,16 @@ export function coercePlan(parsed: unknown, opts: PlanCoerceOptions): CoercedPla
 export function toContentItems(
   plan: CoercedPlan,
   makeId: (index: number) => string,
-  now: string
+  now: string,
+  author?: { name?: string | null; email?: string | null }
 ): ContentItem[] {
   return plan.entries.map((e, i) => ({
     id: makeId(i),
+    // Who pressed the button. Every other creation path stamps this (QuickAddBar,
+    // ContentEditorModal), and without it a generated month is the only content in
+    // the calendar with no author on the card and no attribution in the audit trail.
+    authorName: author?.name || undefined,
+    authorEmail: author?.email || undefined,
     title: e.topic,
     topic: e.topic,
     platform: e.channel,

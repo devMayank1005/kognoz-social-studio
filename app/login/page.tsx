@@ -381,6 +381,13 @@ function LoginForm() {
           }}
         >
           Protected team environment. User access is managed via the authorized Kognoz member allowlist.
+          {/* Saying this is what makes the logging defensible, and it is required in
+              substance by GDPR and India's DPDP Act — IP address is personal data.
+              A trail people were never told about is the one that causes trouble. */}
+          <div style={{ marginTop: 6 }}>
+            Sign-ins, content changes and downloads are recorded, including your IP address and device, and
+            kept for 180 days.
+          </div>
         </div>
       </div>
     </main>

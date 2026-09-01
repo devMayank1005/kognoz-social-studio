@@ -105,3 +105,36 @@ create index if not exists api_call_log_user_time_idx on api_call_log (user_emai
 create index if not exists api_call_log_search_idx on api_call_log (user_email, created_at desc) where use_search;
 
 alter table api_call_log enable row level security;
+
+
+-- ---------------------------------------------------------------------------
+-- Activity trail (added 2026-09-01). Full, commented DDL — including the
+-- v_all_activity view and the retention policy — lives in
+-- supabase/migrations/2026-09-01_activity_log.sql. Reproduced here so a fresh
+-- project gets the table; run the migration for the view.
+--
+-- NOTE this project is SHARED with another app ("Team Pulse"), which owns
+-- audit_log, login_ip_throttle and tasks, and co-owns users. Nothing here
+-- writes to any of them. v_all_activity READS audit_log so one person's
+-- activity across both products reads as a single timeline.
+-- ---------------------------------------------------------------------------
+create table if not exists studio_activity (
+  id           bigint generated always as identity primary key,
+  created_at   timestamptz not null default now(),
+  actor_email  text not null,   -- email, not a uuid: SSO users have no `users` row
+  actor_name   text,
+  action       text not null,   -- allowlisted in lib/activityEvents.ts, not by CHECK
+  entity       text,
+  entity_id    text,
+  entity_label text,
+  screen       text,
+  ip           text,
+  user_agent   text,
+  session_id   text,            -- groups one sign-in's events into a visit
+  meta         jsonb
+);
+
+create index if not exists studio_activity_actor_time_idx on studio_activity (actor_email, created_at desc);
+create index if not exists studio_activity_time_idx       on studio_activity (created_at desc);
+
+alter table studio_activity enable row level security;

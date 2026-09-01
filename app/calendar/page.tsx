@@ -57,6 +57,25 @@ export default function CalendarPage() {
 
         {session?.user && (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {/* Only shown to admins — a link nobody can follow is worse than no link.
+                Both API routes re-check independently; this is discoverability only. */}
+            {session.user.isAdmin && (
+              <Link
+                href="/admin/activity"
+                style={{
+                  fontFamily: FONT,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: C.blue,
+                  textDecoration: "none",
+                  background: C.mist,
+                  padding: "5px 12px",
+                  borderRadius: 14
+                }}
+              >
+                Activity
+              </Link>
+            )}
             <span
               style={{
                 fontFamily: FONT,

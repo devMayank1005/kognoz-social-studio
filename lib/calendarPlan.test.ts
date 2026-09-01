@@ -218,3 +218,30 @@ describe("occupiedDates", () => {
     expect(r.entries.map((e) => e.date)).toEqual(["2026-09-04"]);
   });
 });
+
+describe("generated posts carry an author", () => {
+  const plan = coercePlan({ items: [entry({ day: 2 }), entry({ day: 8 })] }, opts());
+
+  it("stamps whoever pressed the button", () => {
+    // Every other creation path sets these (QuickAddBar, ContentEditorModal). Without
+    // them a generated month would be the only content with a blank author on the
+    // card — and nothing to attribute in the activity trail.
+    const items = toContentItems(plan, (i) => `g_${i}`, "2026-09-01T00:00:00.000Z", {
+      name: "Mayank",
+      email: "mayank@kognozconsulting.com"
+    });
+    expect(items.every((i) => i.authorName === "Mayank")).toBe(true);
+    expect(items.every((i) => i.authorEmail === "mayank@kognozconsulting.com")).toBe(true);
+  });
+
+  it("leaves the fields undefined rather than empty strings when there is no session", () => {
+    // getAuthorInfo falls back on a missing value; an empty string is a value.
+    const items = toContentItems(plan, (i) => `g_${i}`, "x", { name: null, email: undefined });
+    expect(items[0].authorName).toBeUndefined();
+    expect(items[0].authorEmail).toBeUndefined();
+  });
+
+  it("still works when no author is passed at all", () => {
+    expect(() => toContentItems(plan, (i) => `g_${i}`, "x")).not.toThrow();
+  });
+});

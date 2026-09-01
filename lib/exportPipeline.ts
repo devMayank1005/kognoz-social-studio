@@ -12,6 +12,7 @@
 import { buildPdfFromJpegs } from "./pdfBuilder";
 import { getEmbeddableFontFaceCssSafe } from "./exportFonts";
 import { frameWidth } from "./slideIndex";
+import { logDownload } from "@/lib/activityClient";
 
 export async function buildSlideSvg(elId: string, baseW: number, baseH: number, fontFaceCss: string): Promise<string | null> {
   const node = document.getElementById(elId);
@@ -140,6 +141,14 @@ export async function slideCanvas(elId: string, baseW: number, baseH: number, sc
 }
 
 export function saveBlobAs(blob: Blob, name: string): void {
+  // The single point every export in this app passes through — PNG, PDF, panorama,
+  // strip, frames and the article markdown all end here. Since the app publishes
+  // nowhere itself, a download is the moment work actually leaves the tool, which
+  // makes this the most meaningful thing in the activity trail.
+  //
+  // logDownload coalesces a burst, so a 5-slide deck is one row, not five.
+  logDownload(name);
+
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;

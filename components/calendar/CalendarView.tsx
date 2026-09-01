@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import { storeGet, storeSet } from "@/lib/storeClient";
 import { callClaudeJSON } from "@/lib/claudeClient";
 import { buildCalendarPlanPrompt } from "@/lib/promptBuilders";
 import { coercePlan, toContentItems, occupiedDates, daysInMonth } from "@/lib/calendarPlan";
 import { CADENCE } from "@/lib/founderProfiles";
 import { generateContentId } from "./calendarUtils";
+import { logActivity } from "@/lib/activityClient";
 import { C, FONT } from "@/lib/tokens";
 import { CalendarHeader } from "./CalendarHeader";
 import { CalendarFilters } from "./CalendarFilters";
@@ -55,6 +57,7 @@ export function CalendarView() {
   const [error, setError] = useState("");
   /** The server could not be read. We are NOT looking at a calendar we can trust. */
   const [loadFailed, setLoadFailed] = useState(false);
+  const { data: session } = useSession();
   const [planning, setPlanning] = useState(false);
   const [planNote, setPlanNote] = useState("");
 
@@ -235,25 +238,57 @@ export function CalendarView() {
     setIsModalOpen(true);
   }
 
+  // Every calendar change is reported AFTER its save succeeds. Logging optimistically
+  // would put edits in the trail that a 409 or a dropped connection then threw away —
+  // a record of work that never happened is worse than a gap.
+  const track = (
+    ok: boolean,
+    action: Parameters<typeof logActivity>[0],
+    item: ContentItem,
+    meta?: Record<string, unknown>
+  ) => {
+    if (!ok) return;
+    logActivity(action, {
+      entity: "content",
+      entityId: item.id,
+      entityLabel: item.title || item.topic,
+      screen: "calendar",
+      meta: { platform: item.platform, contentType: item.contentType, date: item.date, ...meta }
+    });
+  };
+
   function handleSaveItem(savedItem: ContentItem): Promise<boolean> {
     const prev = itemsRef.current;
     const exists = prev.some((it) => it.id === savedItem.id);
     const next = exists
       ? prev.map((it) => (it.id === savedItem.id ? savedItem : it))
       : [savedItem, ...prev];
-    return commit(next);
+    // This is the chokepoint for the editor modal's saves, so both creating and
+    // editing a post are covered here rather than inside the modal.
+    return commit(next).then((ok) => {
+      track(ok, exists ? "content_edited" : "content_created", savedItem);
+      return ok;
+    });
   }
 
   function handleDeleteItem(id: string) {
-    void commit(itemsRef.current.filter((it) => it.id !== id));
+    const target = itemsRef.current.find((it) => it.id === id);
+    void commit(itemsRef.current.filter((it) => it.id !== id)).then((ok) => {
+      if (target) track(ok, "content_deleted", target);
+    });
   }
 
   function handleStatusChange(id: string, nextStatus: ContentStatus) {
+    const target = itemsRef.current.find((it) => it.id === id);
     void commit(
       itemsRef.current.map((it) =>
         it.id === id ? { ...it, status: nextStatus, updatedAt: new Date().toISOString() } : it
       )
-    );
+    ).then((ok) => {
+      // The transition to "Posted" is the one people will look for. Worth remembering
+      // that it is a status somebody flipped by hand — this app publishes nowhere.
+      if (target) track(ok, "content_status_changed", target, { from: target.status, to: nextStatus });
+    });
   }
 
   function handleDropItem(itemId: string, targetDateKey: string) {
@@ -264,7 +299,7 @@ export function CalendarView() {
       prev.map((it) =>
         it.id === itemId ? { ...it, date: targetDateKey, updatedAt: new Date().toISOString() } : it
       )
-    );
+    ).then((ok) => track(ok, "content_edited", target, { movedFrom: target.date, movedTo: targetDateKey }));
   }
 
   /**
@@ -317,10 +352,19 @@ export function CalendarView() {
       const reply = await callClaudeJSON("calendarPlan", prompt);
       const plan = coercePlan(reply, { year, month, occupied });
       const stamp = new Date().toISOString();
-      const fresh = toContentItems(plan, () => generateContentId(), stamp);
+      const fresh = toContentItems(plan, () => generateContentId(), stamp, {
+        name: session?.user?.name,
+        email: session?.user?.email
+      });
 
       const ok = await commit([...fresh, ...itemsRef.current]);
       if (ok) {
+        logActivity("month_generated", {
+          entity: "calendar",
+          entityLabel: `${monthName} ${year}`,
+          screen: "calendar",
+          meta: { count: fresh.length, month: `${year}-${String(month + 1).padStart(2, "0")}` }
+        });
         const skipped = plan.skippedOccupied + plan.skippedInvalid;
         setPlanNote(
           `Added ${fresh.length} posts to ${monthName}.` +
@@ -338,7 +382,7 @@ export function CalendarView() {
   }
 
   function handleQuickAdd(newItem: ContentItem) {
-    void commit([newItem, ...itemsRef.current]);
+    void commit([newItem, ...itemsRef.current]).then((ok) => track(ok, "content_created", newItem));
   }
 
   if (loading) {
