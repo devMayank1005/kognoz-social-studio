@@ -370,16 +370,18 @@ export function buildArticlePrompt(opts: {
   instruction?: string;
   currentArticle?: string;
   voiceSamples?: VoiceSample[];
+  /** Whose byline. Without it a long article is written by nobody in particular. */
+  channel?: string;
   seed?: number;
 }): BuiltPrompt {
-  const { topic, pillar, instruction, currentArticle, voiceSamples = [], seed = 0 } = opts;
+  const { topic, pillar, instruction, currentArticle, voiceSamples = [], channel, seed = 0 } = opts;
   const revBlock =
     instruction && instruction.trim() && currentArticle
       ? `\nCURRENT ARTICLE:\n${currentArticle}\n\nREVISION INSTRUCTION: "${instruction.trim()}"\nApply it precisely; keep everything the instruction doesn't touch. Return the full revised article.`
       : "";
 
   const system = `You write long-form LinkedIn articles for Kognoz.
-
+${channel ? `\nTHIS ARTICLE IS PUBLISHED AS ${voiceFor(channel)}\n` : ""}
 ${BRAND_CORE}
 
 ${laneContext(topic, seed)}
@@ -439,13 +441,27 @@ export function buildModifyPrompt(opts: {
   cta: string;
   instruction: string;
   housePrefs?: string;
+  /**
+   * The same voice corpus the draft was written from.
+   *
+   * This used to receive none, which made Revise the one button that could undo
+   * the humanising. A deck drafted and line-edited against real writing would be
+   * rewritten here in the default machine voice, and the team would reasonably
+   * conclude the voice work did not survive contact with editing.
+   */
+  voiceSamples?: VoiceSample[];
+  channel?: string;
 }): BuiltPrompt {
-  const { eyebrow, cover, slides, cta, instruction, housePrefs = "" } = opts;
+  const { eyebrow, cover, slides, cta, instruction, housePrefs = "", voiceSamples = [], channel } = opts;
   const current = JSON.stringify({ eyebrow, cover, slides: slides.map((sl, i) => ({ slide: i + 1, title: sl.title, body: sl.body })), cta });
   const prefBlock = housePrefs.trim() ? `\nSTANDING TEAM PREFERENCES, apply proactively:\n${housePrefs.trim()}\n` : "";
+  const who = channel ? voiceFor(channel) : "";
   const system = `You edit social-deck content for Kognoz. Voice: a senior partner speaking to a CEO. Declarative, behavioral, specific. No URLs anywhere.
+${who ? `\nTHIS PIECE IS PUBLISHED AS ${who}\n` : ""}
+${UNEVENNESS_BLOCK}
 
-${BANNED_BLOCK}`;
+${BANNED_BLOCK}
+${formatSamplesBlock(voiceSamples)}`;
   const user = `CURRENT CONTENT (slides are numbered for reference): ${current}
 
 INSTRUCTION: "${instruction.trim()}"

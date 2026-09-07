@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  DEFAULT_SAMPLE_COUNT,
   MIN_SAMPLE_CHARS,
+  stableSeed,
   coerceSamples,
   formatSamplesBlock,
   mergeSamples,
@@ -168,5 +170,53 @@ describe("formatSamplesBlock", () => {
   it("tells the model not to reuse the phrasing", () => {
     const block = formatSamplesBlock([s("a", "Lokesh", "post")]);
     expect(block.toLowerCase()).toContain("not what they wrote about");
+  });
+});
+
+describe("stableSeed", () => {
+  it("is deterministic, so one post keeps seeing the same writing", () => {
+    expect(stableSeed("item-42")).toBe(stableSeed("item-42"));
+  });
+
+  it("differs between posts, so a month does not converge on four samples", () => {
+    expect(stableSeed("item-1")).not.toBe(stableSeed("item-2"));
+  });
+
+  it("is never negative, since rotate() indexes with it", () => {
+    for (const s of ["", "a", "item-9999", "a very long topic line about succession depth"]) {
+      expect(stableSeed(s)).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("actually changes which samples are picked", () => {
+    const many = Array.from({ length: 8 }, (_, i) => s(`id${i}`, "Lokesh", "post"));
+    const a = pickSamples(many, { channel: "Lokesh", kind: "post", count: 3, seed: stableSeed("post-a") });
+    const b = pickSamples(many, { channel: "Lokesh", kind: "post", count: 3, seed: stableSeed("post-b") });
+    expect(a.map((x) => x.id)).not.toEqual(b.map((x) => x.id));
+  });
+});
+
+describe("how many samples reach a prompt", () => {
+  it("defaults to six now there is a real corpus to draw from", () => {
+    expect(DEFAULT_SAMPLE_COUNT).toBe(6);
+  });
+
+  it("hands over six when six are available", () => {
+    const many = Array.from({ length: 22 }, (_, i) => s(`id${i}`, "Lokesh", "post"));
+    expect(pickSamples(many, { channel: "Lokesh", kind: "post" })).toHaveLength(6);
+  });
+
+  it("hands over what exists when the corpus is smaller than six", () => {
+    const few = [s("a", "Lokesh", "post"), s("b", "Lokesh", "post")];
+    expect(pickSamples(few, { channel: "Lokesh", kind: "post" })).toHaveLength(2);
+  });
+
+  it("still reaches a post-only corpus from the deck path", () => {
+    // Decks ask for slide samples. Nobody has pasted slide copy, so the tiering
+    // has to fall through to that person's posts rather than returning nothing.
+    const posts = Array.from({ length: 22 }, (_, i) => s(`id${i}`, "Lokesh", "post"));
+    const picked = pickSamples(posts, { channel: "Lokesh", kind: "slide" });
+    expect(picked).toHaveLength(6);
+    expect(picked.every((p) => p.channel === "Lokesh")).toBe(true);
   });
 });

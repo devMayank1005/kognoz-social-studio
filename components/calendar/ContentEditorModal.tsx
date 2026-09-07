@@ -7,7 +7,7 @@ import { STUDIO_FORMATS } from "@/lib/formats";
 import { buildCaptionPrompt } from "@/lib/promptBuilders";
 import { callClaudeText, FAST_MODEL } from "@/lib/claudeClient";
 import { storeGet } from "@/lib/storeClient";
-import { coerceSamples, pickSamples, type VoiceSample } from "@/lib/voiceSamples";
+import { coerceSamples, pickSamples, stableSeed, type VoiceSample } from "@/lib/voiceSamples";
 import { humanizeNote, humanizeText } from "@/lib/humanizePass";
 import {
   PLATFORMS,
@@ -211,13 +211,19 @@ export function ContentEditorModal({
     setIsGeneratingAI(true);
     setAiError("");
     try {
-      const samples = pickSamples(voiceSamples, { channel: platform, kind: "post" });
+      // Rotate which samples this post sees. Without a seed every caption in the
+      // month was shown the same few posts and they converged on that handful.
+      // Derived from the item so a given post is reproducible while different
+      // posts differ; a brand new item falls back to the topic text.
+      const seed = stableSeed(item?.id || promptTopic);
+      const samples = pickSamples(voiceSamples, { channel: platform, kind: "post", seed });
       const prompt = buildCaptionPrompt({
         channel: platform,
         fmt: contentType,
         topic: promptTopic,
         currentCopy: content,
         instruction: aiInstruction.trim() || undefined,
+        seed,
         // This argument was simply missing. Every rule the team had added to house
         // style was invisible to caption generation, while the Studio saw all of
         // them — so the two surfaces were being written to different rules.

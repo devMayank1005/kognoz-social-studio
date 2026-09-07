@@ -47,8 +47,19 @@ export interface VoiceSample {
  */
 export const MIN_SAMPLE_CHARS = 140;
 
-/** How many samples go into a prompt. More is not better past this: the model starts collaging. */
-export const DEFAULT_SAMPLE_COUNT = 4;
+/**
+ * How many samples go into a prompt.
+ *
+ * Was 4, chosen when the corpus was empty and four was all there would ever be.
+ * With a real corpus, six gives the model a wider sense of the writer's range,
+ * and it matches what the month planner already asks for. The samples sit in the
+ * cached system half, so the extra two cost cache-read rates after the first call.
+ *
+ * This is a dial, not a truth. Past roughly six the model starts collaging
+ * phrases out of the samples instead of learning their rhythm, so if generated
+ * copy begins echoing a sample's actual wording, come back down.
+ */
+export const DEFAULT_SAMPLE_COUNT = 6;
 
 export function isChannelId(v: unknown): v is ChannelId {
   return typeof v === "string" && (CHANNEL_IDS as string[]).includes(v);
@@ -107,6 +118,23 @@ export function newSample(fields: {
     addedBy: fields.addedBy,
     addedAt: new Date().toISOString()
   };
+}
+
+/**
+ * A small stable number from a string, for rotating samples where no seed exists.
+ *
+ * Studio has a real seed that changes on "Regenerate afresh"; the calendar modal
+ * has none, so without this every caption in a month was shown the same handful
+ * of samples and converged on them. Deterministic on purpose: the same post
+ * should keep seeing the same writing, while a different post sees different
+ * writing.
+ */
+export function stableSeed(input: string): number {
+  let h = 0;
+  for (let i = 0; i < input.length; i++) {
+    h = (h * 31 + input.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   buildCaptionPrompt,
   buildGeneratePrompt,
   buildHumanizePrompt,
+  buildModifyPrompt,
   wholePrompt,
   MAX_SOURCE_CHARS
 } from "./promptBuilders";
@@ -459,5 +460,63 @@ describe("raw material", () => {
     // would invite claims nobody reviewed. buildHumanizePrompt takes no source.
     const p = buildHumanizePrompt({ shape: "deck", draft: '{"cover":"x"}' });
     expect(wholePrompt(p)).not.toContain("MATERIAL");
+  });
+});
+
+// Revise used to be the one button that undid the voice work: no samples, no
+// unevenness rules, and no second pass to catch it. A deck drafted and edited
+// against real writing came back out of Revise in the default machine voice.
+describe("Revise keeps the voice", () => {
+  const samples = [
+    {
+      id: "a",
+      channel: "Lokesh" as const,
+      kind: "post" as const,
+      text: "Trust scores were high. Speak-up behaviour was near zero. Believe the behaviour.",
+      addedAt: "2026-09-07T00:00:00.000Z"
+    }
+  ];
+  const base = { eyebrow: "Culture", cover: "A cover", slides: [{ title: "A claim", body: "A body." }], cta: "A close" };
+
+  it("shows the editor the same real writing the draft was written from", () => {
+    const { system } = buildModifyPrompt({ ...base, instruction: "sharpen slide 1", voiceSamples: samples });
+    expect(system).toContain("Believe the behaviour.");
+    expect(system).toContain("written by a human");
+  });
+
+  it("carries the unevenness rules, not just the ban list", () => {
+    const { system } = buildModifyPrompt({ ...base, instruction: "sharpen slide 1", voiceSamples: samples });
+    expect(system).toContain("WRITE UNEVENLY");
+    expect(system).toContain("BANNED");
+  });
+
+  it("edits in the same person's voice as the draft", () => {
+    const { system } = buildModifyPrompt({ ...base, instruction: "sharpen it", channel: "Lokesh" });
+    expect(system).toContain(voiceFor("Lokesh"));
+  });
+
+  it("still holds the instruction contract", () => {
+    const { user } = buildModifyPrompt({ ...base, instruction: "change slide 1 only" });
+    expect(user).toContain("change only those and copy everything else back word for word");
+    expect(user).toContain("change slide 1 only");
+  });
+
+  it("keeps the corpus in the cacheable half", () => {
+    const p = buildModifyPrompt({ ...base, instruction: "x", voiceSamples: samples });
+    expect(p.system).toContain("Believe the behaviour.");
+    expect(p.user).not.toContain("Believe the behaviour.");
+  });
+});
+
+describe("articles carry a byline", () => {
+  it("names the person the article is published as", () => {
+    const { system } = buildArticlePrompt({ topic: "Succession", pillar: "Culture", channel: "Harpreet" });
+    expect(system).toContain("THIS ARTICLE IS PUBLISHED AS");
+    expect(system).toContain(voiceFor("Harpreet"));
+  });
+
+  it("says nothing when no voice is chosen", () => {
+    const { system } = buildArticlePrompt({ topic: "Succession", pillar: "Culture" });
+    expect(system).not.toContain("THIS ARTICLE IS PUBLISHED AS");
   });
 });

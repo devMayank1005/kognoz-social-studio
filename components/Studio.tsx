@@ -150,6 +150,10 @@ export default function Studio() {
   // stored score goes stale the moment someone edits a field by hand, and the
   // panel would then be reporting on text that is no longer on screen.
   const [passNote, setPassNote] = useState("");
+  // Which samples the last generation was actually shown. Without this, "used
+  // the wrong person's posts" and "used the right ones and the problem is
+  // elsewhere" look identical from the interface.
+  const [usedSamples, setUsedSamples] = useState<VoiceSample[] | null>(null);
   const [designNote, setDesignNote] = useState("");
   const [designBusy, setDesignBusy] = useState(false);
   const [lookI, setLookI] = useState(0);
@@ -615,12 +619,14 @@ export default function Studio() {
     // the previous deck's edit-pass note sitting under the new topic.
     setPassNote("");
     setEditDiff(null);
+    setUsedSamples(null);
     try {
       // Chosen once and used for both passes, so the draft and the line edit are
       // measured against the same writing.
       // Channel first: with a voice chosen, pickSamples prefers that person's
       // writing and falls back to their posts when no slide samples exist.
       const samples = pickSamples(voiceSamples, { channel, kind: "slide", seed });
+      setUsedSamples(samples);
       const { system, user, useSearch } = buildGeneratePrompt({
         topic: gTopic,
         pillar: gPillar,
@@ -700,7 +706,19 @@ export default function Studio() {
     setModLoading(true);
     setError("");
     try {
-      const prompt = buildModifyPrompt({ eyebrow, cover, slides, cta, instruction: modTxt, housePrefs });
+      // The same corpus and voice the draft was written from. Without these,
+      // Revise was the one button that rewrote humanised copy back into the
+      // default machine voice.
+      const prompt = buildModifyPrompt({
+        eyebrow,
+        cover,
+        slides,
+        cta,
+        instruction: modTxt,
+        housePrefs,
+        voiceSamples: pickSamples(voiceSamples, { channel, kind: "slide", seed }),
+        channel
+      });
       const parsed = coerceContent(await callClaudeJSON("revise", prompt, { model: FAST_MODEL }), undefined, {
         body: bodyBudgetFor(format)
       });
@@ -724,8 +742,9 @@ export default function Studio() {
     setArtBusy(true);
     setError("");
     try {
-      const samples = pickSamples(voiceSamples, { kind: "article", seed });
-      const prompt = buildArticlePrompt({ topic, pillar, instruction, currentArticle: article, voiceSamples: samples, seed });
+      const samples = pickSamples(voiceSamples, { channel, kind: "article", seed });
+      setUsedSamples(samples);
+      const prompt = buildArticlePrompt({ topic, pillar, instruction, currentArticle: article, voiceSamples: samples, channel, seed });
       const text = await callClaudeText("article", prompt, { model: instruction && instruction.trim() ? FAST_MODEL : undefined, maxTokens: 2600 });
 
       // Second pass. Skipped on a targeted revision: the team asked for one
@@ -1477,6 +1496,39 @@ export default function Studio() {
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+        )}
+
+        {/*
+          Which real writing this generation was actually shown.
+          A channel mismatch, an empty corpus, and samples filed under the wrong
+          person all produce identical-looking output, so without this the only
+          way to tell them apart is to read the network request.
+        */}
+        {usedSamples && (
+          <div style={{ marginTop: 10, fontFamily: font, fontSize: 11.5, lineHeight: 1.5 }}>
+            {usedSamples.length === 0 ? (
+              <span style={{ color: "#C4553D" }}>
+                No voice samples matched, so this was written with nothing human to imitate. Paste real posts below.
+              </span>
+            ) : (
+              <>
+                <span style={{ fontWeight: 700, color: C.ink }}>
+                  Written from {usedSamples.length} real {usedSamples.length === 1 ? "post" : "posts"}
+                </span>
+                <ul style={{ margin: "4px 0 0", paddingLeft: 16, color: C.inkSoft }}>
+                  {usedSamples.map((v) => (
+                    <li key={v.id} style={{ marginBottom: 1 }}>
+                      <span style={{ fontWeight: 600, color: v.channel === channel ? C.teal : C.inkMute }}>
+                        {v.channel}
+                      </span>
+                      {v.channel !== channel ? " (no samples for the selected voice) " : " "}
+                      {v.text.slice(0, 60)}…
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </div>
         )}
