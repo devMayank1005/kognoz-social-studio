@@ -9,6 +9,8 @@ import { callClaudeText, FAST_MODEL } from "@/lib/claudeClient";
 import { storeGet } from "@/lib/storeClient";
 import { coerceSamples, pickSamples, stableSeed, type VoiceSample } from "@/lib/voiceSamples";
 import { humanizeNote, humanizeText } from "@/lib/humanizePass";
+import { brandKey } from "@/lib/brands";
+import { useBrandSwitch } from "@/components/BrandProvider";
 import {
   PLATFORMS,
   PILLARS_LIST,
@@ -42,6 +44,7 @@ export function ContentEditorModal({
 }: ContentEditorModalProps) {
   const { data: session } = useSession();
   const isEditing = !!item;
+  const { brand } = useBrandSwitch();
 
   const [title, setTitle] = useState("");
   const [topic, setTopic] = useState("");
@@ -52,6 +55,16 @@ export function ContentEditorModal({
   const [status, setStatus] = useState<ContentStatus>("Planned");
   const [pillar, setPillar] = useState("Behavioral Signal");
   const [content, setContent] = useState("");
+
+  // The brand's own pillars, plus whatever this item already carries. An item
+  // saved under the other brand must stay selectable rather than silently
+  // snapping to a pillar nobody chose — the modal is the one place a person can
+  // see and correct it.
+  const pillarOptions: string[] = React.useMemo(() => {
+    const own = Object.keys(brand.pillars);
+    return !pillar || own.includes(pillar) ? own : [...own, pillar];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brand.id, pillar]);
 
   // AI Generation state
   const [aiInstruction, setAiInstruction] = useState("");
@@ -102,7 +115,7 @@ export function ContentEditorModal({
         setDate(initialDate || getTodayKey());
         setTime("10:00");
         setStatus("Planned");
-        setPillar("Behavioral Signal");
+        setPillar(Object.keys(brand.pillars)[0]);
         setContent("");
         setUndoStack([]);
         setAiOutput(null);
@@ -185,8 +198,8 @@ export function ContentEditorModal({
     let live = true;
     (async () => {
       const [hp, vs] = await Promise.all([
-        storeGet<string>("kognoz-house-prefs").then((r) => r.value).catch(() => null),
-        storeGet<unknown>("kognoz-voice-samples").then((r) => r.value).catch(() => null)
+        storeGet<string>(brandKey(brand, "house-prefs")).then((r) => r.value).catch(() => null),
+        storeGet<unknown>(brandKey(brand, "voice-samples")).then((r) => r.value).catch(() => null)
       ]);
       if (!live) return;
       if (typeof hp === "string") setHousePrefs(hp);
@@ -195,7 +208,8 @@ export function ContentEditorModal({
     return () => {
       live = false;
     };
-  }, [isOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, brand.id]);
 
   if (!isOpen) return null;
 
@@ -218,6 +232,7 @@ export function ContentEditorModal({
       const seed = stableSeed(item?.id || promptTopic);
       const samples = pickSamples(voiceSamples, { channel: platform, kind: "post", seed });
       const prompt = buildCaptionPrompt({
+        brand,
         channel: platform,
         fmt: contentType,
         topic: promptTopic,
@@ -243,7 +258,7 @@ export function ContentEditorModal({
       if (aiInstruction.trim()) {
         setPassNote("");
       } else {
-        const edited = await humanizeText(next, { voiceSamples: samples, housePrefs, channel: platform });
+        const edited = await humanizeText(next, { brand, voiceSamples: samples, housePrefs, channel: platform });
         next = edited.value.trim();
         setPassNote(humanizeNote(edited));
       }
@@ -557,7 +572,7 @@ export function ContentEditorModal({
           <div>
             <label style={labelStyle}>Content Pillar</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {PILLARS_LIST.map((p) => {
+              {pillarOptions.map((p) => {
                 const isSelected = pillar === p;
                 const col = PILLAR_COLORS[p] || C.blue;
                 return (

@@ -18,13 +18,14 @@ import { useSearchParams } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
 import { shiftSlideImages, shiftDeckMap, deckIndexOfSlide, currentAfterRemoval, exportFileCount } from "@/lib/slideIndex";
-import { FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, DECK_SLIDE_LIMITS, bodyBudgetFor, type FormatId } from "@/lib/formats";
-import { PILLARS } from "@/lib/pillars";
-import { DESIGN_SETS, SURFACE_LABELS, surfaceFor, lookLever, nextCardSet, type DesignSetId } from "@/lib/designSets";
+import { FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, DECK_SLIDE_LIMITS, bodyBudgetFor, budgetFor, type FormatId } from "@/lib/formats";
+import { SURFACE_LABELS, surfaceFor, lookLever, nextCardSet, setSpec, type DesignSetId } from "@/lib/designSets";
+import { brandKey } from "@/lib/brands";
+import { useBrandSwitch } from "./BrandProvider";
+import { BrandSwitch } from "./BrandSwitch";
 import {
   coerceContent,
-  applyIdeaDeckKickers,
-  applyStatCardHygiene,
+  applyFormatHygiene,
   type CoercedSlide
 } from "@/lib/coerce";
 import {
@@ -52,7 +53,7 @@ import {
 import { humanizeDeck, humanizeNote, humanizeText } from "@/lib/humanizePass";
 import { diffDecks, slideTarget, type EditDiffRow } from "@/lib/editDiff";
 import { lintContent } from "@/lib/slopLint";
-import { CHANNEL_IDS, type ChannelId } from "@/lib/founderProfiles";
+import { type ChannelId } from "@/lib/founderProfiles";
 import { storeGet, storeSet, storePeek } from "@/lib/storeClient";
 import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG, saveBlobAs } from "@/lib/exportPipeline";
 import { SocialPreview, type PreviewPage } from "@/components/SocialPreview";
@@ -63,10 +64,22 @@ import { Logo } from "./Logo";
 const font = FONT;
 const displayFont = DISPLAY_FONT;
 
-const SOURCE_KEY = "kognoz-source-material";
+/** Suffix, not a key. Scoped per brand at the call site through `k()`. */
+const SOURCE_KEY = "source-material";
 
-const NO_SAMPLES_NOTE =
-  "No voice samples saved yet, so this was written with no human writing to imitate. Paste real published posts below.";
+/**
+ * Shown when the edit pass ran against an empty voice corpus.
+ *
+ * This is the honest ceiling on the humanize pass. With no samples it still has
+ * the ban list and the rhythm rules, but nothing human to imitate, and that is a
+ * materially weaker pass than the one Kognoz gets from its 36 approved posts.
+ * Konverz starts here by design — the 36 Konverz posts in lib/konverzTemplate.ts
+ * were written by a model and are deliberately kept out of the corpus — so this
+ * line has to name the brand, or a person reading it under Konverz will assume
+ * somebody already pasted the samples in.
+ */
+const noSamplesNote = (brandName: string) =>
+  `No ${brandName} voice samples saved yet, so this was written with no human writing to imitate. Paste real published posts below.`;
 
 interface VerifyCheck {
   where: string;
@@ -76,26 +89,53 @@ interface VerifyCheck {
   realSource: string | null;
 }
 
-const DEFAULT_DESIGN: Required<SlideDesign> = {
-  url: "kognozconsulting.com",
+/**
+ * The design a brand starts from. The website line and the visual family are the
+ * two fields that cannot be shared, so this is a function of the brand rather
+ * than a constant.
+ */
+const defaultDesign = (b: { url: string; defaultSet: DesignSetId }): Required<SlideDesign> => ({
+  url: b.url,
   coverRight: "swipe",
   contentRight: "page",
   singleRight: "cta",
   petals: true,
-  set: "editorial",
+  set: b.defaultSet,
   accent: null
-};
+});
 
 const DEFAULT_SLIDES: CoercedSlide[] = [
   { title: "The survey and the behavior disagree", body: "Your engagement score says people own their work. Meanwhile decisions that belong two levels down are landing on your desk for sign-off." },
   { title: "Behavior is the honest data", body: "What people report once a year and what they do every week are different facts. We measure the second one." },
   { title: "The cause is usually structural", body: "Watch the behavior and the problem is rarely attitude. Decision rights, spans, and consequences are set up to push everything upward. Structures can be redesigned." },
-  { title: "Read it with the Immersion Index", body: "Five conditions, read through behavioral signals across the organization. You see what is happening and which two changes matter most." }
+  // Was "Read it with the Immersion Index". DO_NOT_ASSERT in
+  // lib/founderProfiles.ts forbids that phrase outright — research found no
+  // public footprint for it — and this placeholder is the first thing anyone
+  // sees on an empty Studio. The five conditions it named are real and are kept.
+  { title: "Read it through the five conditions", body: "Purpose, ownership, mastery, trust, wellbeing, read through behavioral signals across the organization. You see what is happening and which two changes matter most." }
 ];
 
 export default function Studio() {
   const { data: session } = useSession();
   const searchParams = useSearchParams();
+
+  // ---------------------------------------------------------------------------
+  // The brand. Shadowing `C`, `GRAD`, `font` and `displayFont` here means every
+  // existing reference below resolves to whichever brand is loaded without being
+  // touched; see the header of lib/brands.ts for why this is shadowing and not
+  // mutation. `k()` scopes a storage key: the existing Kognoz keys are already
+  // spelled "kognoz-<name>", so this reproduces every one of them exactly and no
+  // saved data moves.
+  // ---------------------------------------------------------------------------
+  const { brand, brandId, setBrandId } = useBrandSwitch();
+  const C = brand.C;
+  const GRAD = brand.GRAD;
+  const font = brand.font;
+  const displayFont = brand.displayFont;
+  const PILLARS = brand.pillars;
+  const CHANNEL_IDS = brand.channelIds;
+  const DESIGN_SETS = brand.designSets;
+  const k = (name: string) => brandKey(brand, name);
 
   const [format, setFormat] = useState<FormatId>("Carousel");
   const [pillar, setPillar] = useState("Behavioral Signal");
@@ -122,7 +162,7 @@ export default function Studio() {
   const [grounded, setGrounded] = useState(false);
   const groundedTouched = useRef(false);
 
-  const [design, setDesignLocal] = useState<Required<SlideDesign>>(DEFAULT_DESIGN);
+  const [design, setDesignLocal] = useState<Required<SlideDesign>>(() => defaultDesign(brand));
   const [housePrefs, setHousePrefsLocal] = useState("");
   const [styleMem, setStyleMem] = useState<StyleExample[]>([]);
   // Real human writing the model imitates. Distinct from styleMem, which is the
@@ -130,13 +170,13 @@ export default function Studio() {
   // is what made everything sound machine-written.
   const [voiceSamples, setVoiceSamples] = useState<VoiceSample[]>([]);
   const [sampleDraft, setSampleDraft] = useState("");
-  const [sampleChannel, setSampleChannel] = useState<ChannelId>("Kognoz page");
+  const [sampleChannel, setSampleChannel] = useState<ChannelId>(brand.defaultChannel);
   const [sampleKind, setSampleKind] = useState<SampleKind>("post");
   const [showSamples, setShowSamples] = useState(false);
   // Whose voice this deck is in. Captions have always had this; decks did not,
   // so deck copy was written by nobody in particular and could not pick the
   // right person's samples.
-  const [channel, setChannel] = useState<ChannelId>("Kognoz page");
+  const [channel, setChannel] = useState<ChannelId>(brand.defaultChannel);
   // Notes, a transcript, dictated thoughts. A topic line is not enough material
   // to say anything specific, and generic input is most of why output reads
   // generic. Kept in localStorage so a refresh does not lose a pasted
@@ -253,15 +293,28 @@ export default function Studio() {
     });
   };
 
-  // Load shared design/house-prefs/style-memory once on mount (PRD §3.2).
+  // Load the shared design/house-prefs/style-memory/voice-samples for the active
+  // brand (PRD §3.2). Re-runs on a brand switch, because every one of these is
+  // brand-scoped and showing Kognoz's house style under a Konverz deck would be
+  // worse than showing none.
+  //
+  // The reset before the load is deliberate: without it, the previous brand's
+  // design and voice corpus stay on screen for the length of a round trip, and a
+  // generation fired in that window is written from the wrong brand's samples.
   useEffect(() => {
+    let cancelled = false;
+    setDesignLocal(defaultDesign(brand));
+    setHousePrefsLocal("");
+    setStyleMem([]);
+    setVoiceSamples([]);
     (async () => {
       const [d, hp, sm, vs] = await Promise.all([
-        storeGet<Partial<SlideDesign>>("kognoz-design").then((r) => r.value),
-        storeGet<string>("kognoz-house-prefs").then((r) => r.value),
-        storeGet<StyleExample[]>("kognoz-style-memory").then((r) => r.value),
-        storeGet<unknown>("kognoz-voice-samples").then((r) => r.value)
+        storeGet<Partial<SlideDesign>>(k("design")).then((r) => r.value),
+        storeGet<string>(k("house-prefs")).then((r) => r.value),
+        storeGet<StyleExample[]>(k("style-memory")).then((r) => r.value),
+        storeGet<unknown>(k("voice-samples")).then((r) => r.value)
       ]);
+      if (cancelled) return;
       if (d && Object.keys(d).length) setDesignLocal((cur) => ({ ...cur, ...d }));
       if (typeof hp === "string") setHousePrefsLocal(hp);
       if (Array.isArray(sm)) setStyleMem(sm);
@@ -272,11 +325,24 @@ export default function Studio() {
       // corpus should not be a small red line inside a collapsed panel.
       if (!samples.length) setShowSamples(true);
     })();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brand.id]);
+
+  // A brand switch also has to move the editorial selections, or a Konverz deck
+  // opens on a Kognoz pillar that its own prompt has never heard of.
+  useEffect(() => {
+    setChannel((c) => ((brand.channelIds as string[]).includes(c) ? c : brand.defaultChannel));
+    setSampleChannel((c) => ((brand.channelIds as string[]).includes(c) ? c : brand.defaultChannel));
+    setPillar((pl) => (brand.pillars[pl] ? pl : Object.keys(brand.pillars)[0]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brand.id]);
 
   const saveDesign = (next: Required<SlideDesign>) => {
     setDesignLocal(next);
-    storeSet("kognoz-design", next);
+    storeSet(k("design"), next);
   };
   /**
    * Same, but derived from the newest design rather than the one captured in a closure.
@@ -287,13 +353,13 @@ export default function Studio() {
   const setDesignAndPersist = (fn: (d: Required<SlideDesign>) => Required<SlideDesign>) => {
     setDesignLocal((d) => {
       const next = fn(d);
-      storeSet("kognoz-design", next);
+      storeSet(k("design"), next);
       return next;
     });
   };
   const saveHousePrefs = (v: string) => {
     setHousePrefsLocal(v);
-    storeSet("kognoz-house-prefs", v);
+    storeSet(k("house-prefs"), v);
   };
   const appendPref = (t: string) => {
     const line = "- " + t.trim();
@@ -328,28 +394,28 @@ export default function Studio() {
     const ex: StyleExample = { format, cover, slides: slides.slice(0, 6), cta };
     const next = [...styleMem.filter((e) => e.cover !== cover), ex].slice(-6);
     setStyleMem(next);
-    storeSet("kognoz-style-memory", next);
+    storeSet(k("style-memory"), next);
   };
 
-  // Restore any pasted transcript on mount. localStorage rather than the shared
-  // store: this is one person's working notes, not team state.
+  // Restore any pasted transcript. localStorage rather than the shared store:
+  // this is one person's working notes, not team state. Scoped per brand like
+  // everything else, so notes for a Konverz deck do not turn up under a Kognoz one.
   useEffect(() => {
     try {
-      const v = localStorage.getItem(SOURCE_KEY);
-      if (v) {
-        setSourceMaterial(v);
-        setShowSource(true);
-      }
+      const v = localStorage.getItem(k(SOURCE_KEY));
+      setSourceMaterial(v || "");
+      if (v) setShowSource(true);
     } catch {
       /* private mode or quota — the field just starts empty */
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brand.id]);
 
   const saveSourceMaterial = (v: string) => {
     setSourceMaterial(v);
     try {
-      if (v.trim()) localStorage.setItem(SOURCE_KEY, v);
-      else localStorage.removeItem(SOURCE_KEY);
+      if (v.trim()) localStorage.setItem(k(SOURCE_KEY), v);
+      else localStorage.removeItem(k(SOURCE_KEY));
     } catch {
       /* not worth an error banner; the value is still in state for this session */
     }
@@ -383,7 +449,7 @@ export default function Studio() {
 
   const persistSamples = (next: VoiceSample[]) => {
     setVoiceSamples(next);
-    storeSet("kognoz-voice-samples", next);
+    storeSet(k("voice-samples"), next);
   };
 
   const addSample = () => {
@@ -467,7 +533,7 @@ export default function Studio() {
    * rewritten. Pure and cheap — regex passes over a few hundred characters.
    */
   const styleReport = useMemo(
-    () => (cover || slides.length ? lintContent({ cover, slides, cta }) : null),
+    () => (cover || slides.length ? lintContent({ cover, slides, cta }, { allowed: brand.allowedPhrases }) : null),
     [cover, slides, cta]
   );
 
@@ -580,7 +646,7 @@ export default function Studio() {
   async function markDrafted(itemN: number | string) {
     // Calendar Create-> sets the item to Draft on successful generation
     // Round-trips through /api/store since Studio doesn't hold calendar state directly.
-    const { value: plan } = await storeGet<{ items: { id?: string; n?: number; status: string }[] }>("kognoz-calendar");
+    const { value: plan } = await storeGet<{ items: { id?: string; n?: number; status: string }[] }>(k("calendar"));
     if (!plan || !Array.isArray(plan.items)) return;
     const next = {
       ...plan,
@@ -589,7 +655,7 @@ export default function Studio() {
         return matches ? { ...it, status: "Draft" } : it;
       })
     };
-    const saved = await storeSet("kognoz-calendar", next);
+    const saved = await storeSet(k("calendar"), next);
     if (!saved.ok && saved.reason === "conflict") {
       // Someone edited the calendar while this deck was generating. Marking one
       // item as Draft is not worth overwriting their work — say so and move on.
@@ -628,6 +694,7 @@ export default function Studio() {
       const samples = pickSamples(voiceSamples, { channel, kind: "slide", seed });
       setUsedSamples(samples);
       const { system, user, useSearch } = buildGeneratePrompt({
+        brand,
         topic: gTopic,
         pillar: gPillar,
         format: gFormat,
@@ -641,28 +708,28 @@ export default function Studio() {
         fresh,
         grounded: gGrounded
       });
-      const bodyBudget = bodyBudgetFor(gFormat);
-      // Per-format body budget: without it, a Story asking for three paragraphs gets
-      // cut to 230 characters on arrival and the page looks unchanged.
-      const parsed = coerceContent(await callClaudeJSON("generate", { system, user }, { useSearch }), undefined, {
-        body: bodyBudget
-      });
-      if (gFormat === "Idea Deck") parsed.slides = applyIdeaDeckKickers(parsed.slides, ideaStyle);
-      if (gFormat === "Stat Card" && parsed.slides[0]) parsed.slides[0] = applyStatCardHygiene(parsed.slides[0]);
+      // Per-format budget: without it, a Story asking for three paragraphs gets
+      // cut to 230 characters on arrival and the page looks unchanged. It also
+      // carries the two Customer Quote exceptions — a 260-character cover, and no
+      // gradient word forced into somebody's published words.
+      const budget = budgetFor(gFormat);
+      const hygiene = { format: gFormat, ideaStyle, readCloser: brand.readCloser };
+      const parsed = applyFormatHygiene(
+        coerceContent(await callClaudeJSON("generate", { system, user }, { useSearch }), undefined, budget),
+        hygiene
+      );
 
       // Second pass: the line edit. It never throws — a failure returns the draft
       // untouched, because the draft is already paid for and already usable.
       // No source material here on purpose: the edit pass freezes every fact in
       // the draft, and handing it new material would invite claims nobody
       // reviewed onto the slides.
-      const edited = await humanizeDeck(parsed, { voiceSamples: samples, housePrefs, channel });
-      setPassNote(voiceSamples.length ? humanizeNote(edited) : NO_SAMPLES_NOTE);
+      const edited = await humanizeDeck(parsed, { brand, voiceSamples: samples, housePrefs, channel });
+      setPassNote(voiceSamples.length ? humanizeNote(edited) : noSamplesNote(brand.name));
 
       // Back through the quality firewall: the edit pass is a model reply like any
       // other and must not be trusted with URLs, dashes or character budgets.
-      const final = coerceContent(edited.value, parsed.slides.length, { body: bodyBudget });
-      if (gFormat === "Idea Deck") final.slides = applyIdeaDeckKickers(final.slides, ideaStyle);
-      if (gFormat === "Stat Card" && final.slides[0]) final.slides[0] = applyStatCardHygiene(final.slides[0]);
+      const final = applyFormatHygiene(coerceContent(edited.value, parsed.slides.length, budget), hygiene);
 
       // Diff the two COERCED versions. Comparing the raw model reply against the
       // coerced draft would report the quality firewall's own edits — clamped
@@ -710,6 +777,7 @@ export default function Studio() {
       // Revise was the one button that rewrote humanised copy back into the
       // default machine voice.
       const prompt = buildModifyPrompt({
+        brand,
         eyebrow,
         cover,
         slides,
@@ -719,9 +787,7 @@ export default function Studio() {
         voiceSamples: pickSamples(voiceSamples, { channel, kind: "slide", seed }),
         channel
       });
-      const parsed = coerceContent(await callClaudeJSON("revise", prompt, { model: FAST_MODEL }), undefined, {
-        body: bodyBudgetFor(format)
-      });
+      const parsed = coerceContent(await callClaudeJSON("revise", prompt, { model: FAST_MODEL }), undefined, budgetFor(format));
       snapshotDeck("revision");
       setEyebrow(parsed.eyebrow || eyebrow);
       setCover(parsed.cover || cover);
@@ -744,7 +810,7 @@ export default function Studio() {
     try {
       const samples = pickSamples(voiceSamples, { channel, kind: "article", seed });
       setUsedSamples(samples);
-      const prompt = buildArticlePrompt({ topic, pillar, instruction, currentArticle: article, voiceSamples: samples, channel, seed });
+      const prompt = buildArticlePrompt({ brand, topic, pillar, instruction, currentArticle: article, voiceSamples: samples, channel, seed });
       const text = await callClaudeText("article", prompt, { model: instruction && instruction.trim() ? FAST_MODEL : undefined, maxTokens: 2600 });
 
       // Second pass. Skipped on a targeted revision: the team asked for one
@@ -754,7 +820,7 @@ export default function Studio() {
       if (instruction && instruction.trim()) {
         setPassNote("");
       } else {
-        const edited = await humanizeText(finalText, { voiceSamples: samples, maxTokens: 6000 });
+        const edited = await humanizeText(finalText, { brand, voiceSamples: samples, channel, maxTokens: 6000 });
         finalText = edited.value.trim();
         setPassNote(humanizeNote(edited));
       }
@@ -779,7 +845,7 @@ export default function Studio() {
     setVerifyRes(null);
     setVerifyFixed(null);
     try {
-      const prompt = buildVerifyPrompt({ eyebrow, cover, slides, cta });
+      const prompt = buildVerifyPrompt({ eyebrow, cover, slides, cta }, brand);
       const parsed = await callClaudeJSON("verify", prompt, { useSearch: true });
       if (parsed && parsed.fixed) {
         setVerifyRes(parsed.checks || []);
@@ -812,7 +878,7 @@ export default function Studio() {
     setDesignBusy(true);
     setError("");
     try {
-      const prompt = buildDesignNotePrompt(designNote);
+      const prompt = buildDesignNotePrompt(designNote, brand);
       const parsed = await callClaudeJSON("designNote", prompt, { model: FAST_MODEL });
       const next = { ...design };
       if (typeof parsed.url === "string" && parsed.url.trim()) next.url = parsed.url.trim();
@@ -830,7 +896,9 @@ export default function Studio() {
     }
   }
 
-  const LOOK_SETS: DesignSetId[] = ["editorial", "numeral", "dark", "glass", "bloom", "magazine"];
+  // The brand's own set list. Kognoz cycles its six; Konverz cycles its five, so
+  // "Next look" never lands on a family the brand does not have.
+  const LOOK_SETS: DesignSetId[] = brand.lookSets;
   const LOOK_ACCENTS: (string | null)[] = [null, C.blue, C.teal, C.cyan, C.green];
 
   // Which dimension THIS format can actually render. Cycling a design set on a
@@ -856,7 +924,7 @@ export default function Studio() {
       // Every set now renders its own surface on these formats, so a plain walk
       // through the sets gives a visibly different look each click. "Mixed" is an
       // explicit choice and rotates surfaces on the seed instead.
-      const nextSet: DesignSetId = design.set === "mixed" ? "mixed" : nextCardSet(i);
+      const nextSet: DesignSetId = design.set === "mixed" ? "mixed" : nextCardSet(i, LOOK_SETS);
       const nextAccent = LOOK_ACCENTS[i % LOOK_ACCENTS.length];
       saveDesign({ ...design, set: nextSet, accent: nextAccent });
       setSeed((x) => x + 1);
@@ -890,6 +958,12 @@ export default function Studio() {
     if (fmt.single === "story") return "story";
     if (fmt.single === "article") return "article";
     if (fmt.single === "montage") return "montage";
+    // Feature Card's screenshot and Customer Quote's customer logo. Both are
+    // optional and both gate on photoOn inside the renderer, so they must be
+    // offered here or the toggle would be invisible on the two formats that most
+    // obviously want a picture.
+    if (fmt.single === "feature") return "feature";
+    if (fmt.single === "quote") return "quote";
     if (fmt.deck && !fmt.idea && cur.kind === "cover") return "cover";
     if (fmt.deck && !fmt.idea && cur.kind === "content") return `s${current - 1}`;
     return null;
@@ -949,12 +1023,12 @@ export default function Studio() {
     scale: scales[i] || 1,
     photoOn: !!imgOn[i]
   }));
-  const filenameBase = (i: number) => `kognoz-${format.toLowerCase().replace(/\s+/g, "-")}-${String(i + 1).padStart(2, "0")}`;
+  const filenameBase = (i: number) => `${brand.id}-${format.toLowerCase().replace(/\s+/g, "-")}-${String(i + 1).padStart(2, "0")}`;
 
   /** Export one slide. Returns the failure text, or null on success. */
   async function exportOne(i: number): Promise<string | null> {
     try {
-      await exportPNG({ elId: `exp-${i}`, baseW, baseH, frames: fmt.frames, filenameBase: filenameBase(i) });
+      await exportPNG({ elId: `exp-${i}`, baseW, baseH, frames: fmt.frames, filenameBase: filenameBase(i), fontsUrl: brand.googleFontsUrl });
       return null;
     } catch (e) {
       return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
@@ -1006,7 +1080,7 @@ export default function Studio() {
     if (pdfBusy) return;
     setError("");
     try {
-      await exportPdf(elIds, baseW, baseH, (n) => setPdfBusy(n), `kognoz-${format.toLowerCase().replace(/\s+/g, "-")}-deck`);
+      await exportPdf(elIds, baseW, baseH, (n) => setPdfBusy(n), `${brand.id}-${format.toLowerCase().replace(/\s+/g, "-")}-deck`, brand.googleFontsUrl);
     } catch (e) {
       setError(`Deck PDF failed (${e instanceof Error ? e.name + ": " + e.message : e}). Per-slide downloads still work; tell me this message if it repeats.`);
     } finally {
@@ -1022,12 +1096,12 @@ export default function Studio() {
   async function handleExportDocPdf() {
     if (pdfBusy || exportBusy) return;
     setError("");
-    const base = `kognoz-${format.toLowerCase().replace(/\s+/g, "-")}`;
+    const base = `${brand.id}-${format.toLowerCase().replace(/\s+/g, "-")}`;
     try {
       if (fmt.frames) {
-        await exportFramesPdf("exp-0", baseW, baseH, fmt.frames, `${base}-linkedin`, (k) => setPdfBusy(k));
+        await exportFramesPdf("exp-0", baseW, baseH, fmt.frames, `${base}-linkedin`, (k) => setPdfBusy(k), brand.googleFontsUrl);
       } else {
-        await exportPdf(elIds, baseW, baseH, (k) => setPdfBusy(k), `${base}-deck`);
+        await exportPdf(elIds, baseW, baseH, (k) => setPdfBusy(k), `${base}-deck`, brand.googleFontsUrl);
       }
     } catch (e) {
       setError(`LinkedIn PDF failed (${e instanceof Error ? e.name + ": " + e.message : e}). The PNGs still work; tell me this message if it repeats.`);
@@ -1060,7 +1134,7 @@ export default function Studio() {
       // "exp-0" is right only because the button is gated on fmt.frames and Montage is
       // the sole format that sets it, so its deck is a single node. Assert that rather
       // than leaving a silent cover-only export for whatever gains `frames` next.
-      await exportPanorama("exp-0", baseW, baseH);
+      await exportPanorama("exp-0", baseW, baseH, `${brand.id}-montage-panorama`, brand.googleFontsUrl);
     } catch (e) {
       setError(`Panorama failed (${e instanceof Error ? e.name + ": " + e.message : e}).`);
     } finally {
@@ -1072,7 +1146,7 @@ export default function Studio() {
     setExportBusy(true);
     setError("");
     try {
-      await exportStrip(elIds, baseW, baseH, `kognoz-${format.toLowerCase().replace(/\s+/g, "-")}-strip`);
+      await exportStrip(elIds, baseW, baseH, `${brand.id}-${format.toLowerCase().replace(/\s+/g, "-")}-strip`, brand.googleFontsUrl);
     } catch (e) {
       setError(`Whole-deck export failed (${e instanceof Error ? e.name + ": " + e.message : e}). Per-slide downloads still work.`);
     } finally {
@@ -1121,7 +1195,11 @@ export default function Studio() {
     // Was `saveDesign({ ...design, set: qSet })`, which raced the loader below it: if
     // priming won, DEFAULT_DESIGN + qSet was written to the server and the team's saved
     // url/accent/petals were destroyed. Merge onto the latest design at write time.
-    if (qSet) setDesignAndPersist((d) => ({ ...d, set: qSet }));
+    // Only a set THIS brand actually has. A calendar item saved under Konverz
+    // links with set=halo; following that link while Kognoz is loaded would pin a
+    // family Kognoz cannot render, and setSpec would quietly fall back on every
+    // slide with nothing in the UI to explain it.
+    if (qSet && brand.designSets[qSet]) setDesignAndPersist((d) => ({ ...d, set: qSet }));
     const resolvedPillar = qPillar && PILLARS[qPillar] ? qPillar : pillar;
     if (qPillar && PILLARS[qPillar]) {
       setPillar(qPillar);
@@ -1166,7 +1244,7 @@ export default function Studio() {
     if (primedItem == null || captionTouched.current) return;
     let live = true;
     (async () => {
-      const { value: plan } = await storeGet<{ items: { id?: string; n?: number; content?: string }[] }>("kognoz-calendar");
+      const { value: plan } = await storeGet<{ items: { id?: string; n?: number; content?: string }[] }>(k("calendar"));
       if (!live || !plan || !Array.isArray(plan.items)) return;
       const hit = plan.items.find(
         (it) => it.id === String(primedItem) || (typeof it.n === "number" && it.n === Number(primedItem))
@@ -1214,7 +1292,7 @@ export default function Studio() {
       >
         <div style={{ width: "100%", maxWidth: 352, display: "flex", flexDirection: "column", margin: isMobile ? "0 auto" : 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <Logo h={32} />
+            <Logo h={32} brand={brand} />
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {session?.user && (
                 <span
@@ -1279,7 +1357,12 @@ export default function Studio() {
               )}
             </div>
           </div>
-        <div style={{ fontFamily: font, fontSize: 13, color: C.inkMute, lineHeight: 1.5, marginBottom: 14 }}>Type a topic. Kognoz-voiced content and on-brand design, generated together.</div>
+
+        <BrandSwitch disabled={busy} style={{ marginBottom: 12 }} />
+
+        <div style={{ fontFamily: font, fontSize: 13, color: C.inkMute, lineHeight: 1.5, marginBottom: 14 }}>
+          Type a topic. {brand.name}-voiced content and on-brand design, generated together.
+        </div>
         <a href="/calendar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", borderRadius: 10, background: C.mist, cursor: "pointer", marginBottom: 22, border: `1px solid ${C.line}`, textDecoration: "none" }}>
           <div style={{ fontFamily: font, fontSize: 13, fontWeight: 700, color: C.blue }}>Content Calendar</div>
           <div style={{ fontFamily: font, fontSize: 12, color: C.inkMute }}>→</div>
@@ -1667,7 +1750,7 @@ export default function Studio() {
                     {copied ? "Copied ✓" : "Copy article"}
                   </button>
                   <button
-                    onClick={() => saveBlobAs(new Blob([article], { type: "text/markdown" }), "kognoz-article.md")}
+                    onClick={() => saveBlobAs(new Blob([article], { type: "text/markdown" }), `${brand.id}-article.md`)}
                     style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "8px 14px", borderRadius: 8, cursor: "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent" }}
                   >
                     ⬇ .md file
@@ -1767,9 +1850,9 @@ export default function Studio() {
         <div style={{ marginTop: 18, padding: "14px 14px 12px", background: C.off, borderRadius: 10, border: `1px solid ${C.line}` }}>
           <span style={label}>Design set · one family per deck</span>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-            {(Object.keys(DESIGN_SETS) as DesignSetId[]).map((k) => (
-              <div key={k} onClick={() => saveDesign({ ...design, set: k })} style={chip((design.set || "editorial") === k, C.blue)}>
-                {DESIGN_SETS[k].label}
+            {(Object.keys(DESIGN_SETS) as DesignSetId[]).map((sid) => (
+              <div key={sid} onClick={() => saveDesign({ ...design, set: sid })} style={chip((design.set || brand.defaultSet) === sid, C.blue)}>
+                {setSpec(DESIGN_SETS, sid).label}
               </div>
             ))}
           </div>
@@ -1874,14 +1957,21 @@ export default function Studio() {
                   ))}
                 </select>
               </div>
-              <textarea value={sampleDraft} onChange={(e) => setSampleDraft(e.target.value)} rows={4} placeholder="Paste one real published post, whole. Not a summary of it, and not something the tool wrote." style={{ ...inputStyle, background: C.white, fontSize: 12.5, marginBottom: 6 }} />
+              <textarea value={sampleDraft} onChange={(e) => setSampleDraft(e.target.value)} rows={4} placeholder={`Paste one real published ${brand.name} post, whole. Not a summary of it, and not something the tool wrote.`} style={{ ...inputStyle, background: C.white, fontSize: 12.5, marginBottom: 6 }} />
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <button type="button" onClick={addSample} disabled={!sampleDraft.trim()} style={{ fontFamily: font, fontSize: 11.5, fontWeight: 700, padding: "7px 12px", borderRadius: 7, border: `1px solid ${C.line}`, background: sampleDraft.trim() ? C.white : C.mist, color: C.ink, cursor: sampleDraft.trim() ? "pointer" : "default" }}>
                   Add sample
                 </button>
-                <button type="button" onClick={importTemplateSamples} title="Import the hand-written copy from the agreed editorial plan already in this repo" style={{ fontFamily: font, fontSize: 11.5, fontWeight: 600, padding: "7px 12px", borderRadius: 7, border: `1px solid ${C.line}`, background: C.white, color: C.inkSoft, cursor: "pointer" }}>
-                  Import from the editorial plan
-                </button>
+                {/* Kognoz only. The Konverz plan's copy was written by a model,
+                    and importing machine text into the corpus the edit pass
+                    imitates is exactly the loop lib/voiceSamples.ts exists to
+                    break. Hidden rather than disabled: a greyed-out button invites
+                    someone to find out why, and the answer is "never". */}
+                {brand.id === "kognoz" && (
+                  <button type="button" onClick={importTemplateSamples} title="Import the hand-written copy from the agreed editorial plan already in this repo" style={{ fontFamily: font, fontSize: 11.5, fontWeight: 600, padding: "7px 12px", borderRadius: 7, border: `1px solid ${C.line}`, background: C.white, color: C.inkSoft, cursor: "pointer" }}>
+                    Import from the editorial plan
+                  </button>
+                )}
               </div>
 
               <div style={{ marginTop: 10, maxHeight: 220, overflowY: "auto" }}>
@@ -2053,6 +2143,7 @@ export default function Studio() {
             ))}
           <div style={{ transform: `scale(${previewScale})`, transformOrigin: "top left", width: baseW, height: baseH }}>
             <Slide
+              brand={brand}
               kind={cur.kind}
               data={cur as CoercedSlide}
               accent={accent}
@@ -2268,12 +2359,12 @@ export default function Studio() {
                   // button reads "Mixed" forever and looks stuck while the art changes.
                   design.set === "mixed"
                   ? SURFACE_LABELS[surfaceFor(design.set, seed)]
-                  : (DESIGN_SETS[design.set || "editorial"] || DESIGN_SETS.editorial).label.split(" ·")[0]
+                  : setSpec(DESIGN_SETS, design.set).label.split(" ·")[0]
                 : lever === "accent"
                 ? design.accent
                   ? "tinted"
                   : "auto tone"
-                : (DESIGN_SETS[design.set || "editorial"] || DESIGN_SETS.editorial).label.split(" ·")[0]}
+                : setSpec(DESIGN_SETS, design.set).label.split(" ·")[0]}
               {design.accent ? " · tinted" : ""}
             </button>
           )}
@@ -2379,6 +2470,7 @@ export default function Studio() {
       <div style={{ position: "absolute", left: -99999, top: 0, pointerEvents: "none" }} aria-hidden>
         {deck.map((d, i) => (
           <Slide
+            brand={brand}
             key={i}
             id={`exp-${i}`}
             kind={d.kind}

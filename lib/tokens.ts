@@ -50,3 +50,76 @@ export const GLASS_LIGHTBG = {
 // Uniform card chrome (PRD §4 / jsx Slide component — footer + eyebrow, no accent bars).
 export const FOOT = { left: 96, right: 96, bottom: 84, logoHeight: 64 } as const;
 export const CONTENT_PADDING = "96px 96px 196px";
+
+// ---------------------------------------------------------------------------
+// Second brand: Konverz AI.
+//
+// Everything above is Kognoz and stays exactly as it was — those are the proven
+// values and this file's own header says not to "improve" them. What follows is
+// additive: a second token set with the same SHAPE, so a component can swap the
+// whole object and every `C.blue` reference downstream keeps working.
+//
+// Source: the Konverz brand kit (Konverz_Website_Inputs.md §1.2). The mapping
+// from Konverz's named colours onto Kognoz's slot names is deliberate, because
+// the slot names are what the renderers read:
+//
+//   blue  -> deep blue #005382   the authority colour, the wordmark
+//   cyan  -> magenta   #B52879   the primary accent and the speech-bubble mark
+//   teal  -> teal      #55B09D   shared with Kognoz; the "AI acts" signal
+//   green -> teal               Konverz has no green; the slot is reused rather
+//                               than left to render a Kognoz colour by accident
+// ---------------------------------------------------------------------------
+
+/**
+ * The shape every brand palette has to fill. `C` is declared `as const`, so
+ * `typeof C` would pin each slot to its Kognoz literal ("#005184" and nothing
+ * else) and no second palette could satisfy it. Widening to string keeps the
+ * KEYS exact — a palette missing `inkMute`, or inventing `purple`, still fails
+ * to compile — while letting the values differ, which is the whole point.
+ */
+export type PaletteTokens = Record<keyof typeof C, string>;
+
+export const KONVERZ_C: PaletteTokens = {
+  blue: "#005382",
+  green: "#55B09D",
+  cyan: "#B52879",
+  teal: "#55B09D",
+  ink: "#212121",
+  inkSoft: "#4A4558",
+  inkMute: "#6E6880",
+  off: "#FAF8F9",
+  mist: "#F3EDF6",
+  line: "#E4DEE8",
+  lineD: "#D2C9D8",
+  white: "#ffffff",
+  gradFrom: "#B52879",
+  gradTo: "#005382"
+};
+
+/** magenta -> violet -> deep blue, the signature gradient from the brand kit. */
+export const KONVERZ_GRAD = "linear-gradient(90deg, #B52879 0%, #6B4FC9 50%, #005382 100%)";
+export const KONVERZ_GRAD_DARK = "linear-gradient(150deg, #0B2A44 0%, #005382 55%, #3E2F7A 100%)";
+
+// Poppins for both body and display. Konverz_Website_Inputs.md §9 lists the font
+// as OBSERVED across the deck and site but NOT yet confirmed as official. It is a
+// single pair of constants for exactly that reason — confirming or replacing it is
+// a two-line change here and nothing else moves.
+export const KONVERZ_FONT = "'Poppins', 'Segoe UI', system-ui, sans-serif";
+export const KONVERZ_DISPLAY_FONT = "'Poppins', 'Segoe UI', system-ui, sans-serif";
+
+export const KONVERZ_GOOGLE_FONTS_URL =
+  "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap";
+
+// Konverz module tints (brand kit §1.2). The panel background for a given accent:
+// journey columns and card panels are tinted per module rather than sharing one
+// neutral, which is most of what makes a Konverz slide read as Konverz.
+export const KONVERZ_TINT: Record<string, string> = {
+  "#B52879": "#FCE4EC", // magenta / Hire
+  "#005382": "#E3F2FD", // deep blue
+  "#6B4FC9": "#EFE9FA", // violet
+  "#55B09D": "#E8F5E9", // teal / Nurture
+  "#2196F3": "#E3F2FD", // Coach
+  "#607D8B": "#ECEFF1" // Learn
+};
+
+export const KONVERZ_TINT_FALLBACK = "#F3EDF6";

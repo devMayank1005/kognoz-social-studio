@@ -6,11 +6,28 @@
 // in the browser.
 
 // URLs are design elements, never copy. Strip them from every content field.
+// Both brand domains are stripped regardless of which brand is loaded: a Kognoz
+// deck can reference the product and a Konverz deck names its parent, so keying
+// this to the active brand would let one of the two slip through as body copy.
 export function stripUrl(t: unknown): string {
-  return String(t || "")
+  const before = String(t || "");
+  const stripped = before
     .replace(/https?:\/\/\S+/gi, "")
     .replace(/(www\.)?kognozconsulting\.com/gi, "")
-    .replace(/\s{2,}/g, " ")
+    .replace(/(www\.)?konverz\.ai/gi, "")
+    .replace(/\s{2,}/g, " ");
+
+  // The two cleanups below exist to tidy what a removed URL left behind:
+  // "Read more at kognozconsulting.com" -> "Read more at" -> "Read more". They
+  // only run when something was actually removed.
+  //
+  // They used to run unconditionally, which also took the full stop off any text
+  // that simply ended in one. That is invisible on a headline and wrong on a
+  // Customer Quote, where the cover is somebody's published sentence and the
+  // format's whole job is reproducing it as they wrote it.
+  if (stripped === before) return before.trim();
+
+  return stripped
     .replace(/\s+(at|on|via|from|visit|to|see)\s*$/i, "")
     .replace(/[\s,;:.\-]+$/g, "")
     .trim();
@@ -107,6 +124,12 @@ export interface ContentBudget {
   cover?: number;
   cta?: number;
   slides?: number;
+  /**
+   * Whether a cover with no *asterisk* gets one inserted. True everywhere except
+   * Customer Quote, where the cover is somebody's published words and marking a
+   * word inside them changes what they said. See FORMAT_BUDGET in lib/formats.ts.
+   */
+  em?: boolean;
 }
 
 export const DEFAULT_BUDGET: Required<ContentBudget> = {
@@ -116,7 +139,8 @@ export const DEFAULT_BUDGET: Required<ContentBudget> = {
   // Founder Video asks for a ~280-char LinkedIn caption in `cta`; the old 110 was
   // throwing away roughly 60% of it before anyone could read it.
   cta: 300,
-  slides: 8
+  slides: 8,
+  em: true
 };
 
 export function coerceContent(parsed: RawParsed, keepCount?: number, budget: ContentBudget = {}): CoercedContent {
@@ -131,7 +155,10 @@ export function coerceContent(parsed: RawParsed, keepCount?: number, budget: Con
   if (!out.length) throw new Error("no slides");
   return {
     eyebrow: scrubInline(clampText(stripUrl(parsed.eyebrow), 40)),
-    cover: ensureEm(scrubInline(clampText(stripWrapQuotes(stripUrl(parsed.cover)), b.cover))),
+    cover: (() => {
+      const c = scrubInline(clampText(stripWrapQuotes(stripUrl(parsed.cover)), b.cover));
+      return b.em ? ensureEm(c) : c;
+    })(),
     slides: out.slice(0, keepCount || b.slides),
     cta: scrubInline(clampText(stripUrl(parsed.cta), b.cta))
   };
@@ -146,15 +173,29 @@ export function plainWords(text: unknown): { t: string; em: boolean }[] {
     .map((w) => ({ t: w.replace(/\*/g, ""), em: w.includes("*") }));
 }
 
+// Matches the closing card whichever brand wrote it. The model is told the
+// brand's own phrase, but it has been observed returning the other one, and a
+// deck whose last card says "The Kognoz read" under a Konverz logo is worse than
+// a mislabelled kicker — it reads as the wrong company answering.
+const READ_CLOSER_RE = /(kognoz|konverz)\s+read/i;
+
 // Idea Deck kicker normalization by style (PRD §7 point 7) — ported verbatim
 // from generate()'s post-processing after coerceContent.
-export function applyIdeaDeckKickers(slides: CoercedSlide[], ideaStyle: "signals" | "book" | "story"): CoercedSlide[] {
+export function applyIdeaDeckKickers(
+  slides: CoercedSlide[],
+  ideaStyle: "signals" | "book" | "story",
+  /**
+   * The brand's closing-card kicker. Defaults to Kognoz so every existing caller
+   * and test keeps its behaviour; Konverz passes "The Konverz read".
+   */
+  readCloser = "The Kognoz read"
+): CoercedSlide[] {
   let nSig = 0;
   return slides.map((sl) => {
     if (/^ask\b/i.test(sl.title)) return { ...sl, title: "Ask" };
     if (/^reveal\b/i.test(sl.title)) return { ...sl, title: "Reveal" };
     if (ideaStyle === "book") {
-      if (/kognoz read/i.test(sl.title)) return { ...sl, title: "The Kognoz read" };
+      if (READ_CLOSER_RE.test(sl.title)) return { ...sl, title: readCloser };
       nSig += 1;
       return { ...sl, title: `Idea ${String(nSig).padStart(2, "0")}` };
     }
@@ -186,4 +227,31 @@ export function applyStatCardHygiene(slide: CoercedSlide): CoercedSlide {
     s0.body = s0.body.charAt(0).toUpperCase() + s0.body.slice(1);
   }
   return s0;
+}
+
+/**
+ * Every per-format hygiene rule, in one call.
+ *
+ * These used to be four `if (format === ...)` lines at each of two call sites in
+ * Studio's generate(), once for the draft and once for the line-edited version.
+ * Two copies of a growing list is how the second one ends up missing a rule, and
+ * a rule that runs on the draft but not on the edit is invisible: the slide looks
+ * right until somebody regenerates.
+ */
+export function applyFormatHygiene(
+  content: CoercedContent,
+  opts: { format: string; ideaStyle?: "signals" | "book" | "story"; readCloser?: string }
+): CoercedContent {
+  const { format, ideaStyle = "signals", readCloser } = opts;
+  let slides = content.slides;
+
+  if (format === "Idea Deck") slides = applyIdeaDeckKickers(slides, ideaStyle, readCloser);
+
+  // Stat Card and Numbers Wall are the same problem at different counts: a tile
+  // whose title must be the figure alone, and a model that keeps writing the
+  // whole sentence into it.
+  if (format === "Stat Card" && slides[0]) slides = [applyStatCardHygiene(slides[0]), ...slides.slice(1)];
+  if (format === "Numbers Wall") slides = slides.map(applyStatCardHygiene);
+
+  return slides === content.slides ? content : { ...content, slides };
 }

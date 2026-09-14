@@ -3,8 +3,8 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Kognoz Social Studio",
-  description: "AI-powered content production for the Kognoz LinkedIn presence.",
+  title: "Social Studio",
+  description: "AI-powered content production for the Kognoz and Konverz AI LinkedIn presence.",
   // Icons come from the App Router file conventions — app/favicon.ico (16/32/48),
   // app/icon.png (512), app/apple-icon.png (180). An explicit `icons` block here
   // would override those and drop the content hash Next appends for cache-busting.
@@ -14,13 +14,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
-        {/* PRD §3.3 — Fraunces (display) + Open Sans (body) via Google Fonts for UI.
-            Export pipeline embeds these as base64 @font-face separately (§12) —
-            that's a different code path, not this <link>. */}
+        {/* PRD §3.3 — Fraunces (display) + Open Sans (body) for Kognoz, Poppins for
+            Konverz. Both brands' faces load here rather than being swapped on a
+            brand change: a <link> swap re-flows the whole page mid-session, and
+            the second family is a few tens of KB against a tool that is already
+            loading brand PNGs inline.
+
+            NOTE: Poppins is an ASSUMPTION. Konverz_Website_Inputs.md §9 lists it
+            as observed across the deck and the site but not confirmed as the
+            official brand font. It is one constant in lib/tokens.ts and one
+            family here; confirming or replacing it is a two-line change.
+
+            The export pipeline embeds these as base64 @font-face separately
+            (§12) — that's a different code path, not this <link>. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600&family=Open+Sans:wght@400;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600&family=Open+Sans:wght@400;600;700&family=Poppins:wght@400;500;600;700;800&display=swap"
           rel="stylesheet"
         />
       </head>

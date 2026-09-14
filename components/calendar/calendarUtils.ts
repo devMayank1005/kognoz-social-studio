@@ -150,13 +150,13 @@ export function generateContentId(): string {
 /**
  * Migrates legacy Plan / PLAN_TEMPLATE format to ContentItem[].
  */
-export function migrateLegacyPlan(raw: unknown): ContentItem[] {
+export function migrateLegacyPlan(raw: unknown, template: PlanItem[] = PLAN_TEMPLATE, fallbackChannel = "Kognoz page"): ContentItem[] {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
 
   if (!raw || typeof raw !== "object") {
-    return seedFromTemplate(currentYear, currentMonth);
+    return seedFromTemplate(currentYear, currentMonth, template);
   }
 
   const data = raw as Partial<DynamicCalendarStore & Plan>;
@@ -178,12 +178,12 @@ export function migrateLegacyPlan(raw: unknown): ContentItem[] {
         title: it.topic || `Content #${it.n || idx + 1}`,
         topic: it.topic || "",
         content: it.copy || "",
-        platform: it.ch || "Kognoz page",
+        platform: it.ch || fallbackChannel,
         contentType: it.fmt || "Carousel",
         date: dateKey,
         time: idx % 2 === 0 ? "10:00" : "15:00",
         status: (it as any).status || "Planned",
-        pillar: it.pillar || "Behavioral Signal",
+        pillar: it.pillar || template[0]?.pillar || "Behavioral Signal",
         set: it.set,
         style: it.style,
         createdAt: new Date().toISOString(),
@@ -192,11 +192,11 @@ export function migrateLegacyPlan(raw: unknown): ContentItem[] {
     });
   }
 
-  return seedFromTemplate(currentYear, currentMonth);
+  return seedFromTemplate(currentYear, currentMonth, template);
 }
 
-function seedFromTemplate(year: number, month: number): ContentItem[] {
-  return PLAN_TEMPLATE.map((it) => {
+function seedFromTemplate(year: number, month: number, template: PlanItem[] = PLAN_TEMPLATE): ContentItem[] {
+  return template.map((it) => {
     const day = typeof it.day === "number" ? Math.min(Math.max(1, it.day), 30) : 1;
     const dateKey = formatDateKey(year, month, day);
     return {

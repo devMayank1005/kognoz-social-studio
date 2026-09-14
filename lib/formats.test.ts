@@ -3,9 +3,37 @@ import { FORMATS, STUDIO_FORMATS, DECK_SLIDE_LIMITS } from "./formats";
 import { DESIGN_SETS, LOOK_SETS, LOOK_ACCENT_KEYS, TOTAL_LOOKS } from "./designSets";
 
 describe("formats", () => {
-  it("has all 11 studio formats from the reference implementation", () => {
-    expect(Object.keys(FORMATS)).toHaveLength(11);
-    expect(STUDIO_FORMATS).toHaveLength(11);
+  // 11 in the v3 reference, 15 since the v4 reference added Feature Card,
+  // Numbers Wall, Customer Quote and Journey Map. The order is asserted, not just
+  // the count: STUDIO_FORMATS is what the picker renders, and the v4 file groups
+  // it deliberately — decks, then the editorial single, then the evidence
+  // singles, then the conversational and motion ones.
+  it("has all 15 studio formats from the v4 reference, in its order", () => {
+    expect(Object.keys(FORMATS)).toHaveLength(15);
+    expect(STUDIO_FORMATS).toEqual([
+      "Carousel",
+      "Square",
+      "Idea Deck",
+      "Article Cover",
+      "Stat Card",
+      "Says vs Does",
+      "Feature Card",
+      "Numbers Wall",
+      "Customer Quote",
+      "Journey Map",
+      "Dialogue",
+      "Montage",
+      "Story",
+      "Video",
+      "Founder Video"
+    ]);
+  });
+
+  it("the four v4 formats are all 1080x1350 singles", () => {
+    for (const f of ["Feature Card", "Numbers Wall", "Customer Quote", "Journey Map"] as const) {
+      expect(FORMATS[f]).toMatchObject({ w: 1080, h: 1350 });
+      expect(FORMATS[f].single).toBeTruthy();
+    }
   });
 
   it("deck slide count bounds match PRD (2-8)", () => {

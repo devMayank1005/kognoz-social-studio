@@ -3,11 +3,12 @@
 // verifyFacts(), modifyContent(), applyDesignNote()). Split out from the
 // React state management so the prompt text itself is reviewable and
 // (where it matters) testable on its own.
-import { BRAND_CORE, laneContext } from "./brandCore";
-import { FOUNDER_PROFILES, CHANNEL_IDS, DO_NOT_ASSERT, CADENCE, voiceFor } from "./founderProfiles";
-import { BANNED_PHRASES, HEDGES } from "./slopLint";
+import { laneContext } from "./brandCore";
+import { voiceFor } from "./founderProfiles";
+import { bannedFor, HEDGES } from "./slopLint";
+import { KOGNOZ, type Brand } from "./brands";
 import { formatSamplesBlock, type VoiceSample } from "./voiceSamples";
-import type { FormatId } from "./formats";
+import { STUDIO_FORMATS, CALENDAR_ONLY_FORMATS, type FormatId } from "./formats";
 import type { CoercedSlide } from "./coerce";
 
 /**
@@ -60,12 +61,26 @@ const quoted = (xs: string[]) => xs.map((x) => `"${x}"`).join(", ");
  */
 export const MAX_SOURCE_CHARS = 6000;
 
-export const BANNED_BLOCK = `BANNED. If any of these appear, the output is wrong:
-- These words and phrases, in any inflection ("unlocking" and "unlocked" are as wrong as "unlock"): ${quoted(BANNED_PHRASES)}
+/**
+ * The ban list as the model is told it, for one brand.
+ *
+ * Built from `bannedFor` in lib/slopLint.ts rather than from a second copy of the
+ * list, so the rule the model is GIVEN and the rule it is MEASURED against cannot
+ * drift. A brand's exemptions apply here too: telling Konverz never to write
+ * "journey" and then linting its Journey Map deck against a list that allows it
+ * would be two different rules wearing one name.
+ */
+export function bannedBlock(brand: Brand = KOGNOZ): string {
+  return `BANNED. If any of these appear, the output is wrong:
+- These words and phrases, in any inflection ("unlocking" and "unlocked" are as wrong as "unlock"): ${quoted(bannedFor(brand.allowedPhrases))}
 - Em dashes and en dashes anywhere. Colons in headlines ("X: the Y of Z"). Rhetorical-question hooks. Exclamation marks. Emojis. Hashtags.
 - Hedging: ${quoted(HEDGES)}.
 - Symmetric constructions ("Get X right and... get it wrong and...", "It is not X, it is Y"). Triads for rhythm ("faster, smarter, better").
-- Never name, quote, or knock competitors, vendors, or "most consultants". Kognoz states what it sees and does.`;
+- Never name, quote, or knock competitors, vendors, or "most consultants". ${brand.name} states what it sees and does.`;
+}
+
+/** The Kognoz rendering, kept as a constant because tests and older callers name it. */
+export const BANNED_BLOCK = bannedBlock();
 
 /**
  * The rules that actually decide whether a reader believes a person wrote this.
@@ -83,6 +98,11 @@ export const UNEVENNESS_BLOCK = `WRITE UNEVENLY. This matters more than the bann
 - No two parts may open the same way. Vary the grammatical shape, not only the words.
 - Break a parallel structure on purpose where the argument is better for it. Perfect balance is the tell.`;
 
+/**
+ * Kognoz's writing brief. Now also carried as `KOGNOZ.writingBrief` in
+ * lib/brands.ts, which is what the prompts read, so a second brand can supply its
+ * own. Kept exported here because it is named by tests and reads well in isolation.
+ */
 export const SENIOR_PARTNER_BLOCK = `WRITE LIKE A SENIOR PARTNER SPEAKING TO A CEO. Not a content marketer, not an analyst, not an AI.
 - Speak to consequences leaders own: growth that stalls, succession that is not real, a culture quietly working against the strategy, AI spend that changes nothing.
 - Behavioral language always: name what people do, never how they feel.
@@ -92,6 +112,7 @@ export const SENIOR_PARTNER_BLOCK = `WRITE LIKE A SENIOR PARTNER SPEAKING TO A C
 // "the Immersion Index" was removed from this list: DO_NOT_ASSERT in
 // lib/founderProfiles.ts forbids the phrase outright, and it was being offered
 // here as approved vocabulary in the same prompt.
+/** Kognoz's vocabulary. Same note as SENIOR_PARTNER_BLOCK above. */
 export const VOCABULARY_BLOCK = `KOGNOZ VOCABULARY, used only where genuinely apt: behavioral signals, the Human-AI Work Spectrum, job architecture, decision rights, succession depth, talent intelligence, "AI recommends, people decide."`;
 
 // ---------------------------------------------------------------------------
@@ -135,6 +156,8 @@ export interface GenerateOpts {
    * a format. Omitted -> falls back to `groundingDefault`.
    */
   grounded?: boolean;
+  /** Which brand is publishing. Defaults to Kognoz, which is what shipped first. */
+  brand?: Brand;
 }
 
 /**
@@ -142,7 +165,13 @@ export interface GenerateOpts {
  * DEFAULT state of the toggle now, not a silent trigger.
  */
 export function groundingDefault(format: FormatId, pillar: string): boolean {
-  return format === "Stat Card" || format === "Montage" || pillar === "Market Intelligence";
+  return (
+    format === "Stat Card" ||
+    // Four figures on one slide is four chances to print a wrong one.
+    format === "Numbers Wall" ||
+    format === "Montage" ||
+    pillar === "Market Intelligence"
+  );
 }
 
 export function buildGeneratePrompt(opts: GenerateOpts): BuiltPrompt & { useSearch: boolean } {
@@ -158,7 +187,8 @@ export function buildGeneratePrompt(opts: GenerateOpts): BuiltPrompt & { useSear
     sourceMaterial = "",
     seed = 0,
     fresh,
-    grounded
+    grounded,
+    brand = KOGNOZ
   } = opts;
 
   const prefBlock = housePrefs.trim()
@@ -206,23 +236,29 @@ Build the piece out of what is actually here: the specifics, the numbers, the mo
 
   // Same helper the caption prompt uses, so a deck and a caption published under
   // the same name cannot end up written by two different people.
-  const who = channel ? voiceFor(channel) : "";
+  const who = channel ? voiceFor(channel, brand.profiles, brand.defaultChannel) : "";
 
-  const system = `You write for Kognoz, a people-consulting firm for CEOs, CHROs, promoters, and business owners across India and Southeast Asia. Kognoz reads what people and organizations actually do, through behavioral science and AI, and turns it into decisions leaders can trust. The audience is senior executives deciding who to bring in on their hardest people problems.
+  // Per-format steer, where the brand has one. Konverz does — a product brand
+  // needs each format pointed at mechanisms and proof rather than at argument —
+  // and Kognoz does not, so this is empty for it and costs nothing.
+  const formatGuide = brand.formatGuide?.[gFormat]
+    ? `\n\nFORMAT RELEVANCE FOR ${brand.name.toUpperCase()}: ${brand.formatGuide[gFormat]}`
+    : "";
+
+  const system = `${brand.voiceHeader}
 ${who ? `\nTHIS PIECE IS PUBLISHED AS ${who}\n` : ""}
 
-${BRAND_CORE}
+${brand.core}
 
-${laneContext(gTopic, seed)}
+${laneContext(gTopic, seed, brand)}
 
-${SENIOR_PARTNER_BLOCK}
-- In the headline, mark exactly ONE pivotal word or two-word phrase with *asterisks*; it renders in the Kognoz gradient. Choose the word that carries the argument.
+${brand.writingBrief}
 
 ${UNEVENNESS_BLOCK}
 
-${BANNED_BLOCK}
+${bannedBlock(brand)}
 
-${VOCABULARY_BLOCK}
+${brand.vocabulary}
 
 NEVER include a URL or web address in any field. The site address is rendered separately as a fixed design element on the slide.
 
@@ -238,29 +274,43 @@ ${formatSamplesBlock(voiceSamples)}`;
   const needsGrounding = typeof grounded === "boolean" ? grounded : groundingDefault(gFormat, gPillar);
   const sourceRule = needsGrounding
     ? `\n\nGROUNDING, NON-NEGOTIABLE: use the web_search tool to verify any statistic BEFORE stating it. State only numbers you can actually see in search results, and cite them as "Source: <the actual publication and year you found>". If you cannot verify a number, write the insight without a number and with no source line. Never cite a report from memory; a wrong source printed on a slide costs the firm its credibility.\nSEARCH BUDGET: you have at most 2 searches. Spend them on the load-bearing numbers, the ones a reader would challenge. Write the rest of the piece from the brief, without numbers, rather than spending a search to decorate a slide.`
-    : `\n\nSOURCES: do not attach named external reports or statistics from memory. The firm's own proof numbers may be stated as Kognoz's. Any external figure must appear without a source line (the team verifies separately with the Verify facts button).`;
+    : `\n\nSOURCES: do not attach named external reports or statistics from memory. The brand's own proof numbers may be stated as ${brand.name}'s. Any external figure must appear without a source line (the team verifies separately with the Verify facts button).`;
 
-  const user = `${buildFormatBlock(gFormat, gTopic, gPillar, ideaStyle)}${sourceBlock}${prefBlock}${memBlock}${freshBlock}${LINE_RULE}${sourceRule}`;
+  const user = `${buildFormatBlock(gFormat, gTopic, gPillar, ideaStyle, brand)}${formatGuide}${sourceBlock}${prefBlock}${memBlock}${freshBlock}${LINE_RULE}${sourceRule}`;
 
   return { system, user, useSearch: needsGrounding };
 }
 
-function buildFormatBlock(gFormat: FormatId, gTopic: string, gPillar: string, ideaStyle: IdeaStyle): string {
+function buildFormatBlock(
+  gFormat: FormatId,
+  gTopic: string,
+  gPillar: string,
+  ideaStyle: IdeaStyle,
+  brand: Brand = KOGNOZ
+): string {
   switch (gFormat) {
     case "Article Cover":
-      return `Write the cover for a Kognoz long-form article on this topic: "${gTopic}" (pillar: "${gPillar}"). This is a WIDE 16:9 editorial cover, not a social card: a headline plus a standfirst that makes a reader commit to the piece.
+      return `Write the cover for a ${brand.name} long-form article on this topic: "${gTopic}" (pillar: "${gPillar}"). This is a WIDE 16:9 editorial cover, not a social card: a headline plus a standfirst that makes a reader commit to the piece.
 Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "the article headline, sharp and specific, max ~80 characters", "slides": [{"title": "-", "body": "the standfirst: two or three sentences on separate lines joined with \\n. Line 1 names the tension the article resolves. Line 2 says what the reader will be able to do differently. Optional line 3 carries the evidence or scale. Max ~300 chars total."}], "cta": "the reading promise, e.g. a six-minute read on what the behaviour shows, max ~60 chars, NO URL"}
 The standfirst is the only body copy on the page and it fills the width beside the headline. Write it to be read, not skimmed.`;
     case "Stat Card":
       return `Create a single-statistic card on this topic: "${gTopic}" (pillar: "${gPillar}").
-Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "-", "slides": [{"title": "THE NUMBER ALONE, max 10 characters, e.g. 1,700+ or 1 in 3 or 30%", "body": "two or three SEPARATE lines joined with \\n: line 1 = the claim in one plain sentence, no source in it; line 2 = one Kognoz or Konverz capability sentence only if it genuinely fits; line 3 = Source: <publication, year> ONLY if verified via search this session"}], "cta": "a short closing line, max ~50 chars, NO source, NO URL"}
+Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "-", "slides": [{"title": "THE NUMBER ALONE, max 10 characters, e.g. 1,700+ or 1 in 3 or 30%", "body": "two or three SEPARATE lines joined with \\n: line 1 = the claim in one plain sentence, no source in it; line 2 = one ${brand.name} capability sentence only if it genuinely fits; line 3 = Source: <publication, year> ONLY if verified via search this session"}], "cta": "a short closing line, max ~50 chars, NO source, NO URL"}
 The title must contain nothing but the figure. The body must NOT restate the figure; it says what the figure means. One sentence per line. Em dashes and en dashes are forbidden everywhere; write separate short sentences instead.`;
     case "Says vs Does":
-      return `Create a "Says vs Does" contrast card on this topic: "${gTopic}" (pillar: "${gPillar}"). This is Kognoz's signature: the gap between what people or surveys SAY and what behavior actually SHOWS.
-Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "a headline naming the gap, max ~70 chars", "slides": [{"title": "What the survey says", "body": "the reported belief, first person or survey voice, max ~110 chars"}, {"title": "What behavior says", "body": "the observed behavior that contradicts it, max ~110 chars"}], "cta": "one-line takeaway, max ~60 chars, NO URL"}`;
+      // The two halves are the brand's own contrast. For Kognoz it is the gap
+      // between what a survey reports and what behaviour shows; for Konverz it is
+      // the old process against the mechanism that replaces it. Same renderer,
+      // different argument, so the labels come from the brand rather than the prompt.
+      return `Create a two-column contrast card on this topic: "${gTopic}" (pillar: "${gPillar}"). The contrast is ${brand.split.left} against ${brand.split.right}.
+Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "a headline naming the gap, max ~70 chars", "slides": [{"title": "${brand.split.leftLabel}", "body": "${brand.split.left}, concrete, max ~110 chars"}, {"title": "${brand.split.rightLabel}", "body": "${brand.split.right}, concrete, max ~110 chars"}], "cta": "one-line takeaway, max ~60 chars, NO URL"}
+Both sides must be specific. A vague left half makes the right half look like marketing.`;
     case "Dialogue":
-      return `Write a short, real-feeling exchange between a business leader and Kognoz on this topic: "${gTopic}" (pillar: "${gPillar}"). The leader asks or asserts; Kognoz answers with the sharp, evidence-led reframe. 4 to 5 messages, alternating, ending on Kognoz.
-Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "a short scene-setting heading, max ~60 chars", "slides": [{"title": "Leader", "body": "their line, max ~120 chars"}, {"title": "Kognoz", "body": "our line, max ~140 chars"}], "cta": "one-line takeaway, max ~50 chars, NO URL"}`;
+      // The answering speaker is titled with the brand's short name, and the
+      // renderer aligns that speaker right. A reply labelled "Kognoz" under a
+      // Konverz logo reads as the wrong company answering.
+      return `Write a short, real-feeling exchange between a business leader and ${brand.speaker} on this topic: "${gTopic}" (pillar: "${gPillar}"). The leader asks or asserts; ${brand.speaker} answers with the sharp, evidence-led reframe. 4 to 5 messages, alternating, ending on ${brand.speaker}.
+Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "a short scene-setting heading, max ~60 chars", "slides": [{"title": "Leader", "body": "their line, max ~120 chars"}, {"title": "${brand.speaker}", "body": "our line, max ~140 chars"}], "cta": "one-line takeaway, max ~50 chars, NO URL"}`;
     case "Montage":
       return `Create a 3-frame montage on this topic: "${gTopic}" (pillar: "${gPillar}"). One big headline spans all three frames.
 You have EXACTLY three frames and no more, so the three together must carry the COMPLETE argument — not three disconnected observations. Frame 1 sets up the tension. Frame 2 develops it with the evidence or mechanism. Frame 3 lands the takeaway a leader acts on. Someone reading only these three frames should feel they have the whole piece.
@@ -272,18 +322,34 @@ The three frames are swiped in order and are designed to read as one continuous 
 Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "a bold short headline, max ~55 chars", "slides": [{"title": "-", "body": "three short paragraphs on separate lines joined with \\n. Line 1 is the hook that stops the scroll. Line 2 develops it with the behaviour, number or mechanism. Line 3 is the thought worth screenshotting. Max ~420 chars total."}], "cta": "a short next step, max ~40 chars, NO URL"}
 The three lines fill the vertical frame. One short line leaves most of the card empty.`;
     case "Founder Video":
-      return `Write a 60-90 second talking-head video script for a Kognoz co-founder to record, on this topic: "${gTopic}" (pillar: "${gPillar}"). It must sound like a real person speaking, not a brand. First person, direct, one core insight, evidence or a real (anonymized) example in the middle, and a closing point of view. No hedging, no jargon.
+      return `Write a 60-90 second talking-head video script for a ${brand.name} founder to record, on this topic: "${gTopic}" (pillar: "${gPillar}"). It must sound like a real person speaking, not a brand. First person, direct, one core insight, evidence or a real (anonymized) example in the middle, and a closing point of view. No hedging, no jargon.
 Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "the video's working title / on-screen hook, max ~60 chars", "slides": [{"title": "Hook · 0-8s", "body": "the spoken opening line(s) that earn the next 10 seconds, max ~160 chars"}, {"title": "Setup · 8-25s", "body": "frame the tension or misconception, spoken, max ~200 chars"}, {"title": "Insight · 25-55s", "body": "the core point with the evidence or example, spoken, max ~240 chars"}, {"title": "Close · 55-80s", "body": "the point of view + one question to the viewer, spoken, max ~160 chars"}], "cta": "the LinkedIn caption to post with the video: 2-3 sharp lines plus one question, max ~280 chars"}`;
     case "Video":
       return `Write a kinetic-typography video sequence on this topic: "${gTopic}" (pillar: "${gPillar}"). The headline animates in word by word, then each beat below is REVEALED in turn on screen.
 This is a sequence, not a card. Write 4 beats that build: the opening claim, the tension or misconception, the evidence or mechanism, then the turn a leader should take. Each beat is spoken-weight text meant to land on its own frame, so write short declarative lines, not paragraphs. Separate distinct statements inside a beat with \\n so they reveal line by line.
 Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "the animated headline, max 9 words, punchy", "slides": [{"title": "-", "body": "beat 1, the opening claim, max ~180 chars"}, {"title": "-", "body": "beat 2, the tension, max ~180 chars"}, {"title": "-", "body": "beat 3, the evidence or mechanism, max ~180 chars"}, {"title": "-", "body": "beat 4, the turn, max ~180 chars"}], "cta": "a short close, max ~40 chars, NO URL"} — exactly 4 slides.
 Do not pad. Every beat must carry a real idea; if a beat has nothing to say, make the argument sharper rather than longer.`;
+    case "Journey Map":
+      return `Create a three-stage journey map on: "${gTopic}" (pillar: "${gPillar}").
+Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "the journey title, max 7 words, mark one *word*", "slides": [3 stages, each {"title": "stage name, max 3 words", "body": "3 or 4 capability lines separated by \\n, each max 5 words"}], "cta": "a short closing line, NO URL"}
+Stages must be real steps of the product or method as stated in the ground truth; capability lines must be real capabilities; never invent.`;
+    case "Feature Card":
+      return `Create a product feature card on: "${gTopic}" (pillar: "${gPillar}").
+Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "the feature name as a short claim, max 6 words, mark one *word*", "slides": [{"title": "-", "body": "one sentence on the outcome the feature delivers, max ~120 chars"}, {"title": "capability line 1, max 7 words", "body": "-"}, {"title": "capability line 2, max 7 words", "body": "-"}, {"title": "capability line 3, max 7 words", "body": "-"}], "cta": "a short closing line, NO URL"}
+Capabilities must be real capabilities stated in the ground truth; never invent a feature.`;
+    case "Numbers Wall":
+      return `Create a four-statistic wall on: "${gTopic}" (pillar: "${gPillar}").
+Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "a headline for the wall, max 7 words, mark one *word*", "slides": [4 tiles, each {"title": "THE FIGURE ALONE, max 6 chars, e.g. 60% or 2k+", "body": "what the figure means, max 9 words"}], "cta": "a short closing line, NO URL"}
+Use only the brand's stated proof numbers or figures verified via search this session; never invent a number. Each title contains nothing but the figure.`;
+    case "Customer Quote":
+      return `Create a customer quote card on: "${gTopic}" (pillar: "${gPillar}").
+Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "the quote text: use the customer's real published words (max 40 words) or a faithful tightening of them, no invented claims", "slides": [{"title": "the person's name", "body": "their title, organization"}], "cta": "a short closing line, NO URL"}
+Only use quotes and attributions the brand has published. If the person or the quote is not in the ground truth, use a neutral anonymized attribution such as "CHRO, financial services" and say in the body that it is anonymized. Do NOT mark any word with asterisks: the cover is somebody's words and emphasis inside them changes what they said.`;
     case "Idea Deck":
       if (ideaStyle === "book")
-        return `Create a book-review idea deck for: "${gTopic}" (pillar: "${gPillar}"). Kognoz reviews books for CEOs and CHROs through a behavioral-science lens: what the book gets right about people and organizations, and what a leader should do with it on Monday morning.
+        return `Create a book-review idea deck for: "${gTopic}" (pillar: "${gPillar}"). ${brand.name} reviews books for CEOs and CHROs through its own lens: what the book gets right about people, judgment, and organizations, and what a leader should do with it on Monday morning.
 Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "the book's core claim in plain words, max 7 words, NOT the title", "slides": [7 cards], "cta": "the book title and author, max ~50 chars"}
-Cards in order: kickers "Idea 01" through "Idea 04", each body one idea from the book translated into an action or a behavioral read (max ~110 chars); then exactly "Ask" (a question the book forces on a leadership team) and "Reveal" (the book's answer, sharpened); then a final card with kicker exactly "The Kognoz read" whose body says where the book meets, or misses, what we see in real organizations.`;
+Cards in order: kickers "Idea 01" through "Idea 04", each body one idea from the book translated into an action or a behavioral read (max ~110 chars); then exactly "Ask" (a question the book forces on a leadership team) and "Reveal" (the book's answer, sharpened); then a final card with kicker exactly "${brand.readCloser}" whose body says where the book meets, or misses, what we see in real organizations.`;
       if (ideaStyle === "story")
         return `Tell a true-feeling, fully anonymized client story as an idea deck about: "${gTopic}" (pillar: "${gPillar}"). Concrete, restrained, no names, no invented statistics; the drama lives in behavior.
 Return ONLY valid JSON: {"eyebrow": "${gPillar}", "cover": "the story's hook, max 7 words", "slides": [6 cards], "cta": "the one-line moral, max ~50 chars, NO URL"}
@@ -303,7 +369,7 @@ Provide ${gFormat === "Carousel" ? "5 to 6" : "3 to 4"} slides.`;
 // writeCopy() — the calendar caption engine (LinkedIn post text per item).
 // ---------------------------------------------------------------------------
 export function buildCaptionPrompt(opts: {
-  channel: "Kognoz page" | "Lokesh" | "Harpreet" | string;
+  channel: string;
   fmt: string;
   topic: string;
   currentCopy?: string;
@@ -311,8 +377,19 @@ export function buildCaptionPrompt(opts: {
   housePrefs?: string;
   voiceSamples?: VoiceSample[];
   seed?: number;
+  brand?: Brand;
 }): BuiltPrompt {
-  const { channel, fmt, topic, currentCopy = "", instruction = "", housePrefs = "", voiceSamples = [], seed = 0 } = opts;
+  const {
+    channel,
+    fmt,
+    topic,
+    currentCopy = "",
+    instruction = "",
+    housePrefs = "",
+    voiceSamples = [],
+    seed = 0,
+    brand = KOGNOZ
+  } = opts;
   const isText = fmt === "Text post";
   const isPoll = fmt === "Poll";
   const lengthSpec = isText
@@ -330,7 +407,7 @@ export function buildCaptionPrompt(opts: {
   // not "Kognoz page" or "Lokesh" got Harpreet's first-person voice, including
   // "LinkedIn", which is the quick-add default. Posts nobody assigned to her were being
   // written as her. voiceFor falls back to the company page instead.
-  const who = voiceFor(channel);
+  const who = voiceFor(channel, brand.profiles, brand.defaultChannel);
 
   // The brand canon is dropped on a revision: the draft already embodies it, and
   // resending it invites a rewrite when the team asked for a tweak.
@@ -338,8 +415,8 @@ export function buildCaptionPrompt(opts: {
 
   const system = `You write LinkedIn posts for ${who}
 
-Kognoz is a people-consulting firm for CEOs, CHROs, and business owners across India and Southeast Asia. It reads what people and organizations actually do, through behavioral science and AI, and turns it into decisions leaders can trust.
-${isRevision ? "" : "\n" + BRAND_CORE + "\n\n" + laneContext(topic, seed) + "\n"}
+${brand.voiceHeader}
+${isRevision ? "" : "\n" + brand.core + "\n\n" + laneContext(topic, seed, brand) + "\n"}
 RULES:
 - Insightful: one real idea, stated plainly, with a behavior, number, or observed moment where natural.
 - Behavioral language, never feelings-jargon. Declarative sentences. Confidence without adjectives.
@@ -347,9 +424,9 @@ RULES:
 
 ${UNEVENNESS_BLOCK}
 
-${BANNED_BLOCK}
+${bannedBlock(brand)}
 
-LINE STRUCTURE: when the post carries distinct statements, separate each with a real line break: the claim on its own line, then "Source: <report name, year>" on its own line if a source exists, then a Kognoz capability line on its own line if one belongs. Never run distinct statements together into one sentence. Sources must be real and stated only when known; never invent one.
+LINE STRUCTURE: when the post carries distinct statements, separate each with a real line break: the claim on its own line, then "Source: <report name, year>" on its own line if a source exists, then a ${brand.name} capability line on its own line if one belongs. Never run distinct statements together into one sentence. Sources must be real and stated only when known; never invent one.
 ${formatSamplesBlock(voiceSamples)}`;
 
   const user = `The post accompanies this asset: format "${fmt}", topic "${topic}".
@@ -373,25 +450,26 @@ export function buildArticlePrompt(opts: {
   /** Whose byline. Without it a long article is written by nobody in particular. */
   channel?: string;
   seed?: number;
+  brand?: Brand;
 }): BuiltPrompt {
-  const { topic, pillar, instruction, currentArticle, voiceSamples = [], channel, seed = 0 } = opts;
+  const { topic, pillar, instruction, currentArticle, voiceSamples = [], channel, seed = 0, brand = KOGNOZ } = opts;
   const revBlock =
     instruction && instruction.trim() && currentArticle
       ? `\nCURRENT ARTICLE:\n${currentArticle}\n\nREVISION INSTRUCTION: "${instruction.trim()}"\nApply it precisely; keep everything the instruction doesn't touch. Return the full revised article.`
       : "";
 
-  const system = `You write long-form LinkedIn articles for Kognoz.
-${channel ? `\nTHIS ARTICLE IS PUBLISHED AS ${voiceFor(channel)}\n` : ""}
-${BRAND_CORE}
+  const system = `You write long-form LinkedIn articles for ${brand.name}.
+${channel ? `\nTHIS ARTICLE IS PUBLISHED AS ${voiceFor(channel, brand.profiles, brand.defaultChannel)}\n` : ""}
+${brand.core}
 
-${laneContext(topic, seed)}
+${laneContext(topic, seed, brand)}
 
-VOICE: a senior partner writing personally. Declarative sentences. Behavioral language, never feelings-jargon. Specific over general.
+VOICE: ${brand.articleVoice}. Declarative sentences. Behavioral language, never feelings-jargon. Specific over general.
 
 ${UNEVENNESS_BLOCK}
 - Over 900 words this is the whole game. Paragraphs must not all be the same size either: a one-sentence paragraph is allowed and is often the strongest one on the page.
 
-${BANNED_BLOCK}
+${bannedBlock(brand)}
 ${formatSamplesBlock(voiceSamples)}`;
 
   const user = `Write the full LinkedIn article behind this cover: "${topic}" (pillar: "${pillar}").
@@ -400,9 +478,9 @@ SHAPE:
 - 900 to 1200 words in markdown: one # title, 4 to 6 ## section heads, short paragraphs of 2 to 4 sentences. At most one short list in the whole piece.
 - The first two sentences are the hook readers see before clicking: a claim or a tension, never throat-clearing.
 - The opening section answers the core question in plain words within the first 150 words, phrased so precisely that an AI answer engine could quote it as the definition.
-- One anonymized example from real consulting work. No client names. No invented statistics and NO named external reports or sources from memory; only the firm's stated proof numbers may carry attribution (as Kognoz's own). Leave external figures out rather than guessing.
+- One example from ${brand.exampleSource}. No unpublished client names. No invented statistics and NO named external reports or sources from memory; only the brand's stated proof numbers may carry attribution (as ${brand.name}'s own). Leave external figures out rather than guessing.
 - A section leaders can act on this quarter: concrete first moves, not principles.
-- Close with one line inviting conversation and the site: kognozconsulting.com
+- Close with one line inviting conversation and the site: ${brand.url}
 ${revBlock}
 Return ONLY the article markdown, nothing else.`;
 
@@ -412,17 +490,20 @@ Return ONLY the article markdown, nothing else.`;
 // ---------------------------------------------------------------------------
 // verifyFacts() — the credibility firewall's Verify pass (PRD §9).
 // ---------------------------------------------------------------------------
-export function buildVerifyPrompt(content: {
-  eyebrow: string;
-  cover: string;
-  slides: CoercedSlide[];
-  cta: string;
-}): BuiltPrompt {
+export function buildVerifyPrompt(
+  content: {
+    eyebrow: string;
+    cover: string;
+    slides: CoercedSlide[];
+    cta: string;
+  },
+  brand: Brand = KOGNOZ
+): BuiltPrompt {
   const current = JSON.stringify(content);
-  const system = `You are the fact-checker for Kognoz, a consulting firm. You check numeric claims, statistics, named reports, and source lines in social content against the live web using the web_search tool. A wrong or invented source printed on a slide costs the firm its credibility.`;
+  const system = `You are the fact-checker for ${brand.checkerFor}. You check numeric claims, statistics, named reports, and source lines in social content against the live web using the web_search tool. A wrong or invented source printed on a slide costs the firm its credibility.`;
   const user = `CONTENT: ${current}
 
-SEARCH BUDGET: you have at most 2 searches, so triage before you spend them. Rank the claims by how much damage a wrong one would do — a named external report or a precise statistic outranks a round directional number — and search the top ones. Batch related claims into a single query where one search can settle several. A claim you did not have budget to check is "unverifiable", not "verified"; say so in its note. Kognoz's own proof numbers (650,000+ jobs, 50,000+ assessments, 200+ enterprises, 12 countries) are canon and never need a search.
+SEARCH BUDGET: you have at most 2 searches, so triage before you spend them. Rank the claims by how much damage a wrong one would do — a named external report or a precise statistic outranks a round directional number — and search the top ones. Batch related claims into a single query where one search can settle several. A claim you did not have budget to check is "unverifiable", not "verified"; say so in its note. ${brand.canonNumbers} These are canon and never need a search.
 
 For each factual claim: search where budget allows, then judge. Return ONLY JSON:
 {"checks": [{"where": "cover" | "slide N" | "cta", "claim": "the claim as written", "verdict": "verified" | "wrong" | "unverifiable", "note": "what the search actually shows, one sentence", "realSource": "actual publication title and year" | null}],
@@ -451,16 +532,17 @@ export function buildModifyPrompt(opts: {
    */
   voiceSamples?: VoiceSample[];
   channel?: string;
+  brand?: Brand;
 }): BuiltPrompt {
-  const { eyebrow, cover, slides, cta, instruction, housePrefs = "", voiceSamples = [], channel } = opts;
+  const { eyebrow, cover, slides, cta, instruction, housePrefs = "", voiceSamples = [], channel, brand = KOGNOZ } = opts;
   const current = JSON.stringify({ eyebrow, cover, slides: slides.map((sl, i) => ({ slide: i + 1, title: sl.title, body: sl.body })), cta });
   const prefBlock = housePrefs.trim() ? `\nSTANDING TEAM PREFERENCES, apply proactively:\n${housePrefs.trim()}\n` : "";
-  const who = channel ? voiceFor(channel) : "";
-  const system = `You edit social-deck content for Kognoz. Voice: a senior partner speaking to a CEO. Declarative, behavioral, specific. No URLs anywhere.
+  const who = channel ? voiceFor(channel, brand.profiles, brand.defaultChannel) : "";
+  const system = `You edit social-deck content for ${brand.name}. Voice: ${brand.editVoice}. Declarative, concrete, specific. No URLs anywhere.
 ${who ? `\nTHIS PIECE IS PUBLISHED AS ${who}\n` : ""}
 ${UNEVENNESS_BLOCK}
 
-${BANNED_BLOCK}
+${bannedBlock(brand)}
 ${formatSamplesBlock(voiceSamples)}`;
   const user = `CURRENT CONTENT (slides are numbered for reference): ${current}
 
@@ -480,15 +562,17 @@ Return ONLY JSON in this exact shape, slides in final order, numbering removed: 
 // This one carries no brand context: it maps words onto six enum values and
 // never writes copy, so there is nothing to cache and nothing to humanize.
 // ---------------------------------------------------------------------------
-export function buildDesignNotePrompt(instruction: string): BuiltPrompt {
+export function buildDesignNotePrompt(instruction: string, brand: Brand = KOGNOZ): BuiltPrompt {
   const user = `Map this design instruction for a branded social-slide system onto settings. Instruction: "${instruction.trim()}".
 The system has these controls and no others:
-- "url": the small website line shown as a design element (string, e.g. "kognozconsulting.com")
+- "url": the small website line shown as a design element (string, e.g. "${brand.url}")
 - "coverRight": what sits bottom-right on cover slides: "swipe" | "url" | "none"
 - "contentRight": bottom-right on inner slides: "page" (page numbers) | "url" | "none"
 - "singleRight": bottom-right on single cards (stat, dialogue, split, story, video): "cta" (the closing line) | "url" | "none"
 - "petals": whether the soft background circle motif shows: true | false
-- "set": the deck's visual family: "editorial" | "numeral" | "dark" | "glass" | "bloom" | "magazine" | "mixed"
+- "set": the deck's visual family: ${Object.keys(brand.designSets)
+    .map((k) => `"${k}"`)
+    .join(" | ")}
 Return ONLY a JSON object containing just the keys the instruction actually addresses.`;
   return { system: "", user };
 }
@@ -520,16 +604,34 @@ export function buildCalendarPlanPrompt(opts: {
   targetCount: number;
   voiceSamples?: VoiceSample[];
   seed?: number;
+  brand?: Brand;
 }): BuiltPrompt {
-  const { year, monthName, availableDays, existingTopics, targetCount, voiceSamples = [], seed = 0 } = opts;
+  const {
+    year,
+    monthName,
+    availableDays,
+    existingTopics,
+    targetCount,
+    voiceSamples = [],
+    seed = 0,
+    brand = KOGNOZ
+  } = opts;
 
-  const profiles = CHANNEL_IDS.map((id) => {
-    const p = FOUNDER_PROFILES[id];
-    return `${id} — ${p.publicName}, ${p.role}
+  const profiles = brand.channelIds
+    .map((id) => {
+      const p = brand.profiles[id];
+      if (!p) return "";
+      return `${id} — ${p.publicName}, ${p.role}
 Voice: ${p.voice}
 Writes credibly about: ${p.evidencedTopics.join("; ")}
 Formats that suit this identity: ${p.suitsFormats.join(", ")}`;
-  }).join("\n\n");
+    })
+    .filter(Boolean)
+    .join("\n\n");
+
+  const split = brand.channelIds
+    .map((id) => `${brand.cadence.perChannel[id] ?? 0} from ${id}`)
+    .join(", ");
 
   const avoid = existingTopics.length
     ? `\nALREADY SCHEDULED — do not repeat these subjects or restate them from another angle:\n${existingTopics
@@ -538,31 +640,31 @@ Formats that suit this identity: ${p.suitsFormats.join(", ")}`;
         .join("\n")}\n`
     : "";
 
-  const system = `You plan a month of LinkedIn publishing for Kognoz across three publishing identities.
+  const system = `You plan a month of LinkedIn publishing for ${brand.name} across ${brand.channelIds.length} publishing identities.
 
-${BRAND_CORE}
+${brand.core}
 
 THE THREE IDENTITIES. Each is a real person or a real company page, so write only what that identity can credibly say.
 
 ${profiles}
 
 FACTUAL LIMITS, NON-NEGOTIABLE. Research could not verify these, so they must never appear:
-${DO_NOT_ASSERT.map((d) => `- ${d}`).join("\n")}
+${brand.doNotAssert.map((d) => `- ${d}`).join("\n")}
 
 ${UNEVENNESS_BLOCK}
 - Across ${targetCount} topic lines this is the whole difficulty. Written in one pass they drift into a single shape, usually two clauses joined by "while" or a comma. Vary the construction: some topics are a flat statement, some name a moment, some carry a number, some are one clause only.
 
-${BANNED_BLOCK}
+${bannedBlock(brand)}
 ${formatSamplesBlock(voiceSamples)}`;
 
-  const user = `Plan ${monthName} ${year} for Kognoz's LinkedIn presence: ${targetCount} posts.
+  const user = `Plan ${monthName} ${year} for ${brand.name}'s LinkedIn presence: ${targetCount} posts.
 
 THE MONTH IS A CAMPAIGN, NOT A LIST.
 - Build two or three deliberate arcs across the month: a poll early that a later post answers with what people chose; a deck that a follow-up post refers back to the next working day; a month-closing post that looks back at the month.
 - Where a post depends on an earlier one, the later post's topic must make the dependency obvious, and its day must come after the post it refers to.
 - No two posts may make the same argument. Vary the pillar and the format run to run — never three of the same format in a row.
 
-CADENCE. Post only on the days listed as available: ${availableDays.join(", ")}. Roughly half of them carry two posts. Aim for this split across the month: ${CADENCE.perChannel["Kognoz page"]} from the Kognoz page, ${CADENCE.perChannel.Lokesh} from Lokesh, ${CADENCE.perChannel.Harpreet} from Harpreet.
+CADENCE. Post only on the days listed as available: ${availableDays.join(", ")}. Roughly half of them carry two posts. Aim for this split across the month: ${split}.
 
 TOPIC CRAFT. A topic is a compressed editorial description, not a headline and not a slug.
 - 40 to 95 characters. Sentence case. No title case, no colons, no questions, no hashtags.
@@ -571,12 +673,12 @@ TOPIC CRAFT. A topic is a compressed editorial description, not a headline and n
 - Every topic must be specific enough that two different writers would produce recognisably the same post.
 ${avoid}
 Return ONLY valid JSON in exactly this shape, with no commentary before or after:
-{"items": [{"day": 1, "channel": "Kognoz page", "format": "Carousel", "pillar": "Behavioral Signal", "topic": "the compressed description"}]}
+{"items": [{"day": 1, "channel": "${brand.defaultChannel}", "format": "Carousel", "pillar": "${Object.keys(brand.pillars)[0]}", "topic": "the compressed description"}]}
 
 - "day" is a number from the available list above.
-- "channel" is exactly one of: ${CHANNEL_IDS.join(", ")}.
-- "pillar" is exactly one of: Behavioral Signal, Consulting POV, Market Intelligence, Human + AI, From the Work.
-- "format" is exactly one of: Carousel, Square, Idea Deck, Article Cover, Stat Card, Says vs Does, Dialogue, Montage, Story, Video, Founder Video, Text post, Poll.
+- "channel" is exactly one of: ${brand.channelIds.join(", ")}.
+- "pillar" is exactly one of: ${Object.keys(brand.pillars).join(", ")}.
+- "format" is exactly one of: ${[...STUDIO_FORMATS, ...CALENDAR_ONLY_FORMATS].join(", ")}.
 
 Return exactly ${targetCount} items, ordered by day.`;
 
@@ -621,10 +723,11 @@ export function buildHumanizePrompt(opts: {
   /** Whose voice, when the surface has one. */
   channel?: string;
   housePrefs?: string;
+  brand?: Brand;
 }): BuiltPrompt {
-  const { shape, draft, voiceSamples = [], findings = "", channel, housePrefs = "" } = opts;
+  const { shape, draft, voiceSamples = [], findings = "", channel, housePrefs = "", brand = KOGNOZ } = opts;
 
-  const who = channel ? voiceFor(channel) : "Kognoz";
+  const who = channel ? voiceFor(channel, brand.profiles, brand.defaultChannel) : brand.name;
   const prefBlock = housePrefs.trim() ? `\nSTANDING TEAM PREFERENCES, keep obeying them:\n${housePrefs.trim()}\n` : "";
 
   const system = `You are a line editor. A draft has been written for ${who} and your only job is to make it read as though a person wrote it.
@@ -638,7 +741,7 @@ WHAT MAKES THE DRAFT READ AS MACHINE-WRITTEN, in the order that matters:
 4. Nothing is left for the reader. A piece that states every link in its own argument reads as generated. Cut a connective and let the reader make the jump.
 5. Perfect balance. Antithesis, triads, matched clauses. Break them.
 
-${BANNED_BLOCK}
+${bannedBlock(brand)}
 ${formatSamplesBlock(voiceSamples)}`;
 
   const user = `THE DRAFT:

@@ -86,12 +86,22 @@ function loadImageFrom(src: string): Promise<HTMLImageElement> {
   });
 }
 
+/**
+ * `fontsUrl` is the brand's Google Fonts stylesheet.
+ *
+ * It has to travel with the export rather than being read from a module
+ * constant: the two brands use different families (Fraunces + Open Sans against
+ * Poppins), and an export that embeds the wrong one produces a PNG that
+ * disagrees with the preview it was made from. Optional, defaulting to Kognoz's
+ * pairing, so every existing caller is unchanged.
+ */
 export async function loadSlideImage(
   elId: string,
   baseW: number,
-  baseH: number
+  baseH: number,
+  fontsUrl?: string
 ): Promise<{ img: HTMLImageElement; url: string | null } | null> {
-  const fontFaceCss = await getEmbeddableFontFaceCssSafe();
+  const fontFaceCss = await getEmbeddableFontFaceCssSafe(fontsUrl);
   const svgStr = await buildSlideSvg(elId, baseW, baseH, fontFaceCss);
   if (!svgStr) return null;
 
@@ -127,8 +137,8 @@ export async function loadSlideImage(
   return { img, url: null };
 }
 
-export async function slideCanvas(elId: string, baseW: number, baseH: number, scl: number): Promise<HTMLCanvasElement | null> {
-  const loaded = await loadSlideImage(elId, baseW, baseH);
+export async function slideCanvas(elId: string, baseW: number, baseH: number, scl: number, fontsUrl?: string): Promise<HTMLCanvasElement | null> {
+  const loaded = await loadSlideImage(elId, baseW, baseH, fontsUrl);
   if (!loaded) return null;
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(baseW * scl);
@@ -201,13 +211,14 @@ export async function exportPdf(
   baseW: number,
   baseH: number,
   onProgress?: (slideN: number, total: number) => void,
-  filenameBase = "kognoz-deck"
+  filenameBase = "kognoz-deck",
+  fontsUrl?: string
 ): Promise<void> {
   const jpegs: Uint8Array[] = [];
   const missed: number[] = [];
   for (let i = 0; i < elIds.length; i++) {
     onProgress?.(i + 1, elIds.length);
-    const canvas = await slideCanvas(elIds[i], baseW, baseH, 1);
+    const canvas = await slideCanvas(elIds[i], baseW, baseH, 1, fontsUrl);
     if (!canvas) {
       // Skipping silently produced a short PDF that looked complete.
       missed.push(i + 1);
@@ -244,10 +255,11 @@ export async function exportFramesPdf(
   baseH: number,
   frames: number,
   filenameBase = "kognoz-montage",
-  onProgress?: (frameN: number, total: number) => void
+  onProgress?: (frameN: number, total: number) => void,
+  fontsUrl?: string
 ): Promise<void> {
   if (!frames || frames < 1) throw new Error("exportFramesPdf needs a frame count");
-  const loaded = await loadSlideImage(elId, baseW, baseH);
+  const loaded = await loadSlideImage(elId, baseW, baseH, fontsUrl);
   if (!loaded) throw new Error(`could not render ${elId}`);
 
   const fw = frameWidth(baseW, frames);
@@ -259,8 +271,8 @@ export async function exportFramesPdf(
   saveBlobAs(buildPdfFromJpegs(jpegs, fw, baseH), `${filenameBase}.pdf`);
 }
 
-export async function exportPanorama(elId: string, baseW: number, baseH: number, filenameBase = "kognoz-montage-panorama"): Promise<void> {
-  const canvas = await slideCanvas(elId, baseW, baseH, 1);
+export async function exportPanorama(elId: string, baseW: number, baseH: number, filenameBase = "kognoz-montage-panorama", fontsUrl?: string): Promise<void> {
+  const canvas = await slideCanvas(elId, baseW, baseH, 1, fontsUrl);
   // Returning quietly meant the button did nothing at all — no file, no message.
   if (!canvas) throw new Error(`could not render ${elId}`);
   const blob = await new Promise<Blob>((res, rej) => canvas.toBlob((bl) => (bl ? res(bl) : rej(new Error("empty blob"))), "image/png"));
@@ -270,7 +282,7 @@ export async function exportPanorama(elId: string, baseW: number, baseH: number,
 // The whole deck as one tall image: review it, share it on WhatsApp, or
 // archive the asset in a single file. Half-scale — keeps the tall canvas
 // inside mobile canvas-memory limits (PRD §12).
-export async function exportStrip(elIds: string[], baseW: number, baseH: number, filenameBase = "kognoz-deck-full"): Promise<void> {
+export async function exportStrip(elIds: string[], baseW: number, baseH: number, filenameBase = "kognoz-deck-full", fontsUrl?: string): Promise<void> {
   const SCL = 0.5;
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(baseW * SCL);
@@ -280,7 +292,7 @@ export async function exportStrip(elIds: string[], baseW: number, baseH: number,
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   const missed: number[] = [];
   for (let i = 0; i < elIds.length; i++) {
-    const sc = await slideCanvas(elIds[i], baseW, baseH, SCL);
+    const sc = await slideCanvas(elIds[i], baseW, baseH, SCL, fontsUrl);
     if (!sc) {
       // A skipped slide left a white band, which reads as a design choice.
       missed.push(i + 1);
@@ -300,13 +312,15 @@ export interface ExportPngOpts {
   frames?: number; // Montage only — slices into N frames
   filenameBase: string; // e.g. "kognoz-carousel-01"
   onFrameSaved?: (frameIndex: number) => void;
+  /** The brand's Google Fonts stylesheet. See loadSlideImage. */
+  fontsUrl?: string;
 }
 
 export async function exportPNG(opts: ExportPngOpts): Promise<void> {
-  const { elId, baseW, baseH, frames, filenameBase, onFrameSaved } = opts;
+  const { elId, baseW, baseH, frames, filenameBase, onFrameSaved, fontsUrl } = opts;
   // One rasterisation, N crops. loadSlideImage rebuilds the SVG, inlines every font
   // and decodes the result, so it stays outside the loop.
-  const loaded = await loadSlideImage(elId, baseW, baseH);
+  const loaded = await loadSlideImage(elId, baseW, baseH, fontsUrl);
   if (!loaded) throw new Error(`could not render ${elId}`);
 
   if (frames) {

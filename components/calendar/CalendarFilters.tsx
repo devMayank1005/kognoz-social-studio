@@ -4,7 +4,7 @@ import React from "react";
 import { C, FONT } from "@/lib/tokens";
 import {
   PLATFORMS,
-  PILLARS_LIST,
+  ALL_PILLARS,
   STATUS_ORDER,
   STATUS_CONFIG,
   ALL_CONTENT_TYPES
@@ -174,7 +174,11 @@ export function CalendarFilters({
           style={selectStyle}
         >
           <option value="all">All Pillars</option>
-          {PILLARS_LIST.map((p) => (
+          {/* Every pillar either brand uses. A filter bar is a search over what
+              is SAVED, not a picker for what to create: after a brand switch the
+              month still holds the other brand's items until they are replaced,
+              and a filter that cannot name them cannot find them. */}
+          {ALL_PILLARS.map((p) => (
             <option key={p} value={p}>
               {p}
             </option>

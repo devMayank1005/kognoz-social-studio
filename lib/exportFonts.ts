@@ -13,7 +13,17 @@
 
 import { GOOGLE_FONTS_URL } from "./tokens";
 
-let cachedFontFaceCss: string | null = null; // cache once per session, per PRD §17
+/**
+ * Cache per stylesheet URL, not per session.
+ *
+ * A single module-level string was correct while there was one brand and one
+ * font pairing. With two, the first export would cache Fraunces + Open Sans and
+ * every later Konverz export would embed those instead of Poppins — the exported
+ * PNG would silently disagree with the preview, which is the same class of defect
+ * the PRD already names for Georgia. Keyed by URL, both are cached and neither
+ * can be served for the other.
+ */
+const fontFaceCssByUrl = new Map<string, string>();
 
 async function toBase64DataUrl(res: Response): Promise<string> {
   const buf = await res.arrayBuffer();
@@ -31,10 +41,11 @@ async function toBase64DataUrl(res: Response): Promise<string> {
 // so the resulting CSS is fully self-contained — safe to drop into an SVG
 // <style> that will be rasterized outside the DOM (no external fetch happens
 // during rasterization, which is what breaks font loading in canvas export).
-export async function getEmbeddableFontFaceCss(): Promise<string> {
-  if (cachedFontFaceCss) return cachedFontFaceCss;
+export async function getEmbeddableFontFaceCss(url: string = GOOGLE_FONTS_URL): Promise<string> {
+  const hit = fontFaceCssByUrl.get(url);
+  if (hit) return hit;
 
-  const cssRes = await fetch(GOOGLE_FONTS_URL);
+  const cssRes = await fetch(url);
   if (!cssRes.ok) throw new Error(`font CSS fetch failed: HTTP ${cssRes.status}`);
   const css = await cssRes.text();
 
@@ -54,7 +65,7 @@ export async function getEmbeddableFontFaceCss(): Promise<string> {
     inlined = inlined.split(url).join(dataUrl);
   }
 
-  cachedFontFaceCss = inlined;
+  fontFaceCssByUrl.set(url, inlined);
   return inlined;
 }
 
@@ -62,9 +73,9 @@ export async function getEmbeddableFontFaceCss(): Promise<string> {
 // the browser's system serif/sans, same degraded behavior the PRD names as
 // the known defect) rather than blocking the whole export on a font fetch
 // failure. Every failure is still visible — the caller decides how to surface it.
-export async function getEmbeddableFontFaceCssSafe(): Promise<string> {
+export async function getEmbeddableFontFaceCssSafe(url?: string): Promise<string> {
   try {
-    return await getEmbeddableFontFaceCss();
+    return await getEmbeddableFontFaceCss(url);
   } catch (e) {
     console.error("Font embedding failed, exports will use fallback fonts:", e);
     return "";

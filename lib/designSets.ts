@@ -6,7 +6,19 @@
 // Keeping the indices exactly as-is rather than translating them, so the
 // eventual Slide port has a 1:1 reference instead of a re-guessed mapping.
 
-export type DesignSetId = "editorial" | "numeral" | "dark" | "glass" | "bloom" | "magazine" | "mixed";
+export type KognozSetId = "editorial" | "numeral" | "dark" | "glass" | "bloom" | "magazine" | "mixed";
+
+/**
+ * "dark", "magazine" and "mixed" are shared NAMES but not shared SPECS — Konverz's
+ * Boardroom points at a different content variant than Kognoz's — which is why the
+ * two spec tables below are separate rather than one map with extra keys.
+ */
+export type KonverzSetId = "halo" | "module" | "glasslight" | "dark" | "magazine" | "mixed";
+
+export type DesignSetId = KognozSetId | KonverzSetId;
+
+/** A brand's set table. Looked up through `setSpec`, never indexed directly. */
+export type DesignSetTable = Partial<Record<DesignSetId, DesignSetSpec>>;
 
 export interface DesignSetSpec {
   label: string;
@@ -15,7 +27,8 @@ export interface DesignSetSpec {
   cards: "classic" | "glass" | null; // stat/dialogue register; null = seed-based (Mixed)
 }
 
-export const DESIGN_SETS: Record<DesignSetId, DesignSetSpec> = {
+/** Kognoz's six plus Mixed. Unchanged from v3. */
+export const DESIGN_SETS: Record<KognozSetId, DesignSetSpec> = {
   editorial: { label: "Editorial · light", cover: 0, contents: [0], cards: "classic" },
   numeral: { label: "Numeral · light", cover: 0, contents: [2], cards: "classic" },
   dark: { label: "Boardroom · dark", cover: 1, contents: [1], cards: "glass" },
@@ -25,9 +38,28 @@ export const DESIGN_SETS: Record<DesignSetId, DesignSetSpec> = {
   mixed: { label: "Mixed · max variety", cover: null, contents: null, cards: null }
 };
 
+/**
+ * Konverz's five plus Mixed, ported from KONVERZ_SETS in
+ * social-studio-v4-kognoz-konverz.jsx.
+ *
+ * Two of these need content variants Kognoz never had: Halo · chips renders body
+ * lines as the brand's capability pills (variant 9) and Glass · light renders the
+ * frosted-white-on-cloud card from the AI Assistants page (variant 10). Both live
+ * in components/Slide.tsx alongside the rest.
+ */
+export const KONVERZ_DESIGN_SETS: Record<KonverzSetId, DesignSetSpec> = {
+  halo: { label: "Halo · chips", cover: 0, contents: [9], cards: "classic" },
+  module: { label: "Module tint", cover: 2, contents: [5], cards: "classic" },
+  glasslight: { label: "Glass · light", cover: 0, contents: [10], cards: "classic" },
+  dark: { label: "Boardroom", cover: 1, contents: [7], cards: "glass" },
+  magazine: { label: "Screenshot magazine", cover: 99, contents: [8], cards: "classic" },
+  mixed: { label: "Mixed · max variety", cover: null, contents: null, cards: null }
+};
+
 // "Next look" (🎲) cycle — ported from App's LOOK_SETS / LOOK_ACCENTS + cycleLook().
 // 6 sets x 5 accents (null = "Auto/pillar" + 4 named colors) = 30 uniform looks.
 export const LOOK_SETS: DesignSetId[] = ["editorial", "numeral", "dark", "glass", "bloom", "magazine"];
+export const KONVERZ_LOOK_SETS: DesignSetId[] = ["halo", "module", "glasslight", "dark", "magazine"];
 // LOOK_ACCENTS values are resolved against lib/tokens' C at call sites
 // (null | C.blue | C.teal | C.cyan | C.green) — kept as a shape reference here.
 export const LOOK_ACCENT_KEYS: (null | "blue" | "teal" | "cyan" | "green")[] = [null, "blue", "teal", "cyan", "green"];
@@ -59,6 +91,10 @@ export function lookLever(spec: { deck?: true; idea?: true; single?: string }): 
     case "stat":
     case "dialogue":
     case "split":
+    case "feature":
+    case "numbers":
+    case "quote":
+    case "journey":
     case "montage":
     case "story":
     case "script":
@@ -96,7 +132,14 @@ export const SET_SURFACE: Record<Exclude<DesignSetId, "mixed">, SurfaceId> = {
   dark: "boardroom",      // dark page, solid glass panels
   glass: "glass",         // dark page, lighter and more translucent
   bloom: "bloom",         // mist page, soft borderless cards
-  magazine: "press"       // off-white page, heavy rules, photo-forward
+  magazine: "press",      // off-white page, heavy rules, photo-forward
+  // Konverz's three, mapped onto the surfaces they already look like. Halo and
+  // Glass · light only differ from these on the DECK content variants (9 and 10),
+  // which paint their own backgrounds; the surface is what the single-asset
+  // renderers read, and there they are a paper and an ivory page respectively.
+  halo: "paper",
+  module: "bloom",
+  glasslight: "ivory"
 };
 
 export const SURFACE_ORDER: SurfaceId[] = ["paper", "ivory", "boardroom", "glass", "bloom", "press"];
@@ -132,8 +175,25 @@ export function surfaceFor(set: DesignSetId | undefined | null, seed: number): S
  * The next set for a "cards" format. Every set now looks different, so this is a
  * plain walk through LOOK_SETS — no interleaving needed to guarantee a visible change.
  */
-export function nextCardSet(step: number): DesignSetId {
-  const n = ((step % LOOK_SETS.length) + LOOK_SETS.length) % LOOK_SETS.length;
-  return LOOK_SETS[n];
+export function nextCardSet(step: number, sets: DesignSetId[] = LOOK_SETS): DesignSetId {
+  const list = sets.length ? sets : LOOK_SETS;
+  const n = ((step % list.length) + list.length) % list.length;
+  return list[n];
+}
+
+/**
+ * A set spec, from whichever brand's table holds it.
+ *
+ * Callers hold a set id and a brand; this keeps them from having to know that
+ * "dark" means two different things depending on which one is loaded. Falls back
+ * to the brand's first set rather than throwing — a saved design referencing a
+ * set the other brand does not have (someone switched brands with "bloom" pinned)
+ * should render, not crash.
+ */
+export function setSpec(table: DesignSetTable, set: DesignSetId | undefined | null): DesignSetSpec {
+  const hit = set ? table[set] : undefined;
+  if (hit) return hit;
+  const first = Object.values(table)[0];
+  return first ?? DESIGN_SETS.editorial;
 }
 

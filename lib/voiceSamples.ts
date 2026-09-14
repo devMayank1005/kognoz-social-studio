@@ -14,7 +14,7 @@
 // Everything here is pure. Storage is the existing `store` blob under
 // `kognoz-voice-samples`; see lib/storeClient.ts.
 import type { ChannelId } from "./founderProfiles";
-import { CHANNEL_IDS } from "./founderProfiles";
+import { ALL_CHANNEL_IDS } from "./founderProfiles";
 import { PLAN_TEMPLATE } from "./calendarTemplate";
 
 /**
@@ -61,8 +61,16 @@ export const MIN_SAMPLE_CHARS = 140;
  */
 export const DEFAULT_SAMPLE_COUNT = 6;
 
+/**
+ * Validation across BOTH brands, on purpose.
+ *
+ * A sample filed under "Konverz page" has to survive `coerceSamples` even while
+ * Kognoz is the loaded brand, or a save made after a brand switch would quietly
+ * drop rows it could not name. Which channels a person is offered comes from the
+ * brand; what is allowed to exist in storage is the union.
+ */
 export function isChannelId(v: unknown): v is ChannelId {
-  return typeof v === "string" && (CHANNEL_IDS as string[]).includes(v);
+  return typeof v === "string" && (ALL_CHANNEL_IDS as string[]).includes(v);
 }
 
 export function isSampleKind(v: unknown): v is SampleKind {
@@ -225,6 +233,19 @@ Read them for how these people write, not what they wrote about. Take the senten
  * hand-written deck in that file (DEFAULT_CONTENT) states two things
  * DO_NOT_ASSERT forbids, and seeding a voice corpus with content the brand rules
  * ban would teach exactly the wrong thing.
+ *
+ * KOGNOZ ONLY, AND IT MUST STAY THAT WAY.
+ *
+ * There is a parallel 36-item plan for Konverz in lib/konverzTemplate.ts and it
+ * looks seedable. It is not: its `copy` was written by a model, not by a person,
+ * and feeding machine text into the corpus the humanize pass imitates rebuilds
+ * the exact loop this file was written to break — the app learning its voice from
+ * its own output. Konverz therefore starts with an EMPTY corpus, the Studio says
+ * so plainly through `noSamplesNote`, and the fix is for someone to paste in real
+ * published posts.
+ *
+ * If the client reviews and approves that copy, lift the gate here and say so in
+ * lib/konverzTemplate.ts's header in the same change.
  */
 export function samplesFromTemplate(addedBy?: string): VoiceSample[] {
   const out: VoiceSample[] = [];

@@ -9,6 +9,7 @@ export type ContentPlatform =
   | "X (Twitter)"
   | "YouTube"
   | "Kognoz page"
+  | "Konverz page"
   | "Lokesh"
   | "Harpreet"
   | "Other";
@@ -70,6 +71,7 @@ export function getAuthorInfo(name?: string | null, email?: string | null): { in
 export const PLATFORMS: { id: ContentPlatform; label: string; color: string; bg: string }[] = [
   { id: "LinkedIn", label: "LinkedIn", color: "#0A66C2", bg: "#EBF3FA" },
   { id: "Kognoz page", label: "Kognoz Page", color: "#005184", bg: "#EAF1F4" },
+  { id: "Konverz page", label: "Konverz Page", color: "#B52879", bg: "#FCE4EC" },
   { id: "Lokesh", label: "Lokesh", color: "#005184", bg: "#EAF1F4" },
   { id: "Harpreet", label: "Harpreet", color: "#55B09D", bg: "#EEF7F5" },
   { id: "Instagram", label: "Instagram", color: "#E1306C", bg: "#FDF0F5" },
@@ -102,14 +104,39 @@ export const PILLARS_LIST = [
   "From the Work"
 ] as const;
 
+/** Konverz's six, from lib/pillars.ts. Listed here so the calendar filters can offer them. */
+export const KONVERZ_PILLARS_LIST = [
+  "Outcome Proof",
+  "How It Works",
+  "Customer Story",
+  "Talent Intelligence POV",
+  "Market Intelligence",
+  "Product Update"
+] as const;
+
+/**
+ * Every pillar either brand uses. Used for VALIDATION — a saved calendar written
+ * under one brand must survive being read while the other is loaded — never for
+ * what a person is offered. That comes from the brand.
+ */
+export const ALL_PILLARS: string[] = Array.from(new Set<string>([...PILLARS_LIST, ...KONVERZ_PILLARS_LIST]));
+
 export const PILLAR_COLORS: Record<string, string> = {
   "Behavioral Signal": C.blue,
   "Consulting POV": C.teal,
   "Market Intelligence": C.green,
   "Human + AI": "#C79A2A",
-  "From the Work": "#8F5E9B"
+  "From the Work": "#8F5E9B",
+  // Konverz's, keyed to the module colours in the brand kit.
+  "Outcome Proof": "#B52879",
+  "How It Works": "#005382",
+  "Customer Story": "#6B4FC9",
+  "Talent Intelligence POV": "#55B09D",
+  "Product Update": "#607D8B"
 };
 
+// Mirrors STUDIO_FORMATS in lib/formats.ts, in the same order, plus the two
+// calendar-only kinds that produce words and no visual asset.
 export const ALL_CONTENT_TYPES = [
   "Carousel",
   "Square",
@@ -117,6 +144,10 @@ export const ALL_CONTENT_TYPES = [
   "Article Cover",
   "Stat Card",
   "Says vs Does",
+  "Feature Card",
+  "Numbers Wall",
+  "Customer Quote",
+  "Journey Map",
   "Dialogue",
   "Montage",
   "Story",

@@ -16,7 +16,26 @@
 import { callClaudeJSON, callClaudeText } from "./claudeClient";
 import { buildHumanizePrompt } from "./promptBuilders";
 import { formatFindings, lintContent, lintText, lintTopics, type SlopReport } from "./slopLint";
+import { KOGNOZ, type Brand } from "./brands";
 import type { VoiceSample } from "./voiceSamples";
+
+/**
+ * Options every entry point here shares.
+ *
+ * `brand` matters twice over. It decides whose voice the editor is told it is
+ * editing for, and it decides which banned list the draft is measured against —
+ * the SAME list the prompt quotes back, via `bannedFor`. Without that second
+ * half, a Konverz draft would be linted for words its own canon is built on
+ * ("journey", "elevate") and the edit pass would spend its one turn fixing
+ * things that are not broken.
+ */
+export interface HumanizeOpts {
+  brand?: Brand;
+  voiceSamples?: VoiceSample[];
+  housePrefs?: string;
+  channel?: string;
+  maxTokens?: number;
+}
 
 export interface HumanizeResult<T> {
   /** The rewritten value, or the original draft when the pass could not run. */
@@ -57,13 +76,13 @@ export interface DeckContent {
  * coerced: a montage with four frames or a stat card whose title stopped being a
  * number is worse than the draft it replaced.
  */
-export async function humanizeDeck(
-  draft: DeckContent,
-  opts: { voiceSamples?: VoiceSample[]; housePrefs?: string; channel?: string; maxTokens?: number } = {}
-): Promise<HumanizeResult<DeckContent>> {
-  const before = lintContent(draft);
+export async function humanizeDeck(draft: DeckContent, opts: HumanizeOpts = {}): Promise<HumanizeResult<DeckContent>> {
+  const brand = opts.brand ?? KOGNOZ;
+  const lint = { allowed: brand.allowedPhrases };
+  const before = lintContent(draft, lint);
   try {
     const prompt = buildHumanizePrompt({
+      brand,
       shape: "deck",
       draft: JSON.stringify(draft),
       voiceSamples: opts.voiceSamples,
@@ -88,20 +107,20 @@ export async function humanizeDeck(
       }),
       cta: typeof raw.cta === "string" && raw.cta.trim() ? raw.cta : draft.cta
     };
-    return { value, draft, before, after: lintContent(value), applied: true };
+    return { value, draft, before, after: lintContent(value, lint), applied: true };
   } catch (e) {
     return failed(draft, before, e instanceof Error ? e.message : "the edit pass failed");
   }
 }
 
 /** Rewrite a caption, a text post, or a full article. */
-export async function humanizeText(
-  draft: string,
-  opts: { voiceSamples?: VoiceSample[]; housePrefs?: string; channel?: string; maxTokens?: number } = {}
-): Promise<HumanizeResult<string>> {
-  const before = lintText(draft);
+export async function humanizeText(draft: string, opts: HumanizeOpts = {}): Promise<HumanizeResult<string>> {
+  const brand = opts.brand ?? KOGNOZ;
+  const lint = { allowed: brand.allowedPhrases };
+  const before = lintText(draft, "text", lint);
   try {
     const prompt = buildHumanizePrompt({
+      brand,
       shape: "text",
       draft,
       voiceSamples: opts.voiceSamples,
@@ -117,7 +136,7 @@ export async function humanizeText(
     if (!value || value.length < draft.trim().length * 0.5) {
       return failed(draft, before, "the edit pass returned far less text than the draft, so the original was kept");
     }
-    return { value, draft, before, after: lintText(value), applied: true };
+    return { value, draft, before, after: lintText(value, "text", lint), applied: true };
   } catch (e) {
     return failed(draft, before, e instanceof Error ? e.message : "the edit pass failed");
   }
@@ -141,12 +160,15 @@ export interface PlanItemLike {
  */
 export async function humanizePlanTopics<T extends PlanItemLike>(
   items: T[],
-  opts: { voiceSamples?: VoiceSample[]; maxTokens?: number } = {}
+  opts: HumanizeOpts = {}
 ): Promise<HumanizeResult<T[]>> {
-  const before = lintTopics(items.map((i) => i.topic));
+  const brand = opts.brand ?? KOGNOZ;
+  const lint = { allowed: brand.allowedPhrases };
+  const before = lintTopics(items.map((i) => i.topic), lint);
   if (!items.length) return failed(items, before, "nothing to edit");
   try {
     const prompt = buildHumanizePrompt({
+      brand,
       shape: "topics",
       draft: JSON.stringify({ items: items.map(({ day, channel, format, pillar, topic }) => ({ day, channel, format, pillar, topic })) }),
       voiceSamples: opts.voiceSamples,
@@ -161,7 +183,7 @@ export async function humanizePlanTopics<T extends PlanItemLike>(
       const t = raw.items[i]?.topic;
       return typeof t === "string" && t.trim() ? { ...item, topic: t.trim() } : item;
     });
-    return { value, draft: items, before, after: lintTopics(value.map((i) => i.topic)), applied: true };
+    return { value, draft: items, before, after: lintTopics(value.map((i) => i.topic), lint), applied: true };
   } catch (e) {
     return failed(items, before, e instanceof Error ? e.message : "the edit pass failed");
   }

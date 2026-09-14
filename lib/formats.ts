@@ -5,6 +5,8 @@
 // "port, don't reinvent." Flagging the discrepancy rather than silently
 // picking one; if it matters, confirm with the team before changing it.
 
+import type { ContentBudget } from "./coerce";
+
 export type FormatId =
   | "Carousel"
   | "Square"
@@ -12,13 +14,29 @@ export type FormatId =
   | "Article Cover"
   | "Stat Card"
   | "Says vs Does"
+  | "Feature Card"
+  | "Numbers Wall"
+  | "Customer Quote"
+  | "Journey Map"
   | "Dialogue"
   | "Montage"
   | "Story"
   | "Video"
   | "Founder Video";
 
-export type SingleKind = "article" | "stat" | "split" | "dialogue" | "montage" | "story" | "video" | "script";
+export type SingleKind =
+  | "article"
+  | "stat"
+  | "split"
+  | "feature"
+  | "numbers"
+  | "quote"
+  | "journey"
+  | "dialogue"
+  | "montage"
+  | "story"
+  | "video"
+  | "script";
 
 export interface FormatSpec {
   w: number;
@@ -37,6 +55,14 @@ export const FORMATS: Record<FormatId, FormatSpec> = {
   "Article Cover": { w: 1920, h: 1080, single: "article", hint: "Article · 16:9" },
   "Stat Card": { w: 1080, h: 1080, single: "stat", hint: "Stat · 1:1" },
   "Says vs Does": { w: 1080, h: 1350, single: "split", hint: "Split · 4:5" },
+  // The four below arrived with the v4 reference alongside the Konverz brand.
+  // They are not Konverz-only — a Kognoz deck can use any of them — but they
+  // exist because a product brand needs shapes a consulting brand does not:
+  // a screenshot, a wall of proof numbers, a named customer, a journey.
+  "Feature Card": { w: 1080, h: 1350, single: "feature", hint: "Feature · screenshot" },
+  "Numbers Wall": { w: 1080, h: 1350, single: "numbers", hint: "4 stats · grid" },
+  "Customer Quote": { w: 1080, h: 1350, single: "quote", hint: "Quote · customer" },
+  "Journey Map": { w: 1080, h: 1350, single: "journey", hint: "Journey · 3 columns" },
   Dialogue: { w: 1080, h: 1350, single: "dialogue", hint: "Chat · 4:5" },
   Montage: { w: 3240, h: 1350, single: "montage", frames: 3, hint: "Montage · 3 frames" },
   Story: { w: 1080, h: 1920, single: "story", hint: "Story · 9:16" },
@@ -57,6 +83,10 @@ export const SLIDE_SLOTS: Record<SingleKind, number> = {
   story: 1, // slides[0]
   video: 4, // four kinetic beats revealed in sequence
   split: 2, // slides[0..1]
+  feature: 4, // slides[0] is the outcome line; [1..3] are capability lines
+  numbers: 4, // four figure tiles
+  quote: 1, // slides[0] carries the speaker name and their title
+  journey: 3, // three stages, side by side
   montage: 3, // slides[0..2]
   dialogue: 8, // maps all
   script: 8 // maps all
@@ -75,6 +105,10 @@ export const FORMAT_BRIEF: Record<FormatId, string> = {
   "Article Cover": "a wide 16:9 cover, plus a 900–1200 word article to paste into LinkedIn",
   "Stat Card": "one figure and what it means",
   "Says vs Does": "two halves: what is said, what is done",
+  "Feature Card": "a screenshot, one outcome line, three capabilities",
+  "Numbers Wall": "four figures in a grid, each with what it means",
+  "Customer Quote": "a published quote with a named speaker",
+  "Journey Map": "three stages side by side, capabilities as chips",
   Dialogue: "4–5 message exchange",
   Montage: "one wide strip, 3 frames, complete argument",
   Story: "vertical 9:16, hook to takeaway",
@@ -99,6 +133,41 @@ export function bodyBudgetFor(format: FormatId): number {
   return FORMAT_BODY_BUDGET[format] ?? 230;
 }
 
+/**
+ * The full budget for a format, not just the body.
+ *
+ * `cover` and `em` exist for Customer Quote, which breaks both defaults at once.
+ * Its cover IS the quotation — up to 40 words, so ~260 characters rather than 95 —
+ * and it must not have a gradient word forced into it. `ensureEm` marks the longest
+ * word in any cover that lacks an asterisk, which on a customer quote means
+ * inserting emphasis into somebody's published words. That is a misquote, not a
+ * design flourish.
+ *
+ * `title` exists for Numbers Wall, whose four titles are bare figures.
+ */
+export const FORMAT_BUDGET: Partial<Record<FormatId, ContentBudget>> = {
+  Story: { body: 460 },
+  "Article Cover": { body: 340 },
+  "Founder Video": { body: 260 },
+  "Customer Quote": { cover: 260, em: false },
+  // No `title` clamp on purpose. The four titles are bare figures, but the model
+  // reliably writes the whole sentence into one of them, and applyStatCardHygiene
+  // splits that at the first full stop — which it can only do while the sentence
+  // is still intact. Clamping to 10 first cut "60%. Time to hire" to "60%. Time",
+  // which is under the hygiene threshold, so the split never ran and the figure
+  // rendered with a fragment glued to it.
+  "Numbers Wall": { body: 90 },
+  "Journey Map": { title: 24, body: 120 },
+  "Feature Card": { title: 48, body: 140 }
+};
+
+export function budgetFor(format: FormatId): ContentBudget {
+  return FORMAT_BUDGET[format] ?? { body: 230 };
+}
+
+// Order matches STUDIO_FORMATS in social-studio-v4-kognoz-konverz.jsx exactly:
+// the deck formats, then the editorial single, then the evidence singles, then
+// the conversational and motion ones. Both brands see the same fifteen.
 export const STUDIO_FORMATS: FormatId[] = [
   "Carousel",
   "Square",
@@ -106,6 +175,10 @@ export const STUDIO_FORMATS: FormatId[] = [
   "Article Cover",
   "Stat Card",
   "Says vs Does",
+  "Feature Card",
+  "Numbers Wall",
+  "Customer Quote",
+  "Journey Map",
   "Dialogue",
   "Montage",
   "Story",

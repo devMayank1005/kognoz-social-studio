@@ -3,6 +3,7 @@
 import React from "react";
 import { C, FONT, DISPLAY_FONT } from "@/lib/tokens";
 import type { CalendarViewMode } from "./types";
+import { BrandSwitch } from "@/components/BrandSwitch";
 
 interface CalendarHeaderProps {
   currentDate: Date;
@@ -202,8 +203,11 @@ export function CalendarHeader({
         </span>
       </div>
 
-      {/* Right: View Switcher (Month | Week | List) & Create Content */}
+      {/* Right: Brand, View Switcher (Month | Week | List) & Create Content */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {/* Which brand's calendar this is. Each brand keeps its own stored plan,
+            so switching swaps the whole month rather than filtering it. */}
+        <BrandSwitch compact />
         {/* Segmented View Switcher */}
         <div
           style={{

@@ -8,9 +8,12 @@ import {
   buildGeneratePrompt,
   buildHumanizePrompt,
   buildModifyPrompt,
+  buildVerifyPrompt,
+  groundingDefault,
   wholePrompt,
   MAX_SOURCE_CHARS
 } from "./promptBuilders";
+import { KOGNOZ, KONVERZ } from "./brands";
 import { voiceFor } from "./founderProfiles";
 import { BANNED_PHRASES } from "./slopLint";
 import { DEFAULT_BUDGET } from "./coerce";
@@ -518,5 +521,153 @@ describe("articles carry a byline", () => {
   it("says nothing when no voice is chosen", () => {
     const { system } = buildArticlePrompt({ topic: "Succession", pillar: "Culture" });
     expect(system).not.toContain("THIS ARTICLE IS PUBLISHED AS");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Two brands through one set of builders.
+//
+// The failure this guards is quiet: a prompt that still says "Kognoz" while the
+// logo on the slide says Konverz. Nothing errors, the deck renders, and the copy
+// is written for the wrong company.
+// ---------------------------------------------------------------------------
+describe("brand-aware prompts", () => {
+  const konverzOpts = { brand: KONVERZ, topic: "screening a campus intake", pillar: "How It Works" } as const;
+
+  it("a Konverz prompt never says Kognoz except as the parent line", () => {
+    const p = wholePrompt(buildGeneratePrompt({ ...konverzOpts, format: "Carousel" }));
+    // "Powered by Kognoz" / "Parent: Kognoz" is canon and belongs there. Any other
+    // mention means a hardcoded string survived.
+    const strays = p
+      .split("\n")
+      .filter((l) => /kognoz/i.test(l))
+      .filter((l) => !/parent|powered by|empowered by/i.test(l));
+    expect(strays, `stray Kognoz lines:\n${strays.join("\n")}`).toEqual([]);
+  });
+
+  it("carries the Konverz canon, voice and vocabulary rather than Kognoz's", () => {
+    const p = wholePrompt(buildGeneratePrompt({ ...konverzOpts, format: "Carousel" }));
+    expect(p).toContain("KONVERZ AI GROUND TRUTH");
+    expect(p).toContain("PRODUCT LEADER SHOWING A CHRO");
+    expect(p).toContain("Talent Intelligence Layer");
+    expect(p).toContain("HIRE LANE");
+  });
+
+  it("the banned block a brand is given matches the list it is measured against", () => {
+    const konverz = wholePrompt(buildGeneratePrompt({ ...konverzOpts, format: "Carousel" }));
+    const kognoz = wholePrompt(
+      buildGeneratePrompt({ topic: "succession depth", pillar: "Consulting POV", format: "Carousel" })
+    );
+    // The exempted words are absent from the list Konverz is shown, and present
+    // in the one Kognoz is shown. Both come from bannedFor, so they cannot drift.
+    const konverzBanList = konverz.slice(konverz.indexOf("BANNED."), konverz.indexOf("BANNED.") + 1200);
+    const kognozBanList = kognoz.slice(kognoz.indexOf("BANNED."), kognoz.indexOf("BANNED.") + 1200);
+    expect(konverzBanList).not.toContain('"journey"');
+    expect(kognozBanList).toContain('"journey"');
+    expect(konverzBanList).toContain("Konverz AI states what it sees and does");
+  });
+
+  it("injects the per-format guide only where the brand has one", () => {
+    const withGuide = wholePrompt(buildGeneratePrompt({ ...konverzOpts, format: "Journey Map" }));
+    expect(withGuide).toContain("FORMAT RELEVANCE FOR KONVERZ AI");
+    const noGuide = wholePrompt(
+      buildGeneratePrompt({ topic: "succession depth", pillar: "Consulting POV", format: "Journey Map" })
+    );
+    expect(noGuide).not.toContain("FORMAT RELEVANCE");
+  });
+
+  it("each new format asks for the shape its renderer actually draws", () => {
+    const shapes: Record<string, RegExp[]> = {
+      "Journey Map": [/3 stages/, /capability lines/],
+      "Feature Card": [/capability line 1/, /outcome the feature delivers/],
+      "Numbers Wall": [/4 tiles/, /THE FIGURE ALONE/],
+      "Customer Quote": [/the person's name/, /anonymized/]
+    };
+    for (const [format, patterns] of Object.entries(shapes)) {
+      const p = wholePrompt(buildGeneratePrompt({ ...konverzOpts, format: format as never }));
+      for (const re of patterns) expect(p, `${format} / ${re}`).toMatch(re);
+    }
+  });
+
+  it("Customer Quote is told not to mark a word, because the cover is a quotation", () => {
+    const p = wholePrompt(buildGeneratePrompt({ ...konverzOpts, format: "Customer Quote" }));
+    expect(p).toMatch(/Do NOT mark any word with asterisks/);
+  });
+
+  it("Numbers Wall grounds by default, like every other format that prints figures", () => {
+    expect(groundingDefault("Numbers Wall", "How It Works")).toBe(true);
+    expect(groundingDefault("Stat Card", "How It Works")).toBe(true);
+    expect(groundingDefault("Carousel", "How It Works")).toBe(false);
+  });
+
+  it("the Dialogue speaker and the Idea Deck closer carry the brand's own name", () => {
+    const dialogue = wholePrompt(buildGeneratePrompt({ ...konverzOpts, format: "Dialogue" }));
+    expect(dialogue).toContain('"title": "Konverz"');
+    const idea = wholePrompt(buildGeneratePrompt({ ...konverzOpts, format: "Idea Deck", ideaStyle: "book" }));
+    expect(idea).toContain("The Konverz read");
+    expect(idea).not.toContain("The Kognoz read");
+  });
+
+  it("Says vs Does argues the brand's own contrast", () => {
+    const konverz = wholePrompt(buildGeneratePrompt({ ...konverzOpts, format: "Says vs Does" }));
+    expect(konverz).toContain("The old way");
+    expect(konverz).toContain("With Konverz");
+    const kognoz = wholePrompt(
+      buildGeneratePrompt({ topic: "engagement scores", pillar: "Behavioral Signal", format: "Says vs Does" })
+    );
+    expect(kognoz).toContain("What the survey says");
+    expect(kognoz).toContain("What behavior says");
+  });
+
+  it("the caption, article, verify, modify and plan builders all follow the brand", () => {
+    expect(wholePrompt(buildCaptionPrompt({ brand: KONVERZ, channel: "Konverz page", fmt: "Text post", topic: "Screen AI" }))).toContain(
+      "KONVERZ AI GROUND TRUTH"
+    );
+    expect(wholePrompt(buildArticlePrompt({ brand: KONVERZ, topic: "JobFit AI", pillar: "How It Works" }))).toContain("konverz.ai");
+    expect(
+      wholePrompt(buildVerifyPrompt({ eyebrow: "", cover: "", slides: [], cta: "" }, KONVERZ))
+    ).toContain("Konverz AI, a talent intelligence platform");
+    expect(
+      wholePrompt(
+        buildModifyPrompt({ brand: KONVERZ, eyebrow: "", cover: "", slides: [], cta: "", instruction: "shorter" })
+      )
+    ).toContain("a product leader speaking to a CHRO");
+
+    const plan = wholePrompt(
+      buildCalendarPlanPrompt({
+        brand: KONVERZ,
+        year: 2026,
+        monthName: "March",
+        availableDays: [2, 3, 4],
+        existingTopics: [],
+        targetCount: 6
+      })
+    );
+    expect(plan).toContain("Konverz page");
+    expect(plan).toContain("Outcome Proof");
+    expect(plan).not.toContain("Behavioral Signal");
+    // The four new formats must be offerable from the planner too, or a plan can
+    // never schedule one.
+    expect(plan).toContain("Numbers Wall");
+  });
+
+  it("the humanize prompt edits for the right brand", () => {
+    const p = wholePrompt(
+      buildHumanizePrompt({ brand: KONVERZ, shape: "text", draft: "A draft.", channel: "Konverz page" })
+    );
+    expect(p).toContain("Konverz AI");
+    expect(p).not.toMatch(/banned phrase.*journey/i);
+  });
+
+  it("every untouched builder still produces exactly the Kognoz prompt", () => {
+    // The default-argument contract: nothing that has not been threaded yet
+    // changes behaviour.
+    const explicit = wholePrompt(
+      buildGeneratePrompt({ brand: KOGNOZ, topic: "succession depth", pillar: "Consulting POV", format: "Carousel" })
+    );
+    const implicit = wholePrompt(
+      buildGeneratePrompt({ topic: "succession depth", pillar: "Consulting POV", format: "Carousel" })
+    );
+    expect(implicit).toBe(explicit);
   });
 });

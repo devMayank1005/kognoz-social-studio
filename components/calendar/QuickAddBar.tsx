@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { useSession } from "next-auth/react";
 import { C, FONT } from "@/lib/tokens";
 import { PLATFORMS, type ContentItem } from "./types";
+import { useBrandSwitch } from "@/components/BrandProvider";
 import { generateContentId, getTodayKey } from "./calendarUtils";
 
 interface QuickAddBarProps {
@@ -14,6 +15,12 @@ interface QuickAddBarProps {
 
 export function QuickAddBar({ currentDateKey, onAddQuick, onOpenFullModal }: QuickAddBarProps) {
   const { data: session } = useSession();
+  const { brand } = useBrandSwitch();
+  // A quick-added post lands on the loaded brand's first pillar. It used to be
+  // hardcoded to "Behavioral Signal", which is not a Konverz pillar at all — the
+  // item would save, then fail to match any filter and reach the caption prompt
+  // carrying a pillar its own brand has never heard of.
+  const defaultPillar = Object.keys(brand.pillars)[0];
   const [topic, setTopic] = useState("");
   const [platform, setPlatform] = useState("LinkedIn");
   const [contentType, setContentType] = useState("Carousel");
@@ -34,7 +41,7 @@ export function QuickAddBar({ currentDateKey, onAddQuick, onOpenFullModal }: Qui
       date: currentDateKey || getTodayKey(),
       time: "10:00",
       status: "Planned",
-      pillar: "Behavioral Signal",
+      pillar: defaultPillar,
       authorName,
       authorEmail,
       createdAt: new Date().toISOString(),

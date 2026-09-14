@@ -6,12 +6,14 @@ import { storeGet, storeSet } from "@/lib/storeClient";
 import { callClaudeJSON } from "@/lib/claudeClient";
 import { buildCalendarPlanPrompt } from "@/lib/promptBuilders";
 import { coercePlan, toContentItems, occupiedDates, daysInMonth } from "@/lib/calendarPlan";
-import { CADENCE } from "@/lib/founderProfiles";
+import { brandKey } from "@/lib/brands";
+import { C } from "@/lib/tokens";
+import { useBrandSwitch } from "@/components/BrandProvider";
 import { coerceSamples, pickSamples } from "@/lib/voiceSamples";
 import { humanizeNote, humanizePlanTopics } from "@/lib/humanizePass";
 import { generateContentId } from "./calendarUtils";
 import { logActivity } from "@/lib/activityClient";
-import { C, FONT } from "@/lib/tokens";
+import { FONT } from "@/lib/tokens";
 import { CalendarHeader } from "./CalendarHeader";
 import { CalendarFilters } from "./CalendarFilters";
 import { QuickAddBar } from "./QuickAddBar";
@@ -34,9 +36,12 @@ import {
   getTodayKey
 } from "./calendarUtils";
 
-const STORAGE_KEY = "kognoz-calendar";
-
 export function CalendarView() {
+  // The calendar is per brand: a separate stored plan, its own seed template, its
+  // own pillar and channel lists. The key spelling matches what Studio already
+  // wrote ("kognoz-calendar"), so no existing Kognoz data moves.
+  const { brand } = useBrandSwitch();
+  const STORAGE_KEY = brandKey(brand, "calendar");
   const [items, setItems] = useState<ContentItem[]>([]);
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>("month");
@@ -92,7 +97,7 @@ export function CalendarView() {
     try {
       const { value, stale } = await storeGet<unknown>(STORAGE_KEY);
       if (!stale) {
-        applyItems(migrateLegacyPlan(value));
+        applyItems(migrateLegacyPlan(value, brand.template, brand.defaultChannel));
         setLoadFailed(false);
         return;
       }
@@ -105,7 +110,7 @@ export function CalendarView() {
       }
       setLoadFailed(true);
       if (local) {
-        applyItems(migrateLegacyPlan(local));
+        applyItems(migrateLegacyPlan(local, brand.template, brand.defaultChannel));
         setError(
           "Showing the copy cached in this browser — the server is unreachable. " +
             "Edits will not be saved until it is back."
@@ -116,7 +121,8 @@ export function CalendarView() {
     } finally {
       setLoading(false);
     }
-  }, [applyItems]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyItems, brand.id, STORAGE_KEY]);
 
   useEffect(() => {
     void loadCalendar();
@@ -338,7 +344,7 @@ export function CalendarView() {
     setPlanNote("");
     setError("");
     try {
-      const allSamples = coerceSamples(await storeGet<unknown>("kognoz-voice-samples").then((r) => r.value).catch(() => null));
+      const allSamples = coerceSamples(await storeGet<unknown>(brandKey(brand, "voice-samples")).then((r) => r.value).catch(() => null));
       // Six rather than the usual four: a month is planned for three different
       // voices in one call, so the corpus shown has to cover all three.
       const planSamples = pickSamples(allSamples, { kind: "post", count: 6 });
@@ -353,18 +359,19 @@ export function CalendarView() {
           .map((i) => i.topic)
           .filter(Boolean),
         // Never ask for more than there are days to put them on.
-        targetCount: Math.min(CADENCE.postsPerMonth, availableDays.length * 2),
-        voiceSamples: planSamples
+        targetCount: Math.min(brand.cadence.postsPerMonth, availableDays.length * 2),
+        voiceSamples: planSamples,
+        brand
       });
       const reply = await callClaudeJSON("calendarPlan", prompt);
-      const plan = coercePlan(reply, { year, month, occupied });
+      const plan = coercePlan(reply, { year, month, occupied, brand });
 
       // Second pass, over the topic lines only. Thirty-six topics written in one
       // call converge on a single sentence shape, and every post generated from
       // them inherits it. Only the `topic` string is taken from the reply — days,
       // channels, formats and pillars are copied across untouched, so this cannot
       // reschedule anything. A failure returns the plan unchanged.
-      const edited = await humanizePlanTopics(plan.entries, { voiceSamples: planSamples });
+      const edited = await humanizePlanTopics(plan.entries, { brand, voiceSamples: planSamples });
       const plannedNote = humanizeNote(edited);
       const stamp = new Date().toISOString();
       const fresh = toContentItems({ ...plan, entries: edited.value }, () => generateContentId(), stamp, {
@@ -520,7 +527,7 @@ export function CalendarView() {
         </button>
         <span style={{ fontSize: 12, color: C.inkMute, lineHeight: 1.45 }}>
           {planning
-            ? "Writing topics for Kognoz, Lokesh and Harpreet — about 30 seconds."
+            ? `Writing topics for ${brand.channelIds.join(", ")} — about 30 seconds.`
             : "Fills empty weekdays only. Nothing already scheduled is touched."}
         </span>
       </div>

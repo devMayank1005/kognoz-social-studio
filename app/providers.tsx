@@ -3,6 +3,7 @@
 import { SessionProvider, useSession } from "next-auth/react";
 import { useEffect } from "react";
 import { setActivitySession } from "@/lib/activityClient";
+import { BrandProvider } from "@/components/BrandProvider";
 
 /**
  * Keeps the activity logger pointed at the current sign-in.
@@ -26,7 +27,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
       <ActivitySession />
-      {children}
+      {/* Inside SessionProvider because the brand choice is stored per user
+          through /api/store, which is authenticated. */}
+      <BrandProvider>{children}</BrandProvider>
     </SessionProvider>
   );
 }

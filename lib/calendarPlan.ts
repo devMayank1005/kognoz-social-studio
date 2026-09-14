@@ -32,6 +32,15 @@ export interface PlanCoerceOptions {
   occupied: Set<string>;
   /** Ceiling on how many entries survive, whatever the model returned. */
   max?: number;
+  /**
+   * Whose channels and pillars a returned entry is snapped to.
+   *
+   * This has to be the brand and not a shared union. `snapTo` picks the nearest
+   * allowed value, so widening the list to both brands would let a Konverz plan
+   * keep "Kognoz page" as a channel and "From the Work" as a pillar — values the
+   * Konverz prompt never offered and whose posts nothing downstream can write.
+   */
+  brand?: { channelIds: readonly string[]; pillars: Record<string, string>; defaultChannel: string };
 }
 
 const MAX_TOPIC = 110;
@@ -82,6 +91,14 @@ export function coercePlan(parsed: unknown, opts: PlanCoerceOptions): CoercedPla
   const list = Array.isArray(raw) ? raw : [];
   const lastDay = daysInMonth(opts.year, opts.month);
   const max = opts.max ?? DEFAULT_MAX_ENTRIES;
+  // Defaults reproduce the Kognoz behaviour exactly, so an untouched caller and
+  // every existing test are unchanged.
+  // `as readonly string[]` rather than ChannelId[]: a brand supplies plain strings
+  // and snapTo only ever returns a member of the list it was given, so the cast on
+  // the result below is checked by that list, not assumed.
+  const channelIds = (opts.brand?.channelIds ?? CHANNEL_IDS) as readonly string[];
+  const defaultChannel = opts.brand?.defaultChannel ?? "Kognoz page";
+  const pillarList = (opts.brand ? Object.keys(opts.brand.pillars) : PILLARS_LIST) as readonly string[];
 
   const entries: Array<PlannedEntry & { date: string }> = [];
   const takenThisRun = new Set<string>();
@@ -115,9 +132,9 @@ export function coercePlan(parsed: unknown, opts: PlanCoerceOptions): CoercedPla
       day,
       date,
       topic,
-      channel: snapTo(o.channel ?? o.platform, CHANNEL_IDS, "Kognoz page"),
+      channel: snapTo(o.channel ?? o.platform, channelIds, defaultChannel) as ChannelId,
       format: snapTo(o.format ?? o.contentType, ALL_CONTENT_TYPES, "Text post"),
-      pillar: snapTo(o.pillar, PILLARS_LIST, "Behavioral Signal")
+      pillar: snapTo(o.pillar, pillarList, pillarList[0])
     });
     takenThisRun.add(date);
     if (entries.length >= max) break;

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { humanizeDeck, humanizeNote, humanizePlanTopics, humanizeText, type DeckContent } from "./humanizePass";
+import { KOGNOZ, KONVERZ } from "./brands";
 
 // The governing rule for this module: a failed second pass must never cost the
 // first. The draft is already paid for and already usable, so every failure path
@@ -270,5 +271,55 @@ describe("the draft comes back for diffing", () => {
     const r = await humanizeText(draft);
     expect(r.draft).toBe(draft);
     expect(r.value).not.toBe(draft);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The brand reaches BOTH halves of the pass.
+//
+// The prompt and the linter must be measuring the same thing. If the draft is
+// linted against the shared list while the prompt quotes a filtered one, a
+// Konverz draft arrives at the editor carrying findings for "journey" — a word
+// its own canon is built on — and the edit pass spends its single turn removing
+// accurate product language.
+// ---------------------------------------------------------------------------
+describe("brand plumbing", () => {
+  it("does not report the brand's own vocabulary as a problem", async () => {
+    mockFetch([{ text: "The hire journey runs from screening to offer. Recruiters still decide." }]);
+    const draft = "The hire journey runs screening to offer. It elevates what a recruiter sees.";
+
+    const konverz = await humanizeText(draft, { brand: KONVERZ });
+    expect(konverz.before.findings.some((f) => f.rule === "banned-phrase")).toBe(false);
+    // And the findings block it sent carries no complaint about those words.
+    expect(JSON.stringify(bodies.at(-1))).not.toMatch(/banned phrase "journey"/i);
+
+    bodies = [];
+    mockFetch([{ text: "The hire journey runs from screening to offer. Recruiters still decide." }]);
+    const kognoz = await humanizeText(draft, { brand: KOGNOZ });
+    expect(kognoz.before.findings.some((f) => f.rule === "banned-phrase")).toBe(true);
+  });
+
+  it("tells the editor which brand it is editing for", async () => {
+    mockFetch([{ text: "A rewritten line that is comfortably long enough to survive the length check." }]);
+    await humanizeText("A drafted line that is comfortably long enough to survive the length check.", {
+      brand: KONVERZ,
+      channel: "Konverz page"
+    });
+    const sent = JSON.stringify(bodies.at(-1));
+    expect(sent).toContain("Konverz AI");
+  });
+
+  it("defaults to Kognoz, so an unthreaded caller is unchanged", async () => {
+    mockFetch([{ text: "A rewritten line that is comfortably long enough to survive the length check." }]);
+    await humanizeText("A drafted line that is comfortably long enough to survive the length check.");
+    expect(JSON.stringify(bodies.at(-1))).toContain("Kognoz");
+  });
+
+  it("a failed pass still returns the draft untouched, whichever brand", async () => {
+    mockFetch([{ status: 500 }]);
+    const draft: DeckContent = { cover: "A *cover*", slides: [{ title: "t", body: "b" }], cta: "cta" };
+    const r = await humanizeDeck(draft, { brand: KONVERZ });
+    expect(r.applied).toBe(false);
+    expect(r.value).toBe(draft);
   });
 });

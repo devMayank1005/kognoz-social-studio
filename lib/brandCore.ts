@@ -138,6 +138,9 @@ export const PRACTICE_LANES: Record<PracticeLane, string> = {
   family: laneText("family")
 };
 
+export const KOGNOZ_LANE_FALLBACK =
+  "SUBJECT DISCIPLINE: choose ONE Kognoz practice lens for this piece (Culture, Talent & Leadership, Organization Design, Human + AI Work Design, or Family Business) and stay strictly inside it. Do not blend frameworks from different practices.";
+
 /** The lane a topic belongs to, or null when nothing matches. */
 export function laneFor(topicText: unknown): PracticeLane | null {
   const t = String(topicText || "").toLowerCase();
@@ -155,16 +158,39 @@ export function laneFor(topicText: unknown): PracticeLane | null {
   return null;
 }
 
+/**
+ * The minimum a brand has to expose for lane routing. Declared structurally
+ * rather than importing Brand from lib/brands.ts, which imports this file —
+ * a nominal dependency here would be a cycle.
+ */
+export interface LaneSource {
+  lanes: Record<string, string>;
+  detect: (topic: unknown) => string | null;
+  laneFallback: string;
+  /** Optional: renders a lane with a seed, so illustrations rotate. Kognoz has one. */
+  laneText?: (lane: string, seed: number) => string;
+}
+
 // Detector — keyword routing on the topic, priority order matters:
 // family -> org -> talent -> aiwork -> culture -> general fallback.
 // PRD §16 unit test: "internal mobility ... AI skills" must route talent, not aiwork.
-export function laneContext(topicText: unknown, seed = 0): string {
-  const lane = laneFor(topicText);
+//
+// `brand` defaults to Kognoz's own routing so the two existing tests and any
+// caller that has not been threaded yet behave exactly as before.
+export function laneContext(topicText: unknown, seed = 0, brand?: LaneSource): string {
+  const src: LaneSource = brand ?? {
+    lanes: PRACTICE_LANES,
+    detect: laneFor,
+    laneFallback: KOGNOZ_LANE_FALLBACK,
+    laneText: (lane, s) => laneText(lane as PracticeLane, s)
+  };
 
-  if (!lane)
-    return `SUBJECT DISCIPLINE: choose ONE Kognoz practice lens for this piece (Culture, Talent & Leadership, Organization Design, Human + AI Work Design, or Family Business) and stay strictly inside it. Do not blend frameworks from different practices.`;
+  const lane = src.detect(topicText);
+  if (!lane || !src.lanes[lane]) return src.laneFallback;
+
+  const rendered = src.laneText ? src.laneText(lane, seed) : src.lanes[lane];
   return (
-    laneText(lane, seed) +
+    rendered +
     `\nSUBJECT DISCIPLINE: stay strictly inside this lane. Do not import the off-limits concepts. If the topic genuinely touches a second practice, keep this lane primary and give the other at most one closing sentence that names it as adjacent work.`
   );
 }

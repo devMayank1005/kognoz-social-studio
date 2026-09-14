@@ -7,7 +7,8 @@
 
 import React, { useRef } from "react";
 import { C, GRAD, GRAD_DARK, FONT, DISPLAY_FONT, GLASS_DARKBG, GLASS_LIGHTBG } from "@/lib/tokens";
-import { DESIGN_SETS, isDarkSurface, surfaceFor, type DesignSetId, type SurfaceId } from "@/lib/designSets";
+import { setSpec, isDarkSurface, surfaceFor, type DesignSetId, type SurfaceId } from "@/lib/designSets";
+import { KOGNOZ, type Brand } from "@/lib/brands";
 import { plainWords, type CoercedSlide } from "@/lib/coerce";
 import { splitAcrossFrames, frameRoles, headlineAlign, longestPhrase } from "@/lib/montage";
 import { Logo } from "./Logo";
@@ -15,8 +16,16 @@ import { Logo } from "./Logo";
 const font = FONT;
 const displayFont = DISPLAY_FONT;
 
-const EM_STYLE: React.CSSProperties = {
-  background: GRAD,
+// The gradient-word style, minus the gradient itself. Each brand supplies its own
+// `background`; the rest — the clip, and the negative margin that stops descenders
+// being cropped — is shared.
+//
+// ORDER IS LOAD-BEARING. `background` is a shorthand and resets `background-clip`
+// to `border-box`, so it has to be written BEFORE the clip. React emits style
+// objects in key order, so `{ ...BASE_EM_STYLE, background }` silently undoes the
+// clip and the marked word renders as a solid gradient rectangle with invisible
+// text on top. Always spread as `{ background, ...BASE_EM_STYLE }`.
+const BASE_EM_STYLE: React.CSSProperties = {
   WebkitBackgroundClip: "text",
   backgroundClip: "text",
   color: "transparent",
@@ -24,6 +33,8 @@ const EM_STYLE: React.CSSProperties = {
   paddingBottom: "0.12em",
   marginBottom: "-0.12em"
 };
+
+const EM_STYLE: React.CSSProperties = { background: GRAD, ...BASE_EM_STYLE };
 
 // Bodies can carry distinct statements (claim, source, capability line).
 // Render each on its own line; "Source:" lines become small muted captions.
@@ -47,24 +58,77 @@ export const renderLines = (t: unknown) =>
       );
     });
 
-export const renderEm = (text: unknown) =>
-  String(text || "")
+/**
+ * Render a headline, putting the brand gradient on its marked word.
+ *
+ * Two modes, because the two brands set their hero lines differently.
+ *
+ *   "word"  Kognoz. Exactly the marked word takes the gradient, the way
+ *           "strategy" does on the kognozconsulting.com homepage.
+ *   "tail"  Konverz. The gradient starts at the marked word and runs to the end
+ *           of the line, the way konverz.ai sets "Elevating Talent Decisions
+ *           Through Advanced AI-Powered Intelligence". The prompt is written to
+ *           match: Konverz is told to mark where the promise begins, not which
+ *           word carries the argument.
+ */
+export function renderEmWith(text: unknown, grad: string, mode: "word" | "tail" = "word") {
+  const raw = String(text || "");
+  const em: React.CSSProperties = { background: grad, ...BASE_EM_STYLE };
+
+  if (mode === "tail") {
+    const i = raw.indexOf("*");
+    if (i === -1) return <React.Fragment>{raw}</React.Fragment>;
+    const head = raw.slice(0, i);
+    const tail = raw.slice(i).replace(/\*/g, "");
+    return (
+      <>
+        {head}
+        <span style={em}>{tail}</span>
+      </>
+    );
+  }
+
+  return raw
     .split(/(\*[^*]+\*)/g)
     .map((part, i) =>
       part.length > 2 && part.startsWith("*") && part.endsWith("*") ? (
-        <span key={i} style={EM_STYLE}>
+        <span key={i} style={em}>
           {part.slice(1, -1)}
         </span>
       ) : (
         <React.Fragment key={i}>{part}</React.Fragment>
       )
     );
+}
+
+/** Kognoz's word mode against the Kognoz gradient. Kept for callers outside Slide. */
+export const renderEm = (text: unknown) => renderEmWith(text, GRAD, "word");
 
 export const plain = (text: unknown) => String(text || "").replace(/\*/g, "");
 
-// The three-circle BloomMark / petal motif, as inline SVG (exports cleanly).
-// v8 site language: the motif breathes — a slow, living scale pulse.
-export function Petal({ w = 300, o = 1, style }: { w?: number; o?: number; style?: React.CSSProperties }) {
+interface MotifProps {
+  w?: number;
+  o?: number;
+  style?: React.CSSProperties;
+  brand?: Brand;
+}
+
+/**
+ * The background motif, dispatched on the brand.
+ *
+ * Every call site in this file says `<Petal>` — it has since the v3 port — so the
+ * dispatch lives inside rather than at 29 call sites. Kognoz draws the
+ * three-circle BloomMark; Konverz draws the soft pale-magenta halo that sits
+ * behind every hero on konverz.ai; "bubble" is the speech-bubble mark, wired for
+ * when the official asset arrives.
+ *
+ * All three are inline SVG with no external reference, because these have to
+ * survive the DOM -> SVG -> canvas export path without tainting it.
+ */
+export function Petal({ w = 300, o = 1, style, brand = KOGNOZ }: MotifProps) {
+  if (brand.motif === "halo") return <Halo w={w} o={o} style={style} brand={brand} />;
+  if (brand.motif === "bubble") return <Bubble w={w} o={o} style={style} brand={brand} />;
+  const K = brand.C;
   return (
     <svg
       width={w}
@@ -74,9 +138,53 @@ export function Petal({ w = 300, o = 1, style }: { w?: number; o?: number; style
       xmlns="http://www.w3.org/2000/svg"
     >
       <g style={{ mixBlendMode: "multiply" }}>
-        <circle cx="88" cy="92" r="60" fill={C.cyan} opacity={0.55 * o} />
-        <circle cx="132" cy="92" r="60" fill={C.green} opacity={0.5 * o} />
-        <circle cx="110" cy="128" r="60" fill={C.blue} opacity={0.42 * o} />
+        <circle cx="88" cy="92" r="60" fill={K.cyan} opacity={0.55 * o} />
+        <circle cx="132" cy="92" r="60" fill={K.green} opacity={0.5 * o} />
+        <circle cx="110" cy="128" r="60" fill={K.blue} opacity={0.42 * o} />
+      </g>
+    </svg>
+  );
+}
+
+/** Konverz: the large, soft pale-magenta radial glow behind hero and content. */
+export function Halo({ w = 300, o = 1, style, brand = KOGNOZ }: MotifProps) {
+  const id = `kzhalo${Math.round(w)}`;
+  const K = brand.C;
+  return (
+    <svg
+      width={w}
+      height={w}
+      viewBox="0 0 220 220"
+      style={{ animation: "kzBreathe 9s ease-in-out infinite", transformOrigin: "50% 50%", ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <radialGradient id={id} cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor={K.cyan} stopOpacity={0.5 * o} />
+          <stop offset="55%" stopColor="#6B4FC9" stopOpacity={0.22 * o} />
+          <stop offset="100%" stopColor={K.blue} stopOpacity={0} />
+        </radialGradient>
+      </defs>
+      <circle cx="110" cy="110" r="108" fill={`url(#${id})`} />
+    </svg>
+  );
+}
+
+/** The speech-bubble mark: a circle with a tail, the "o" in the konverz.ai wordmark. */
+export function Bubble({ w = 300, o = 1, style, brand = KOGNOZ }: MotifProps) {
+  const K = brand.C;
+  return (
+    <svg
+      width={w}
+      height={w}
+      viewBox="0 0 220 220"
+      style={{ animation: "kzBreathe 9s ease-in-out infinite", transformOrigin: "50% 50%", ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <g style={{ mixBlendMode: "multiply" }} opacity={o}>
+        <circle cx="110" cy="100" r="72" fill={K.cyan} opacity={0.22} />
+        <path d="M74 156 L96 128 L118 156 Z" fill={K.cyan} opacity={0.22} />
+        <circle cx="110" cy="100" r="30" fill="#fff" opacity={0.9} />
       </g>
     </svg>
   );
@@ -89,13 +197,15 @@ export function ImageSlot({
   onPick,
   style,
   label = "Add image",
-  dark
+  dark,
+  brand = KOGNOZ
 }: {
   img?: string | null;
   onPick: (dataUrl: string) => void;
   style?: React.CSSProperties;
   label?: string;
   dark?: boolean;
+  brand?: Brand;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
@@ -104,7 +214,7 @@ export function ImageSlot({
         e.stopPropagation();
         inputRef.current && inputRef.current.click();
       }}
-      style={{ position: "relative", cursor: "pointer", overflow: "hidden", background: dark ? "rgba(255,255,255,0.08)" : C.mist, ...style }}
+      style={{ position: "relative", cursor: "pointer", overflow: "hidden", background: dark ? "rgba(255,255,255,0.08)" : brand.C.mist, ...style }}
     >
       {img ? (
         <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
@@ -118,12 +228,14 @@ export function ImageSlot({
             alignItems: "center",
             justifyContent: "center",
             gap: 12,
-            border: `3px dashed ${dark ? "rgba(255,255,255,0.35)" : C.lineD}`,
+            border: `3px dashed ${dark ? "rgba(255,255,255,0.35)" : brand.C.lineD}`,
             borderRadius: 16
           }}
         >
-          <Petal w={90} o={0.7} />
-          <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, color: dark ? "rgba(255,255,255,0.7)" : C.inkMute }}>{label}</div>
+          <Petal w={90} o={0.7} brand={brand} />
+          <div style={{ fontFamily: brand.font, fontSize: 22, fontWeight: 700, color: dark ? "rgba(255,255,255,0.7)" : brand.C.inkMute }}>
+            {label}
+          </div>
         </div>
       )}
       <input
@@ -143,7 +255,22 @@ export function ImageSlot({
   );
 }
 
-export type SlideKind = "cover" | "content" | "end" | "article" | "stat" | "split" | "dialogue" | "montage" | "story" | "video" | "script";
+export type SlideKind =
+  | "cover"
+  | "content"
+  | "end"
+  | "article"
+  | "stat"
+  | "split"
+  | "feature"
+  | "numbers"
+  | "quote"
+  | "journey"
+  | "dialogue"
+  | "montage"
+  | "story"
+  | "video"
+  | "script";
 
 export interface SlideDesign {
   url?: string;
@@ -185,6 +312,11 @@ export interface SlideProps {
    * just the animated subtree.
    */
   replay?: number;
+  /**
+   * Which brand this slide is drawn in. Defaults to Kognoz so an untouched
+   * caller renders exactly what it rendered before.
+   */
+  brand?: Brand;
 }
 
 export const Slide = React.memo(function Slide({
@@ -207,21 +339,43 @@ export const Slide = React.memo(function Slide({
   scale = 1,
   ideaMode = false,
   photoOn = false,
-  replay = 0
+  replay = 0,
+  brand = KOGNOZ
 }: SlideProps) {
+  // ---------------------------------------------------------------------------
+  // The brand, shadowed onto the names the renderer already uses.
+  //
+  // `C`, `GRAD`, `GRAD_DARK`, `font` and `displayFont` are imported at module
+  // scope above. Re-declaring them here shadows those bindings for the whole
+  // function body, so roughly a thousand lines of existing `C.blue` / `GRAD` /
+  // `fontFamily: font` keep working untouched and simply resolve to whichever
+  // brand is loaded. That is the entire trick that makes this a small diff.
+  //
+  // It has to be shadowing rather than mutation: see the header of lib/brands.ts
+  // for why mutating the module bindings, as the v4 artifact does, is not safe
+  // in a server-rendered app.
+  // ---------------------------------------------------------------------------
+  const C = brand.C;
+  const GRAD = brand.GRAD;
+  const GRAD_DARK = brand.GRAD_DARK;
+  const font = brand.font;
+  const displayFont = brand.displayFont;
+  const EM_STYLE: React.CSSProperties = { background: GRAD, ...BASE_EM_STYLE };
+  const renderEm = (text: unknown) => renderEmWith(text, GRAD, brand.emMode);
+
   const wrap: React.CSSProperties = { position: "relative", width: baseW, height: baseH, overflow: "hidden", fontFamily: font, boxSizing: "border-box" };
   const dz: Required<SlideDesign> = {
-    url: "kognozconsulting.com",
+    url: brand.url,
     coverRight: "swipe",
     contentRight: "page",
     singleRight: "cta",
     petals: true,
-    set: "editorial",
+    set: brand.defaultSet,
     accent: null,
     ...design
   };
   const CONTENT_ORDER = [0, 1, 2, 4, 5, 6, 7, 8];
-  const dset = DESIGN_SETS[dz.set] || DESIGN_SETS.editorial;
+  const dset = setSpec(brand.designSets, dz.set);
   const variant =
     kind === "cover"
       ? photoOn
@@ -290,12 +444,21 @@ export const Slide = React.memo(function Slide({
 
   // Site-language eyebrow: small, letterspaced, uppercase. No bars, no capsules.
   const Eyebrow = ({ dark, n }: { dark?: boolean; n?: string }) => (
-    <div style={{ fontFamily: font, fontSize: 24, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: dark ? "rgba(255,255,255,0.75)" : accent }}>
-      {n && (
-        <span style={{ color: dark ? "rgba(255,255,255,0.35)" : C.lineD, marginRight: 16 }}>
-          {n}
-        </span>
-      )}
+    <div
+      style={{
+        fontFamily: font,
+        fontSize: 24,
+        fontWeight: 700,
+        letterSpacing: "0.16em",
+        textTransform: "uppercase",
+        color: dark ? "rgba(255,255,255,0.75)" : accent
+      }}
+    >
+      {/* The four-point star is Konverz's section-title marker, straight off the
+          deck and the site. Kognoz has no equivalent device, so it is gated on
+          the brand rather than added to both. */}
+      {brand.sparkle && <span style={{ color: dark ? "#fff" : C.cyan, marginRight: 12, fontSize: 26 }}>✦</span>}
+      {n && <span style={{ color: dark ? "rgba(255,255,255,0.35)" : C.lineD, marginRight: 16 }}>{n}</span>}
       {eyebrow}
     </div>
   );
@@ -303,11 +466,42 @@ export const Slide = React.memo(function Slide({
   // Fixed footer: identical position and logo size on every card slide, so the
   // brand never moves as people swipe.
   const Foot = ({ dark, right }: { dark?: boolean; right?: string | null }) => (
-    <div style={{ position: "absolute", left: 96, right: 96, bottom: 84, display: "flex", alignItems: "center", justifyContent: "space-between", pointerEvents: "none" }}>
-      <Logo h={64} white={dark} />
-      {right ? <div style={{ fontFamily: font, fontSize: 22, color: dark ? "rgba(255,255,255,0.65)" : C.inkMute }}>{right}</div> : <span />}
-    </div>
+    <>
+      {/* "Empowered by Kognoz" is the parent-company line konverz.ai runs in its
+          own footer. It sits above the logo rather than beside it so it never
+          competes with the page number or the swipe cue on the right. */}
+      {brand.empowered && (
+        <div
+          style={{
+            position: "absolute",
+            left: 96,
+            bottom: 158,
+            fontFamily: font,
+            fontSize: 18,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: dark ? "rgba(255,255,255,0.55)" : C.inkMute,
+            pointerEvents: "none"
+          }}
+        >
+          Empowered by Kognoz
+        </div>
+      )}
+      <div style={{ position: "absolute", left: 96, right: 96, bottom: 84, display: "flex", alignItems: "center", justifyContent: "space-between", pointerEvents: "none" }}>
+        <Logo h={64} white={dark} brand={brand} />
+        {right ? <div style={{ fontFamily: font, fontSize: 22, color: dark ? "rgba(255,255,255,0.65)" : C.inkMute }}>{right}</div> : <span />}
+      </div>
+    </>
   );
+
+  /**
+   * The panel background for the current accent.
+   *
+   * Kognoz has one neutral for every accent. Konverz tints per module — magenta
+   * panels for Hire, teal for Nurture, and so on — which is most of what makes a
+   * Konverz slide read as Konverz rather than as a recoloured Kognoz slide.
+   */
+  const tint = (a: string = accent) => brand.tintFor(a);
 
   const PAGE = `${String(idx).padStart(2, "0")} / ${String(total).padStart(2, "0")}`;
   const nn = `${String(idx).padStart(2, "0")}`;
@@ -332,7 +526,7 @@ export const Slide = React.memo(function Slide({
       : { background: C.white, border: `1px solid ${C.lineD}` };
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
-        {dz.petals && <Petal w={620} o={S.petal} style={{ position: "absolute", top: -170, right: -180 }} />}
+        {dz.petals && <Petal w={620} o={S.petal} style={{ position: "absolute", top: -170, right: -180 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark={onDark} />
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
@@ -352,14 +546,14 @@ export const Slide = React.memo(function Slide({
     const kick = String(data.title || "");
     const isAsk = /^ask\b/i.test(kick);
     const isReveal = /^reveal\b/i.test(kick);
-    const isKRead = /^the kognoz read/i.test(kick);
+    const isKRead = /^the (kognoz|konverz) read/i.test(kick);
     const darkCard = isAsk || isKRead;
     return (
       // `darkCard` is per-card: Ask and Kognoz-read cards always read dark, on every
       // surface, because that contrast is what makes the reveal work. Everything
       // else follows the surface.
       <div id={id} style={{ ...wrap, background: S.page }}>
-        {dz.petals && <Petal w={380} o={S.petal * 0.8} style={{ position: "absolute", top: -110, right: -110 }} />}
+        {dz.petals && <Petal w={380} o={S.petal * 0.8} style={{ position: "absolute", top: -110, right: -110 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark={onDark} n={nn} />
           <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
@@ -377,7 +571,7 @@ export const Slide = React.memo(function Slide({
                 overflow: "hidden"
               }}
             >
-              {darkCard && dz.petals && <Petal w={300} o={0.4} style={{ position: "absolute", bottom: -90, right: -90 }} />}
+              {darkCard && dz.petals && <Petal w={300} o={0.4} style={{ position: "absolute", bottom: -90, right: -90 }} brand={brand} />}
               <div style={{ fontFamily: font, fontSize: sz(20), fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: darkCard ? C.green : isReveal ? C.teal : onDark ? accentOnDark : accent, marginBottom: 30, position: "relative" }}>
                 {kick}
               </div>
@@ -398,7 +592,7 @@ export const Slide = React.memo(function Slide({
     if (variant === 1) {
       return (
         <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-          {dz.petals && <Petal w={720} o={0.55} style={{ position: "absolute", bottom: -220, left: -200 }} />}
+          {dz.petals && <Petal w={720} o={0.55} style={{ position: "absolute", bottom: -220, left: -200 }} brand={brand} />}
           <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
             <Eyebrow dark />
             <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
@@ -419,7 +613,7 @@ export const Slide = React.memo(function Slide({
       return (
         <div id={id} style={{ ...wrap, background: C.white }}>
           {photoOn && (
-            <ImageSlot img={images.cover} onPick={(u) => setImg("cover", u)} label="Add cover photo" style={{ position: "absolute", top: 0, left: 0, right: 0, height: "52%" }} />
+            <ImageSlot brand={brand} img={images.cover} onPick={(u) => setImg("cover", u)} label="Add cover photo" style={{ position: "absolute", top: 0, left: 0, right: 0, height: "52%" }} />
           )}
           <div style={{ position: "absolute", top: photoOn ? "52%" : 0, left: 0, right: 0, bottom: 0, padding: photoOn ? "56px 96px 180px" : "96px 96px 196px", display: "flex", flexDirection: "column" }}>
             <Eyebrow />
@@ -454,8 +648,8 @@ export const Slide = React.memo(function Slide({
       // Bloom hero: the motif carries the slide, v8 homepage-hero style.
       return (
         <div id={id} style={{ ...wrap, background: C.off }}>
-          {dz.petals && <Petal w={880} o={0.9} style={{ position: "absolute", top: "50%", right: -300, marginTop: -440 }} />}
-          {dz.petals && <Petal w={360} o={0.4} style={{ position: "absolute", bottom: -120, left: -130 }} />}
+          {dz.petals && <Petal w={880} o={0.9} style={{ position: "absolute", top: "50%", right: -300, marginTop: -440 }} brand={brand} />}
+          {dz.petals && <Petal w={360} o={0.4} style={{ position: "absolute", bottom: -120, left: -130 }} brand={brand} />}
           <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
             <Eyebrow />
             <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
@@ -470,8 +664,8 @@ export const Slide = React.memo(function Slide({
       // Glass cover: frosted panel floating on the deep gradient.
       return (
         <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-          {dz.petals && <Petal w={760} o={0.7} style={{ position: "absolute", top: -220, right: -230 }} />}
-          {dz.petals && <Petal w={460} o={0.45} style={{ position: "absolute", bottom: -160, left: -150 }} />}
+          {dz.petals && <Petal w={760} o={0.7} style={{ position: "absolute", top: -220, right: -230 }} brand={brand} />}
+          {dz.petals && <Petal w={460} o={0.45} style={{ position: "absolute", bottom: -160, left: -150 }} brand={brand} />}
           <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
             <Eyebrow dark />
             <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
@@ -486,7 +680,7 @@ export const Slide = React.memo(function Slide({
     }
     return (
       <div id={id} style={{ ...wrap, background: C.off }}>
-        {dz.petals && <Petal w={680} o={0.85} style={{ position: "absolute", top: -170, right: -190 }} />}
+        {dz.petals && <Petal w={680} o={0.85} style={{ position: "absolute", top: -170, right: -190 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow />
           <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
@@ -526,7 +720,7 @@ export const Slide = React.memo(function Slide({
     // the single formats behave differently from the decks.
     const showArticlePhoto = photoOn;
     const articleSlot = (dark?: boolean) => (
-      <ImageSlot
+      <ImageSlot brand={brand}
         img={images.article}
         onPick={(u) => setImg("article", u)}
         label="Add article photo"
@@ -540,14 +734,14 @@ export const Slide = React.memo(function Slide({
         <div id={id} style={{ ...wrap, background: C.off }}>
           <div style={{ position: "absolute", inset: 0, display: "flex" }}>
             <div style={{ flex: 1.15, padding: "88px 84px", display: "flex", flexDirection: "column", justifyContent: "space-between", position: "relative" }}>
-              {dz.petals && <Petal w={380} o={0.4} style={{ position: "absolute", bottom: -110, left: -110 }} />}
+              {dz.petals && <Petal w={380} o={0.4} style={{ position: "absolute", bottom: -110, left: -110 }} brand={brand} />}
               <Eyebrow />
               <div style={{ position: "relative" }}>
                 <h1 style={{ fontFamily: displayFont, fontSize: fit(90, cover, 50), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: C.ink, margin: 0 }}>{renderEm(cover)}</h1>
                 <Standfirst max={860} />
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}>
-                <Logo h={78} />
+                <Logo h={78} brand={brand} />
                 <div style={{ fontFamily: font, fontSize: 24, color: C.inkMute }}>{dz.url}</div>
               </div>
             </div>
@@ -559,8 +753,8 @@ export const Slide = React.memo(function Slide({
     if (variant === 2) {
       return (
         <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-          {dz.petals && <Petal w={980} o={0.6} style={{ position: "absolute", top: -300, right: -300 }} />}
-          {dz.petals && <Petal w={520} o={0.35} style={{ position: "absolute", bottom: -180, left: -160 }} />}
+          {dz.petals && <Petal w={980} o={0.6} style={{ position: "absolute", top: -300, right: -300 }} brand={brand} />}
+          {dz.petals && <Petal w={520} o={0.35} style={{ position: "absolute", bottom: -180, left: -160 }} brand={brand} />}
           <div style={{ position: "absolute", inset: 0, display: "flex" }}>
             <div style={{ flex: showArticlePhoto ? 1.15 : 1, padding: "88px 100px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <div style={{ ...GLASS_DARKBG, borderRadius: 30, padding: "70px 80px", maxWidth: 1500 }}>
@@ -569,7 +763,7 @@ export const Slide = React.memo(function Slide({
                 <Standfirst dark max={showArticlePhoto ? 900 : 1320} />
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 44 }}>
-                <Logo h={78} white />
+                <Logo h={78} white brand={brand} />
                 <div style={{ fontFamily: font, fontSize: 26, color: "rgba(255,255,255,0.65)" }}>{dz.url}</div>
               </div>
             </div>
@@ -580,8 +774,8 @@ export const Slide = React.memo(function Slide({
     }
     return (
       <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-        {dz.petals && <Petal w={900} o={0.5} style={{ position: "absolute", top: -260, right: -260 }} />}
-        {dz.petals && <Petal w={460} o={0.32} style={{ position: "absolute", bottom: -160, left: -140 }} />}
+        {dz.petals && <Petal w={900} o={0.5} style={{ position: "absolute", top: -260, right: -260 }} brand={brand} />}
+        {dz.petals && <Petal w={460} o={0.32} style={{ position: "absolute", bottom: -160, left: -140 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, display: "flex" }}>
           <div style={{ flex: showArticlePhoto ? 1.15 : 1, padding: "88px 100px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
             <Eyebrow dark />
@@ -590,7 +784,7 @@ export const Slide = React.memo(function Slide({
               <Standfirst dark max={showArticlePhoto ? 1000 : 1460} />
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <Logo h={82} white />
+              <Logo h={82} white brand={brand} />
               <div style={{ fontFamily: font, fontSize: 26, color: "rgba(255,255,255,0.65)" }}>{dz.url}</div>
             </div>
           </div>
@@ -615,7 +809,7 @@ export const Slide = React.memo(function Slide({
     const isFigure = figure.length <= 12;
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
-        {dz.petals && <Petal w={onDark ? 620 : 560} o={S.petal} style={{ position: "absolute", ...(onDark ? { top: -200, right: -200 } : { bottom: -170, right: -170 }) }} />}
+        {dz.petals && <Petal w={onDark ? 620 : 560} o={S.petal} style={{ position: "absolute", ...(onDark ? { top: -200, right: -200 } : { bottom: -170, right: -170 }) }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark={onDark} />
           {onDark ? (
@@ -654,6 +848,333 @@ export const Slide = React.memo(function Slide({
   }
 
   /* ============================ SAYS VS DOES ============================ */
+  /* ==================== JOURNEY MAP (3 tinted columns) ==================== */
+  if (kind === "journey") {
+    // Three stages side by side with an arrow between them, capability lines as
+    // chips. The column tints come from the brand's accent tints rather than from
+    // three hardcoded colours: under Konverz that is Hire pink, Nurture green and
+    // Coach blue, and under Kognoz all three resolve to its one mist, which is
+    // correct — Kognoz has no module palette to spend here.
+    const cols = slides.slice(0, 3);
+    const heads = [accent, C.teal, C.blue];
+    return (
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {dz.petals && <Petal w={520} o={0.7 * S.petal * 2} style={{ position: "absolute", top: -260, right: -280 }} brand={brand} />}
+        <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
+          <Eyebrow dark={onDark} />
+          <h1
+            style={{
+              fontFamily: displayFont,
+              fontSize: fit(54, cover, 52),
+              fontWeight: 700,
+              lineHeight: 1.1,
+              letterSpacing: "-0.01em",
+              color: S.heading,
+              margin: "22px 0 34px"
+            }}
+          >
+            {renderEm(cover)}
+          </h1>
+          <div style={{ flex: 1, display: "flex", gap: 16 }}>
+            {cols.map((cx, i) => {
+              const lines = String(cx.body || "")
+                .split(/\n+/)
+                .map((x) => x.trim())
+                .filter(Boolean);
+              const head = onDark ? accentOnDark : heads[i % 3];
+              return (
+                <div
+                  key={i}
+                  style={{
+                    flex: 1,
+                    background: onDark ? "rgba(255,255,255,0.08)" : tint(heads[i % 3]),
+                    borderRadius: 22,
+                    padding: "22px 18px 26px",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    position: "relative"
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: font,
+                      fontSize: sz(22),
+                      fontWeight: 700,
+                      color: head,
+                      background: onDark ? "rgba(255,255,255,0.92)" : C.white,
+                      borderRadius: 999,
+                      padding: "10px 18px",
+                      boxShadow: "0 6px 18px rgba(0,40,70,0.08)",
+                      marginBottom: 20,
+                      textAlign: "center"
+                    }}
+                  >
+                    {cx.title}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
+                    {lines.map((ln, k) => (
+                      <div
+                        key={k}
+                        style={{
+                          fontFamily: font,
+                          fontSize: sz(19),
+                          fontWeight: 500,
+                          color: onDark ? "#fff" : C.ink,
+                          background: onDark ? "rgba(255,255,255,0.12)" : C.white,
+                          border: `1px solid ${onDark ? "rgba(255,255,255,0.24)" : C.line}`,
+                          borderRadius: 999,
+                          padding: "10px 14px",
+                          textAlign: "center"
+                        }}
+                      >
+                        {ln}
+                      </div>
+                    ))}
+                  </div>
+                  {i < cols.length - 1 && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        right: -16,
+                        top: "50%",
+                        fontFamily: font,
+                        fontSize: 26,
+                        color: S.label,
+                        transform: "translateY(-50%)"
+                      }}
+                    >
+                      {"\u2192"}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <Foot dark={onDark} right={SINGLE_R} />
+      </div>
+    );
+  }
+
+  /* ==================== FEATURE CARD (screenshot + capabilities) ==================== */
+  if (kind === "feature") {
+    // A product screenshot over the top 46%, then the claim, the outcome sentence
+    // and three capability lines. slides[0].body is the outcome; slides[1..3]
+    // carry their text in `title` with a "-" body, which is what the prompt asks
+    // for and why lib/coerce keeps "-" placeholders rather than dropping them.
+    const s0 = slides[0] || { title: "", body: "" };
+    const caps = slides.slice(1, 4);
+    // The screenshot is gated on photoOn like every other slot in this file. The
+    // v4 reference draws it unconditionally, which would put an empty dashed box
+    // on the card until somebody uploaded something — the exact defect
+    // lib/imageSlots.test.ts exists to prevent. With the photo off the text takes
+    // the whole canvas, which is a better card than one with a hole in it.
+    return (
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {photoOn && (
+          <ImageSlot
+            brand={brand}
+            dark={onDark}
+            img={images.feature}
+            onPick={(u) => setImg("feature", u)}
+            label="Add product screenshot"
+            style={{ position: "absolute", top: 0, left: 0, right: 0, height: "46%" }}
+          />
+        )}
+        {dz.petals && !photoOn && (
+          <Petal w={480} o={0.6 * S.petal * 2} style={{ position: "absolute", top: -220, right: -240 }} brand={brand} />
+        )}
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: photoOn ? "46%" : 0,
+            bottom: 0,
+            padding: photoOn ? "56px 96px 196px" : "96px 96px 196px",
+            display: "flex",
+            flexDirection: "column"
+          }}
+        >
+          <Eyebrow dark={onDark} />
+          <h1
+            style={{
+              fontFamily: displayFont,
+              fontSize: fit(photoOn ? 60 : 78, cover, photoOn ? 40 : 44),
+              fontWeight: 600,
+              lineHeight: 1.08,
+              letterSpacing: "-0.01em",
+              color: S.heading,
+              margin: photoOn ? "20px 0 12px" : "34px 0 20px"
+            }}
+          >
+            {renderEm(cover)}
+          </h1>
+          <p
+            style={{
+              fontFamily: font,
+              fontSize: fit(photoOn ? 30 : 38, s0.body, 150),
+              lineHeight: 1.45,
+              color: S.body,
+              margin: photoOn ? "0 0 22px" : "0 0 40px"
+            }}
+          >
+            {renderLines(s0.body)}
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {caps.map((c, i) => (
+              <div
+                key={i}
+                style={{ display: "flex", alignItems: "center", gap: 14, fontFamily: font, fontSize: sz(24), fontWeight: 600, color: S.heading }}
+              >
+                <span style={{ width: 10, height: 10, borderRadius: "50%", background: onDark ? accentOnDark : accent, flexShrink: 0 }} />
+                {c.title}
+              </div>
+            ))}
+          </div>
+        </div>
+        <Foot dark={onDark} right={SINGLE_R} />
+      </div>
+    );
+  }
+
+  /* ==================== NUMBERS WALL (4 figures) ==================== */
+  if (kind === "numbers") {
+    const tiles = slides.slice(0, 4);
+    return (
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {dz.petals && <Petal w={560} o={0.5 * S.petal * 2} style={{ position: "absolute", top: -190, right: -190 }} brand={brand} />}
+        <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
+          <Eyebrow dark={onDark} />
+          <h1
+            style={{
+              fontFamily: displayFont,
+              fontSize: fit(56, cover, 52),
+              fontWeight: 600,
+              lineHeight: 1.08,
+              letterSpacing: "-0.01em",
+              color: S.heading,
+              margin: "20px 0 34px"
+            }}
+          >
+            {renderEm(cover)}
+          </h1>
+          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 18 }}>
+            {tiles.map((t, i) => (
+              <div
+                key={i}
+                style={{
+                  ...S.panel,
+                  ...(onDark ? {} : { boxShadow: "0 12px 34px rgba(0,40,70,0.06)" }),
+                  borderRadius: surfaceId === "press" ? 0 : 22,
+                  padding: "30px",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center"
+                }}
+              >
+                {/* The figure carries the gradient on a light page; on a dark one
+                    a gradient built from the brand's own dark blue disappears into
+                    the background, so it goes solid white instead. */}
+                <div
+                  style={{
+                    fontFamily: displayFont,
+                    fontSize: fit(88, t.title, 6),
+                    fontWeight: 600,
+                    lineHeight: 1,
+                    letterSpacing: "-0.02em",
+                    marginBottom: 12,
+                    paddingBottom: "0.08em",
+                    ...(onDark
+                      ? { color: "#fff" }
+                      : { background: GRAD, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" })
+                  }}
+                >
+                  {t.title}
+                </div>
+                <div style={{ fontFamily: font, fontSize: sz(22), fontWeight: 600, lineHeight: 1.35, color: S.body }}>
+                  {renderLines(t.body)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <Foot dark={onDark} right={SINGLE_R} />
+      </div>
+    );
+  }
+
+  /* ==================== CUSTOMER QUOTE ==================== */
+  if (kind === "quote") {
+    // The cover IS the quotation, so it is rendered plain — never through
+    // renderEm. lib/formats' FORMAT_BUDGET turns off `em` for this format for the
+    // same reason: marking a word inside somebody's published words changes what
+    // they said.
+    const who = slides[0] || { title: "", body: "" };
+    return (
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {dz.petals && <Petal w={620} o={0.5 * S.petal * 2} style={{ position: "absolute", bottom: -200, right: -200 }} brand={brand} />}
+        <div
+          style={{
+            position: "absolute",
+            top: -20,
+            left: 70,
+            fontFamily: displayFont,
+            fontSize: 320,
+            fontWeight: 600,
+            lineHeight: 1,
+            color: onDark ? "rgba(255,255,255,0.14)" : accent,
+            opacity: onDark ? 1 : 0.14,
+            userSelect: "none"
+          }}
+        >
+          {"\u201C"}
+        </div>
+        <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Eyebrow dark={onDark} />
+          </div>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+            <p
+              style={{
+                fontFamily: displayFont,
+                fontSize: fit(48, cover, 170),
+                fontStyle: "italic",
+                lineHeight: 1.3,
+                letterSpacing: "-0.01em",
+                color: S.heading,
+                margin: "0 0 40px"
+              }}
+            >
+              {plain(cover)}
+            </p>
+            {/* The customer logo is optional and gated on photoOn, so the card
+                never shows an empty box where a logo would go. Attribution is the
+                required part; the logo is decoration. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 22 }}>
+              {photoOn && (
+                <ImageSlot
+                  brand={brand}
+                  dark={onDark}
+                  img={images.quote}
+                  onPick={(u) => setImg("quote", u)}
+                  label="Logo"
+                  style={{ width: 150, height: 74, borderRadius: 12, flexShrink: 0 }}
+                />
+              )}
+              <div>
+                <div style={{ fontFamily: font, fontSize: sz(26), fontWeight: 700, color: S.heading }}>{who.title}</div>
+                <div style={{ fontFamily: font, fontSize: sz(21), color: S.label, marginTop: 4 }}>{who.body}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <Foot dark={onDark} right={SINGLE_R} />
+      </div>
+    );
+  }
+
   if (kind === "split") {
     const L = slides[0] || { title: "What the survey says", body: "" };
     const Rt = slides[1] || { title: "What behavior says", body: "" };
@@ -687,13 +1208,13 @@ export const Slide = React.memo(function Slide({
                   : { background: GRAD_DARK })
               }}
             >
-              {dz.petals && <Petal w={340} o={0.42} style={{ position: "absolute", bottom: -100, right: -100 }} />}
+              {dz.petals && <Petal w={340} o={0.42} style={{ position: "absolute", bottom: -100, right: -100 }} brand={brand} />}
               <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: C.green, marginBottom: 30, position: "relative" }}>{Rt.title}</div>
               <p style={{ fontFamily: displayFont, fontSize: fit(45, Rt.body, 150), lineHeight: 1.28, color: "#fff", margin: 0, position: "relative" }}>{Rt.body}</p>
             </div>
           </div>
           <div style={{ padding: "36px 96px 84px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${S.rule}` }}>
-            <Logo h={64} white={onDark} />
+            <Logo h={64} white={onDark} brand={brand} />
             <div style={{ fontFamily: font, fontSize: 22, color: S.label }}>{SINGLE_R}</div>
           </div>
         </div>
@@ -713,13 +1234,17 @@ export const Slide = React.memo(function Slide({
     const d = Math.min(1, Math.max(0.5, 3.5 / dn));
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
-        {dz.petals && <Petal w={onDark ? 520 : 460} o={S.petal} style={{ position: "absolute", top: -150, right: -150 }} />}
+        {dz.petals && <Petal w={onDark ? 520 : 460} o={S.petal} style={{ position: "absolute", top: -150, right: -150 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "80px 96px 190px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark={onDark} />
           <h1 style={{ fontFamily: displayFont, fontSize: fit(56, cover, 62), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: S.heading, margin: `22px 0 ${Math.round(50 * d)}px` }}>{renderEm(cover)}</h1>
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: Math.round(28 * d) }}>
             {slides.map((m, i) => {
-              const isK = /kognoz/i.test(m.title);
+              // Which side of the exchange is ours. Matching on the brand's own
+              // speaker label rather than a hardcoded "kognoz", so a Konverz
+              // dialogue aligns the Konverz turn right instead of aligning
+              // nothing and rendering as two left columns.
+              const isK = new RegExp(brand.speaker, "i").test(m.title);
               return (
                 <div key={i} style={{ display: "flex", justifyContent: isK ? "flex-end" : "flex-start" }}>
                   <div style={{ maxWidth: "78%" }}>
@@ -816,7 +1341,7 @@ export const Slide = React.memo(function Slide({
             second copy of the image. Rendering the photo separately as well would inline
             the same base64 twice into every exported SVG. */}
         {showPhoto && (
-          <ImageSlot
+          <ImageSlot brand={brand}
             img={wide}
             onPick={(u) => setImg("montage", u)}
             dark={darkType}
@@ -850,8 +1375,8 @@ export const Slide = React.memo(function Slide({
             of one is not a clipped element — it is the shape that completes when the
             next frame arrives. Suppressed over a photo, where the scrim already carries
             the drift and a blob would only muddy the picture. */}
-        {!onPhoto && dz.petals && <Petal w={760} o={S.petal} style={{ position: "absolute", top: -250, left: frameW - 380 }} />}
-        {!onPhoto && dz.petals && <Petal w={680} o={S.petal * 0.8} style={{ position: "absolute", bottom: -240, left: frameW * 2 - 340 }} />}
+        {!onPhoto && dz.petals && <Petal w={760} o={S.petal} style={{ position: "absolute", top: -250, left: frameW - 380 }} brand={brand} />}
+        {!onPhoto && dz.petals && <Petal w={680} o={S.petal * 0.8} style={{ position: "absolute", bottom: -240, left: frameW * 2 - 340 }} brand={brand} />}
 
         <div style={{ position: "absolute", inset: 0, display: "flex", pointerEvents: "none" }}>
           {pts.map((p, i) => {
@@ -940,7 +1465,7 @@ export const Slide = React.memo(function Slide({
                     as three separate designs rather than one piece. */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 30, gap: 16, height: 58 }}>
                   {role.cta ? <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, color: labelCol }}>{plain(cta)}</div> : <span />}
-                  {role.logo ? <Logo h={58} white={darkType} /> : null}
+                  {role.logo ? <Logo h={58} white={darkType} brand={brand} /> : null}
                 </div>
               </div>
             );
@@ -976,7 +1501,7 @@ export const Slide = React.memo(function Slide({
     }
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
-        {dz.petals && <Petal w={560} o={S.petal} style={{ position: "absolute", top: -180, right: -190 }} />}
+        {dz.petals && <Petal w={560} o={S.petal} style={{ position: "absolute", top: -180, right: -190 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "112px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark={onDark} />
           <h1 style={{ fontFamily: displayFont, fontSize: fit(90, cover, 42), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: S.heading, margin: "36px 0 44px" }}>{renderEm(cover)}</h1>
@@ -986,7 +1511,7 @@ export const Slide = React.memo(function Slide({
               while the toggle that reveals this slot was still deck-only, so the import
               reported success and the canvas never changed. */}
           {photoOn && (
-            <ImageSlot dark={onDark} img={images.story} onPick={(u) => setImg("story", u)} label="Add photo" style={{ height: 560, borderRadius: surfaceId === "press" ? 0 : 24 }} />
+            <ImageSlot brand={brand} dark={onDark} img={images.story} onPick={(u) => setImg("story", u)} label="Add photo" style={{ height: 560, borderRadius: surfaceId === "press" ? 0 : 24 }} />
           )}
           {/* fit(), not sz(): this was the one body with no auto-shrink, so long copy
               ran under the footer and was silently clipped. */}
@@ -1021,7 +1546,7 @@ export const Slide = React.memo(function Slide({
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
         <div style={{ position: "absolute", top: -170, right: -190, animation: "kvDrift 9s ease-in-out infinite" }}>
-          {dz.petals && <Petal w={600} o={S.petal} />}
+          {dz.petals && <Petal w={600} o={S.petal} brand={brand} />}
         </div>
         <div key={`kv-${replay}`} style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <div style={{ animation: "kvFade .6s ease .25s backwards" }}>
@@ -1084,7 +1609,7 @@ export const Slide = React.memo(function Slide({
     const d = Math.min(1, Math.max(0.55, 4.5 / bn));
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
-        {onDark && dz.petals && <Petal w={520} o={S.petal} style={{ position: "absolute", top: -170, right: -170 }} />}
+        {onDark && dz.petals && <Petal w={520} o={S.petal} style={{ position: "absolute", top: -170, right: -170 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "72px 84px", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 26 }}>
             <div style={{ fontFamily: font, fontSize: 21, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: cue }}>Founder video · shoot script</div>
@@ -1107,7 +1632,7 @@ export const Slide = React.memo(function Slide({
             <p style={{ fontFamily: font, fontSize: fit(23, cta, 130), lineHeight: 1.45, color: S.body, margin: 0 }}>{plain(cta)}</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 26 }}>
-            <Logo h={78} white={onDark} />
+            <Logo h={78} white={onDark} brand={brand} />
             <div style={{ fontFamily: font, fontSize: 18, color: S.label }}>60–90s · talk to camera · captions on</div>
           </div>
         </div>
@@ -1119,7 +1644,7 @@ export const Slide = React.memo(function Slide({
   if (kind === "end") {
     return (
       <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-        {dz.petals && <Petal w={620} o={0.55} style={{ position: "absolute", bottom: -190, left: -170 }} />}
+        {dz.petals && <Petal w={620} o={0.55} style={{ position: "absolute", bottom: -190, left: -170 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
           <h2 style={{ fontFamily: displayFont, fontSize: fit(74, cta, 52), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.01em", color: "#fff", margin: 0, maxWidth: 830 }}>{renderEm(cta)}</h2>
         </div>
@@ -1133,7 +1658,7 @@ export const Slide = React.memo(function Slide({
   if (variant === 1) {
     return (
       <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-        {dz.petals && <Petal w={420} o={0.42} style={{ position: "absolute", top: -130, right: -130 }} />}
+        {dz.petals && <Petal w={420} o={0.42} style={{ position: "absolute", top: -130, right: -130 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark n={nn} />
           <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", maxWidth: 860 }}>
@@ -1170,7 +1695,7 @@ export const Slide = React.memo(function Slide({
     return (
       <div id={id} style={{ ...wrap, background: C.white }}>
         {photoOn && (
-          <ImageSlot img={images[imgKey]} onPick={(u) => setImg(imgKey, u)} label="Add photo" style={{ position: "absolute", top: 0, left: 0, right: 0, height: "44%" }} />
+          <ImageSlot brand={brand} img={images[imgKey]} onPick={(u) => setImg(imgKey, u)} label="Add photo" style={{ position: "absolute", top: 0, left: 0, right: 0, height: "44%" }} />
         )}
         <div style={{ position: "absolute", top: photoOn ? "44%" : 0, left: 0, right: 0, bottom: 0, padding: photoOn ? "50px 96px 180px" : "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow n={nn} />
@@ -1185,8 +1710,8 @@ export const Slide = React.memo(function Slide({
     // Glass tile on the gradient: v8's frosted language as a content slide.
     return (
       <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
-        {dz.petals && <Petal w={520} o={0.55} style={{ position: "absolute", top: -160, right: -160 }} />}
-        {dz.petals && <Petal w={380} o={0.35} style={{ position: "absolute", bottom: -130, left: -120 }} />}
+        {dz.petals && <Petal w={520} o={0.55} style={{ position: "absolute", top: -160, right: -160 }} brand={brand} />}
+        {dz.petals && <Petal w={380} o={0.35} style={{ position: "absolute", bottom: -130, left: -120 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark n={nn} />
           <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
@@ -1217,7 +1742,7 @@ export const Slide = React.memo(function Slide({
           <img src={bgImg} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
         )}
         {photoOn && !bgImg && (
-          <ImageSlot dark img={null} onPick={(u) => setImg(imgKey, u)} label="Add full-bleed photo" style={{ position: "absolute", inset: 0 }} />
+          <ImageSlot brand={brand} dark img={null} onPick={(u) => setImg(imgKey, u)} label="Add full-bleed photo" style={{ position: "absolute", inset: 0 }} />
         )}
         {bgImg && (
           <div
@@ -1235,6 +1760,105 @@ export const Slide = React.memo(function Slide({
           <p style={{ fontFamily: font, fontSize: fit(29, data.body, 220), lineHeight: 1.5, color: "rgba(255,255,255,0.88)", margin: 0 }}>{renderLines(data.body)}</p>
         </div>
         <Foot dark right={CONTENT_R} />
+      </div>
+    );
+  }
+  if (variant === 9) {
+    // Konverz chip cloud. The deck's capability pills, at slide scale: each body
+    // line becomes one white rounded pill with a hairline border. This is the
+    // shape konverz.ai uses to list what an assistant can do, and it is the only
+    // content variant where a body's LINE BREAKS are the layout rather than
+    // typography, which is why the prompt for Journey Map and Feature Card asks
+    // for short separate lines.
+    const lines = String(data.body || "")
+      .split(/\n+/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    // Chips only when the body is genuinely a LIST. This is the brand's default
+    // set, and a Carousel prompt returns prose — one ~180-character sentence,
+    // which as a single pill reads as a mistake rather than as a capability chip.
+    // Journey Map and Feature Card ask for short separate lines and get the chips;
+    // everything else falls back to the paragraph it was written as.
+    const asChips = lines.length >= 2;
+    return (
+      <div id={id} style={{ ...wrap, background: S.page }}>
+        {dz.petals && <Petal w={520} o={0.9 * S.petal} style={{ position: "absolute", top: -260, right: -300 }} brand={brand} />}
+        <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
+          <Eyebrow dark={onDark} n={nn} />
+          <h2
+            style={{
+              fontFamily: displayFont,
+              fontSize: fit(60, data.title, 52),
+              fontWeight: 700,
+              lineHeight: 1.1,
+              letterSpacing: "-0.01em",
+              color: S.heading,
+              margin: "26px 0 34px"
+            }}
+          >
+            {renderEm(data.title)}
+          </h2>
+          {asChips ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignContent: "flex-start" }}>
+              {lines.map((ln, i) => (
+                <div
+                  key={i}
+                  style={{
+                    fontFamily: font,
+                    fontSize: sz(24),
+                    fontWeight: 500,
+                    color: S.heading,
+                    ...S.panel,
+                    borderRadius: 999,
+                    padding: "14px 24px",
+                    boxShadow: onDark ? "none" : "0 6px 18px rgba(0,40,70,0.06)"
+                  }}
+                >
+                  {ln}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ fontFamily: font, fontSize: fit(34, data.body, 230), lineHeight: 1.55, color: S.body, margin: 0 }}>
+              {renderLines(data.body)}
+            </p>
+          )}
+        </div>
+        <Foot dark={onDark} right={CONTENT_R} />
+      </div>
+    );
+  }
+  if (variant === 10) {
+    // Konverz light glass: the AI Assistants page's frosted white card on a cloud
+    // gradient. Distinct from variant 7, which is the same frosted language on a
+    // DARK gradient; this one is the light register the product pages actually use.
+    return (
+      <div id={id} style={{ ...wrap, background: `linear-gradient(160deg, ${C.off} 0%, #EEF3FA 60%, ${C.mist} 100%)` }}>
+        {dz.petals && <Petal w={560} o={0.8} style={{ position: "absolute", top: -240, left: -260 }} brand={brand} />}
+        <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
+          <Eyebrow n={nn} />
+          <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
+            <div style={{ ...GLASS_LIGHTBG, width: "100%", borderRadius: 28, padding: "64px 58px" }}>
+              <h2
+                style={{
+                  fontFamily: displayFont,
+                  fontSize: fit(56, data.title, 52),
+                  fontWeight: 700,
+                  lineHeight: 1.12,
+                  letterSpacing: "-0.01em",
+                  color: C.blue,
+                  margin: "0 0 24px"
+                }}
+              >
+                {data.title}
+              </h2>
+              <p style={{ fontFamily: font, fontSize: fit(33, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>
+                {renderLines(data.body)}
+              </p>
+            </div>
+          </div>
+        </div>
+        <Foot right={CONTENT_R} />
       </div>
     );
   }
@@ -1260,11 +1884,23 @@ export const Slide = React.memo(function Slide({
     // Framework callout: the site's thin-left-border editorial card.
     return (
       <div id={id} style={{ ...wrap, background: C.off }}>
-        {dz.petals && <Petal w={340} o={0.35} style={{ position: "absolute", top: -100, right: -110 }} />}
+        {dz.petals && <Petal w={340} o={0.35} style={{ position: "absolute", top: -100, right: -110 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow n={nn} />
           <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
-            <div style={{ width: "100%", background: C.mist, borderLeft: `6px solid ${accent}`, borderRadius: "0 22px 22px 0", padding: "64px 60px" }}>
+            {/* The module tint is the point of this card under Konverz: the panel
+                takes the tint belonging to the accent, so a Hire slide is pink and
+                a Nurture slide is green. Kognoz's tintFor returns its one mist and
+                the card renders exactly as it always has. */}
+            <div
+              style={{
+                width: "100%",
+                background: tint(),
+                borderLeft: `6px solid ${accent}`,
+                borderRadius: brand.motif === "halo" ? 26 : "0 22px 22px 0",
+                padding: "64px 60px"
+              }}
+            >
               <h2 style={{ fontFamily: displayFont, fontSize: fit(56, data.title, 52), fontWeight: 600, lineHeight: 1.12, letterSpacing: "-0.01em", color: C.ink, margin: "0 0 26px" }}>{data.title}</h2>
               <p style={{ fontFamily: font, fontSize: fit(34, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>{renderLines(data.body)}</p>
             </div>
@@ -1294,7 +1930,7 @@ export const Slide = React.memo(function Slide({
   }
   return (
     <div id={id} style={{ ...wrap, background: C.white }}>
-      {dz.petals && <Petal w={320} o={0.45} style={{ position: "absolute", bottom: -80, right: -80 }} />}
+      {dz.petals && <Petal w={320} o={0.45} style={{ position: "absolute", bottom: -80, right: -80 }} brand={brand} />}
       <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
         <Eyebrow n={nn} />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", maxWidth: 840 }}>

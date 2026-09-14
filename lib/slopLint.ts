@@ -131,8 +131,51 @@ function phraseRegex(phrase: string): RegExp {
   return new RegExp(`${lead}(?:${alts.join("|")})\\b`, "i");
 }
 
-const BANNED_RES = BANNED_PHRASES.map((p) => ({ phrase: p, re: phraseRegex(p) }));
-const HEDGE_RES = HEDGES.map((p) => ({ phrase: p, re: phraseRegex(p) }));
+interface PhraseRe {
+  phrase: string;
+  re: RegExp;
+}
+
+const HEDGE_RES: PhraseRe[] = HEDGES.map((p) => ({ phrase: p, re: phraseRegex(p) }));
+
+/**
+ * The banned list a brand is actually measured against.
+ *
+ * BANNED_PHRASES is the shared list and stays the shared list. What differs is
+ * that a word which is empty marketing filler for one brand is a product noun for
+ * another, and flagging the second case is worse than useless: it tells the
+ * humanize pass to "fix" accurate copy, and it drags the style score down for
+ * writing that is doing its job.
+ *
+ * The live case is Konverz. Its canon is built on the Hire, Nurture, Coach and
+ * Learn JOURNEYS, there is a format called Journey Map, and the deck tagline is
+ * "ELEVATING Talent Decisions". Both words are on the shared list. Konverz
+ * therefore exempts "journey" and "elevate"; Kognoz exempts nothing.
+ *
+ * An exemption is a subtraction, never an addition. Nothing here can ban a phrase
+ * the shared list does not already ban, so the list stays the single source of
+ * truth and lib/promptBuilders.ts can keep rendering the prompt from the same
+ * filtered array the linter uses.
+ */
+export function bannedFor(allowed: readonly string[] = []): string[] {
+  if (!allowed.length) return BANNED_PHRASES;
+  const skip = new Set(allowed.map((a) => a.toLowerCase()));
+  return BANNED_PHRASES.filter((p) => !skip.has(p.toLowerCase()));
+}
+
+// Compiling ~33 regexes per lint call would be wasteful on a path that runs on
+// every generation and every keystroke-free re-render. Two brands means two
+// entries, keyed on the exemption list itself so a third brand costs nothing.
+const bannedReCache = new Map<string, PhraseRe[]>();
+
+function bannedRes(allowed: readonly string[] = []): PhraseRe[] {
+  const key = allowed.length ? [...allowed].map((a) => a.toLowerCase()).sort().join("\u0000") : "";
+  const hit = bannedReCache.get(key);
+  if (hit) return hit;
+  const built = bannedFor(allowed).map((p) => ({ phrase: p, re: phraseRegex(p) }));
+  bannedReCache.set(key, built);
+  return built;
+}
 
 /**
  * Curly apostrophes are what the model actually emits, and "isn’t just" must
@@ -219,12 +262,12 @@ const trim = (s: string, n = 80) => (s.length <= n ? s : s.slice(0, n - 1) + "�
 // Checks
 // ---------------------------------------------------------------------------
 
-function lexicalFindings(seg: LintSegment): SlopFinding[] {
+function lexicalFindings(seg: LintSegment, allowed: readonly string[]): SlopFinding[] {
   const out: SlopFinding[] = [];
   const t = normalizeQuotes(seg.text);
   if (!t.trim()) return out;
 
-  for (const { phrase, re } of BANNED_RES) {
+  for (const { phrase, re } of bannedRes(allowed)) {
     const m = t.match(re);
     if (m) {
       out.push({
@@ -377,8 +420,20 @@ function structuralFindings(segments: LintSegment[]): SlopFinding[] {
 // Entry points
 // ---------------------------------------------------------------------------
 
-export function lintSegments(segments: LintSegment[]): SlopReport {
-  const raw = [...segments.flatMap(lexicalFindings), ...structuralFindings(segments)];
+/**
+ * Per-brand lint options. `allowed` subtracts from the banned list; every other
+ * rule — dashes, emoji, uniform sentence length, repeated openers, symmetry,
+ * tricolon, question hooks — applies to both brands unchanged, because those are
+ * tells of machine rhythm rather than of vocabulary, and no brand gets to opt out
+ * of reading like a person.
+ */
+export interface LintOpts {
+  allowed?: readonly string[];
+}
+
+export function lintSegments(segments: LintSegment[], opts: LintOpts = {}): SlopReport {
+  const allowed = opts.allowed ?? [];
+  const raw = [...segments.flatMap((seg) => lexicalFindings(seg, allowed)), ...structuralFindings(segments)];
 
   const perRule = new Map<string, number>();
   const findings: SlopFinding[] = [];
@@ -397,16 +452,19 @@ export function lintSegments(segments: LintSegment[]): SlopReport {
 }
 
 /** For a caption, a post or an article: one block of prose. */
-export function lintText(text: string, where = "text"): SlopReport {
-  return lintSegments([{ where, text, role: "body" }]);
+export function lintText(text: string, where = "text", opts: LintOpts = {}): SlopReport {
+  return lintSegments([{ where, text, role: "body" }], opts);
 }
 
 /** For a generated deck. Field names match lib/coerce.ts's CoercedContent. */
-export function lintContent(content: {
-  cover?: string;
-  cta?: string;
-  slides?: { title?: string; body?: string }[];
-}): SlopReport {
+export function lintContent(
+  content: {
+    cover?: string;
+    cta?: string;
+    slides?: { title?: string; body?: string }[];
+  },
+  opts: LintOpts = {}
+): SlopReport {
   const segments: LintSegment[] = [];
   if (content.cover) segments.push({ where: "cover", text: content.cover, role: "headline" });
   (content.slides || []).forEach((s, i) => {
@@ -414,12 +472,15 @@ export function lintContent(content: {
     if (s.body) segments.push({ where: `slide ${i + 1}`, text: s.body, role: "body" });
   });
   if (content.cta) segments.push({ where: "closing", text: content.cta, role: "headline" });
-  return lintSegments(segments);
+  return lintSegments(segments, opts);
 }
 
 /** For the month plan: the topic lines, which are written as one batch and drift into one shape. */
-export function lintTopics(topics: string[]): SlopReport {
-  return lintSegments(topics.map((t, i) => ({ where: `topic ${i + 1}`, text: t, role: "body" })));
+export function lintTopics(topics: string[], opts: LintOpts = {}): SlopReport {
+  return lintSegments(
+    topics.map((t, i) => ({ where: `topic ${i + 1}`, text: t, role: "body" })),
+    opts
+  );
 }
 
 /**

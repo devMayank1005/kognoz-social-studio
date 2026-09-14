@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   BANNED_PHRASES,
+  bannedFor,
   MIN_LENGTH_VARIATION,
   formatFindings,
   lengthVariation,
@@ -223,5 +224,69 @@ describe("entry points", () => {
 describe("normalizeQuotes", () => {
   it("folds curly quotes to straight", () => {
     expect(normalizeQuotes("it’s “fine”")).toBe(`it's "fine"`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-brand exemptions.
+//
+// The list stays shared; what changes is which of it applies. Konverz's canon is
+// built on the Hire/Nurture/Coach/Learn JOURNEYS, there is a format called
+// Journey Map, and the deck tagline is "Elevating Talent Decisions". Both words
+// are on the shared banned list. Without the exemption, every accurate Konverz
+// piece is flagged as slop, the humanize pass is handed non-problems to fix, and
+// the style score stops meaning anything for the brand.
+// ---------------------------------------------------------------------------
+describe("brand exemptions", () => {
+  const KONVERZ_ALLOWED = { allowed: ["journey", "elevate"] };
+  const line = "The hire journey runs screening to offer. It elevates what a recruiter sees.";
+
+  it("flags the words for a brand with no exemptions", () => {
+    const rules = lintText(line).findings.filter((f) => f.rule === "banned-phrase");
+    expect(rules.map((f) => f.evidence?.toLowerCase()).sort()).toEqual(["elevates", "journey"]);
+  });
+
+  it("does not flag them for a brand that exempts them", () => {
+    const rules = lintText(line, "text", KONVERZ_ALLOWED).findings.filter((f) => f.rule === "banned-phrase");
+    expect(rules).toEqual([]);
+  });
+
+  it("still flags everything else for the exempting brand", () => {
+    // One word per call: findings are capped at MAX_PER_RULE per rule, and every
+    // banned phrase shares the rule id, so a sentence carrying four of them only
+    // ever reports three.
+    for (const word of ["unlock", "seamless", "leverage", "holistic"]) {
+      const found = lintText(`We ${word} the screening step.`, "text", KONVERZ_ALLOWED).findings.map((f) =>
+        f.evidence?.toLowerCase()
+      );
+      expect(found, word).toContain(word);
+    }
+  });
+
+  it("an exemption cannot ADD a ban — bannedFor only ever subtracts", () => {
+    expect(bannedFor([]).length).toBe(BANNED_PHRASES.length);
+    expect(bannedFor(["journey"]).length).toBe(BANNED_PHRASES.length - 1);
+    // A phrase not on the list changes nothing rather than adding one.
+    expect(bannedFor(["mechanism"]).length).toBe(BANNED_PHRASES.length);
+    expect(bannedFor(["journey"])).not.toContain("journey");
+  });
+
+  it("the structural rules apply to both brands unchanged", () => {
+    // Dashes, emoji and the balanced not-X-but-Y move are tells of machine
+    // rhythm, not of vocabulary. No brand opts out of reading like a person.
+    const dashy = "Screening is fast — and the panel is not.";
+    for (const opts of [{}, KONVERZ_ALLOWED]) {
+      expect(lintText(dashy, "text", opts).findings.map((f) => f.rule)).toContain("dash");
+    }
+  });
+
+  it("lintContent and lintTopics take the exemption too", () => {
+    const deck = { cover: "The hiring *journey*", slides: [{ title: "Stage one", body: "The journey starts at screening." }], cta: "Book a demo" };
+    expect(lintContent(deck).findings.some((f) => f.rule === "banned-phrase")).toBe(true);
+    expect(lintContent(deck, KONVERZ_ALLOWED).findings.some((f) => f.rule === "banned-phrase")).toBe(false);
+
+    const topics = ["The hire journey, end to end"];
+    expect(lintTopics(topics).findings.some((f) => f.rule === "banned-phrase")).toBe(true);
+    expect(lintTopics(topics, KONVERZ_ALLOWED).findings.some((f) => f.rule === "banned-phrase")).toBe(false);
   });
 });

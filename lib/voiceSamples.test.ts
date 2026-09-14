@@ -9,9 +9,11 @@ import {
   newSample,
   pickSamples,
   samplesFromTemplate,
+  isChannelId,
   type VoiceSample
 } from "./voiceSamples";
 import { CHANNEL_IDS } from "./founderProfiles";
+import { KONVERZ_PLAN_TEMPLATE } from "./konverzTemplate";
 
 const s = (id: string, channel: VoiceSample["channel"], kind: VoiceSample["kind"]): VoiceSample => ({
   id,
@@ -218,5 +220,41 @@ describe("how many samples reach a prompt", () => {
     const picked = pickSamples(posts, { channel: "Lokesh", kind: "slide" });
     expect(picked).toHaveLength(6);
     expect(picked.every((p) => p.channel === "Lokesh")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The corpus gate.
+//
+// This file exists because the app once learned its voice from its own output.
+// The Konverz month plan in lib/konverzTemplate.ts looks exactly like the Kognoz
+// one and is exactly as seedable — except its copy was written by a model. Wiring
+// it in would rebuild the loop with extra steps, so the seeder reads the Kognoz
+// plan and only the Kognoz plan.
+// ---------------------------------------------------------------------------
+describe("only human-written copy seeds the corpus", () => {
+  it("samplesFromTemplate reads the Kognoz plan and never the Konverz one", () => {
+    const seeded = samplesFromTemplate();
+    expect(seeded.length).toBeGreaterThan(0);
+
+    const konverzCopy = new Set(
+      KONVERZ_PLAN_TEMPLATE.map((i) => (i.copy || "").trim()).filter((t) => t.length >= MIN_SAMPLE_CHARS)
+    );
+    expect(konverzCopy.size, "the Konverz plan does carry seedable-looking copy").toBeGreaterThan(0);
+    for (const s of seeded) {
+      expect(konverzCopy.has(s.text), `seeded a Konverz post: ${s.text.slice(0, 60)}`).toBe(false);
+      expect(s.channel, "seeded a non-Kognoz channel").not.toBe("Konverz page");
+    }
+  });
+
+  // Validation spans both brands even though seeding does not: a sample saved
+  // under "Konverz page" has to survive being read while Kognoz is loaded, or a
+  // save after a brand switch silently drops half the corpus.
+  it("a Konverz sample survives coerceSamples", () => {
+    const text = "x".repeat(MIN_SAMPLE_CHARS + 10);
+    const [out] = coerceSamples([{ channel: "Konverz page", kind: "post", text, addedAt: new Date().toISOString() }]);
+    expect(out?.channel).toBe("Konverz page");
+    expect(isChannelId("Konverz page")).toBe(true);
+    expect(isChannelId("Konverze page")).toBe(false);
   });
 });
