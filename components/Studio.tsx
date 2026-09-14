@@ -18,7 +18,7 @@ import { useSearchParams } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
 import { shiftSlideImages, shiftDeckMap, deckIndexOfSlide, currentAfterRemoval, exportFileCount } from "@/lib/slideIndex";
-import { FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, DECK_SLIDE_LIMITS, bodyBudgetFor, budgetFor, type FormatId } from "@/lib/formats";
+import { FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, DECK_SLIDE_LIMITS, budgetFor, type FormatId } from "@/lib/formats";
 import { SURFACE_LABELS, surfaceFor, lookLever, nextCardSet, setSpec, type DesignSetId } from "@/lib/designSets";
 import { brandKey } from "@/lib/brands";
 import { useBrandSwitch } from "./BrandProvider";
