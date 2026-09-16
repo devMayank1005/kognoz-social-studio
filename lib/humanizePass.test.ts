@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { humanizeDeck, humanizeNote, humanizePlanTopics, humanizeText, type DeckContent } from "./humanizePass";
+import { humanizeDeck, humanizeNote, humanizePlanTopics, humanizeText, MAX_ROUNDS, type DeckContent } from "./humanizePass";
 import { KOGNOZ, KONVERZ } from "./brands";
 
 // The governing rule for this module: a failed second pass must never cost the
@@ -321,5 +321,126 @@ describe("brand plumbing", () => {
     const r = await humanizeDeck(draft, { brand: KONVERZ });
     expect(r.applied).toBe(false);
     expect(r.value).toBe(draft);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The re-edit loop.
+//
+// One pass got one attempt and never read its own output — `after` was computed
+// and then only printed. Now a rewrite that still reads machine-made buys one
+// more round. The rules that keep that from costing anything:
+//
+//   the draft is never lost      every exit returns an edit or the original
+//   the best round wins          not the last; round two can come out worse
+//   round one always beats the   the score cannot see a concrete scene replacing
+//   draft                        an abstraction, which is most of the job
+//   two rounds, hard             the third trades accuracy for novelty
+// ---------------------------------------------------------------------------
+describe("the re-edit loop", () => {
+  const dirty = "We unlock seamless hiring. We unlock seamless hiring outcomes for every single team.";
+
+  it("stops after one round when the rewrite comes back clean", async () => {
+    mockFetch([{ text: "The pile was the bottleneck. Screening now takes two minutes." }]);
+    const r = await humanizeText(dirty);
+    expect(r.rounds).toBe(1);
+    expect(bodies).toHaveLength(1);
+    expect(r.applied).toBe(true);
+  });
+
+  it("goes round again when the rewrite is still machine-made, and stops at two", async () => {
+    // Both replies keep a banned phrase, so `stillWrong` holds throughout and the
+    // only thing that ends the loop is MAX_ROUNDS.
+    mockFetch([{ text: "We still unlock seamless outcomes across the whole hiring funnel here." }]);
+    const r = await humanizeText(dirty);
+    expect(r.rounds).toBe(MAX_ROUNDS);
+    expect(bodies).toHaveLength(MAX_ROUNDS);
+  });
+
+  it("feeds each round the faults left by the one before it", async () => {
+    mockFetch([{ text: "We still unlock seamless outcomes across the whole hiring funnel here." }]);
+    await humanizeText(dirty);
+    const second = JSON.stringify(bodies[1]);
+    // Round two is editing round one's OUTPUT, not the original draft.
+    expect(second).toContain("We still unlock seamless outcomes");
+    expect(second).toMatch(/PROBLEMS FOUND IN THE DRAFT/);
+  });
+
+  it("keeps the better of two rounds, not the later one", async () => {
+    // Round 1 comes back clean; round 2 would be worse. The loop should not even
+    // ask for round 2 here — and if it ever did, the better one still wins.
+    mockFetch([
+      { text: "Screening took eleven weeks. It takes two minutes now, and a recruiter still decides." },
+      { text: "We unlock seamless synergy. We unlock seamless synergy. We unlock seamless synergy." }
+    ]);
+    const r = await humanizeText(dirty);
+    expect(r.value).toContain("eleven weeks");
+    expect(r.value).not.toContain("synergy");
+  });
+
+  it("a round that fails mid-loop keeps what the earlier round produced", async () => {
+    mockFetch([
+      { text: "We still unlock seamless outcomes across the whole hiring funnel here." },
+      { status: 500 }
+    ]);
+    const r = await humanizeText(dirty);
+    expect(r.applied).toBe(true);
+    expect(r.rounds).toBe(1);
+    expect(r.value).toContain("hiring funnel");
+    expect(r.value).not.toBe(dirty);
+  });
+
+  // The rule the whole file is built on, under the new control flow.
+  it("a FIRST round that fails still costs the draft nothing", async () => {
+    mockFetch([{ status: 500 }]);
+    const r = await humanizeText(dirty);
+    expect(r.applied).toBe(false);
+    expect(r.value).toBe(dirty);
+    expect(r.rounds).toBe(0);
+  });
+
+  it("an already-clean draft still gets its edit kept, even though the score cannot rise", async () => {
+    // The regression this caught: comparing scores from round one discarded every
+    // edit to copy that was already lint-clean, which is most good drafts.
+    const clean = "Screening took eleven weeks. Two minutes now. A recruiter still makes the call on every one.";
+    const edited = "Eleven weeks of screening. Two minutes now. The recruiter still decides, on every single one.";
+    mockFetch([{ text: edited }]);
+    const r = await humanizeText(clean);
+    expect(r.before.score).toBe(100);
+    expect(r.value).toBe(edited);
+    expect(r.applied).toBe(true);
+  });
+
+  it("the deck path loops on the same terms and never changes the slide count", async () => {
+    const draft: DeckContent = {
+      cover: "We *unlock* seamless hiring",
+      slides: [
+        { title: "One", body: "We unlock seamless hiring across the funnel." },
+        { title: "Two", body: "We unlock seamless hiring across the funnel." }
+      ],
+      cta: "Book a demo"
+    };
+    mockFetch([
+      {
+        text: JSON.stringify({
+          cover: "We *unlock* seamless hiring",
+          slides: [
+            { title: "One", body: "We unlock seamless outcomes still." },
+            { title: "Two", body: "We unlock seamless outcomes still." }
+          ],
+          cta: "Book a demo"
+        })
+      }
+    ]);
+    const r = await humanizeDeck(draft);
+    expect(r.rounds).toBe(MAX_ROUNDS);
+    expect(r.value.slides).toHaveLength(2);
+    expect(r.value.eyebrow).toBe(draft.eyebrow);
+  });
+
+  it("names the round count in the note, so a thin corpus is visible", async () => {
+    mockFetch([{ text: "We still unlock seamless outcomes across the whole hiring funnel here." }]);
+    const r = await humanizeText(dirty);
+    expect(humanizeNote(r)).toContain("over 2 passes");
   });
 });

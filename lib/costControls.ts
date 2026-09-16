@@ -119,7 +119,16 @@ export const THINKING_FOR_TASK: Record<Task, ThinkingConfig> = {
  * again or rewriting the prompt.
  */
 export const EFFORT_FOR_TASK: Partial<Record<Task, "low" | "medium" | "high">> = {
-  humanize: "low"
+  // Was "low". Raised after the copy still read flat with everything else in
+  // place — this file named it as the first dial to turn, and it was the only one
+  // still at its minimum. The pass holds a draft, a corpus of human writing and a
+  // list of faults at once and has to decide which sentences to break; that is
+  // the work, and "low" was not paying for enough of it.
+  //
+  // Billed on actual output tokens, so the cost is real but bounded by TOKENS
+  // below rather than by the effort setting. If decks start arriving slowly
+  // enough to annoy people, "medium" is the step back.
+  humanize: "high"
 };
 
 export function thinkingFor(task: Task): ThinkingConfig {

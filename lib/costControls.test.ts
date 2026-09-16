@@ -277,7 +277,12 @@ describe("the humanize pass", () => {
     for (const t of TASKS) {
       if (thinkingFor(t).type === "disabled") expect(EFFORT_FOR_TASK[t]).toBeUndefined();
     }
-    expect(EFFORT_FOR_TASK.humanize).toBe("low");
+    // The pass that decides whether the copy reads as human is the one task where
+    // effort buys anything, so it gets the top setting. Pinned rather than left
+    // loose because it is a cost lever as much as a quality one: if this ever
+    // needs winding back, that should be a deliberate edit with a reason, not a
+    // drift nobody noticed.
+    expect(EFFORT_FOR_TASK.humanize).toBe("high");
   });
 
   it("leaves room for the roomier retry rather than clamping it away", () => {

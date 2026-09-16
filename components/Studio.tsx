@@ -44,6 +44,7 @@ import {
   coerceSamples,
   mergeSamples,
   newSample,
+  splitPastedSamples,
   pickSamples,
   samplesFromTemplate,
   SAMPLE_KINDS,
@@ -452,19 +453,53 @@ export default function Studio() {
     storeSet(k("voice-samples"), next);
   };
 
+  /**
+   * Take one post, or several at once.
+   *
+   * Posts separated by a blank line are filed separately. That is how they arrive
+   * when somebody copies a few out of LinkedIn in one go, and asking people to
+   * paste-and-save six times is most of why a corpus stays empty. One box and one
+   * button rather than a second "bulk" control: the shape of the paste already
+   * says which it is.
+   *
+   * Nothing is lost silently. Too-short pieces and duplicates are counted and
+   * reported, because "added 4, skipped 2" is the difference between trusting
+   * this box and re-checking it every time.
+   */
   const addSample = () => {
-    const text = sampleDraft.trim();
-    if (!text) return;
-    if (text.length < 140) {
-      setError("That is too short to teach a voice. Paste the whole post, not a line from it.");
+    const raw = sampleDraft.trim();
+    if (!raw) return;
+
+    const { samples: parsed, skipped } = splitPastedSamples(raw, {
+      channel: sampleChannel,
+      kind: sampleKind,
+      addedBy: session?.user?.email || undefined
+    });
+
+    if (!parsed.length) {
+      setError(
+        skipped > 1
+          ? "None of those are long enough to teach a voice. Paste whole posts, separated by a blank line."
+          : "That is too short to teach a voice. Paste the whole post, not a line from it."
+      );
       return;
     }
-    if (voiceSamples.some((v) => v.text.trim() === text)) {
-      setError("That sample is already saved.");
+
+    const merged = mergeSamples(voiceSamples, parsed);
+    const added = merged.length - voiceSamples.length;
+    const duplicates = parsed.length - added;
+
+    if (!added) {
+      setError(parsed.length === 1 ? "That sample is already saved." : "All of those are already saved.");
       return;
     }
-    setError("");
-    persistSamples([...voiceSamples, newSample({ channel: sampleChannel, kind: sampleKind, text })]);
+
+    const notes = [
+      skipped ? `${skipped} too short` : "",
+      duplicates ? `${duplicates} already saved` : ""
+    ].filter(Boolean);
+    setError(notes.length ? `Added ${added}. Skipped ${notes.join(" and ")}.` : "");
+    persistSamples(merged);
     setSampleDraft("");
   };
 
@@ -776,6 +811,9 @@ export default function Studio() {
       // The same corpus and voice the draft was written from. Without these,
       // Revise was the one button that rewrote humanised copy back into the
       // default machine voice.
+      // Chosen once and shared by the revision and the edit pass that follows it,
+      // so both are measured against the same writing.
+      const samples = pickSamples(voiceSamples, { channel, kind: "slide", seed });
       const prompt = buildModifyPrompt({
         brand,
         eyebrow,
@@ -784,15 +822,31 @@ export default function Studio() {
         cta,
         instruction: modTxt,
         housePrefs,
-        voiceSamples: pickSamples(voiceSamples, { channel, kind: "slide", seed }),
+        voiceSamples: samples,
         channel
       });
-      const parsed = coerceContent(await callClaudeJSON("revise", prompt, { model: FAST_MODEL }), undefined, budgetFor(format));
+      const budget = budgetFor(format);
+      const hygiene = { format, ideaStyle, readCloser: brand.readCloser };
+      const parsed = applyFormatHygiene(
+        coerceContent(await callClaudeJSON("revise", prompt, { model: FAST_MODEL }), undefined, budget),
+        hygiene
+      );
+
+      // Revise runs the edit pass too. Without it this was the one button that
+      // could undo the humanising: a deck drafted and line-edited against real
+      // writing came back through a cheap model in the default machine voice, and
+      // everything the second pass had done was quietly spent. It is the same
+      // call generate makes, with the same contract — a failure returns the
+      // revision untouched rather than costing it.
+      const edited = await humanizeDeck(parsed, { brand, voiceSamples: samples, housePrefs, channel });
+      setPassNote(voiceSamples.length ? humanizeNote(edited) : noSamplesNote(brand.name));
+      const final = applyFormatHygiene(coerceContent(edited.value, parsed.slides.length, budget), hygiene);
+
       snapshotDeck("revision");
-      setEyebrow(parsed.eyebrow || eyebrow);
-      setCover(parsed.cover || cover);
-      setSlides(parsed.slides);
-      setCta(parsed.cta || cta);
+      setEyebrow(final.eyebrow || eyebrow);
+      setCover(final.cover || cover);
+      setSlides(final.slides);
+      setCta(final.cta || cta);
       setModTxt("");
       bumpReplay();
       markVerifyStale();
@@ -1957,10 +2011,16 @@ export default function Studio() {
                   ))}
                 </select>
               </div>
-              <textarea value={sampleDraft} onChange={(e) => setSampleDraft(e.target.value)} rows={4} placeholder={`Paste one real published ${brand.name} post, whole. Not a summary of it, and not something the tool wrote.`} style={{ ...inputStyle, background: C.white, fontSize: 12.5, marginBottom: 6 }} />
+              <textarea
+                value={sampleDraft}
+                onChange={(e) => setSampleDraft(e.target.value)}
+                rows={5}
+                placeholder={`Paste real published ${brand.name} posts, whole. Several at once is fine — leave a blank line between them. Not summaries, and not anything this tool wrote.`}
+                style={{ ...inputStyle, background: C.white, fontSize: 12.5, marginBottom: 6 }}
+              />
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <button type="button" onClick={addSample} disabled={!sampleDraft.trim()} style={{ fontFamily: font, fontSize: 11.5, fontWeight: 700, padding: "7px 12px", borderRadius: 7, border: `1px solid ${C.line}`, background: sampleDraft.trim() ? C.white : C.mist, color: C.ink, cursor: sampleDraft.trim() ? "pointer" : "default" }}>
-                  Add sample
+                  {/^[\s\S]*\n\s*\n[\s\S]*$/.test(sampleDraft.trim()) ? "Add these posts" : "Add sample"}
                 </button>
                 {/* Kognoz only. The Konverz plan's copy was written by a model,
                     and importing machine text into the corpus the edit pass

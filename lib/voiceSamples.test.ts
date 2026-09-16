@@ -9,6 +9,7 @@ import {
   newSample,
   pickSamples,
   samplesFromTemplate,
+  splitPastedSamples,
   isChannelId,
   type VoiceSample
 } from "./voiceSamples";
@@ -199,16 +200,20 @@ describe("stableSeed", () => {
 });
 
 describe("how many samples reach a prompt", () => {
-  it("defaults to six now there is a real corpus to draw from", () => {
-    expect(DEFAULT_SAMPLE_COUNT).toBe(6);
+  // Pinned rather than read from the constant: this is a dial with a real failure
+  // mode on either side. Too few and the model has no sense of the writer's
+  // range; too many and it starts collaging their actual phrases instead of
+  // learning their rhythm. Changing it should be a deliberate edit with a reason.
+  it("hands over eight, the current setting of the corpus-width dial", () => {
+    expect(DEFAULT_SAMPLE_COUNT).toBe(8);
   });
 
-  it("hands over six when six are available", () => {
+  it("hands over the full count when that many are available", () => {
     const many = Array.from({ length: 22 }, (_, i) => s(`id${i}`, "Lokesh", "post"));
-    expect(pickSamples(many, { channel: "Lokesh", kind: "post" })).toHaveLength(6);
+    expect(pickSamples(many, { channel: "Lokesh", kind: "post" })).toHaveLength(DEFAULT_SAMPLE_COUNT);
   });
 
-  it("hands over what exists when the corpus is smaller than six", () => {
+  it("hands over what exists when the corpus is smaller than the count", () => {
     const few = [s("a", "Lokesh", "post"), s("b", "Lokesh", "post")];
     expect(pickSamples(few, { channel: "Lokesh", kind: "post" })).toHaveLength(2);
   });
@@ -218,7 +223,7 @@ describe("how many samples reach a prompt", () => {
     // has to fall through to that person's posts rather than returning nothing.
     const posts = Array.from({ length: 22 }, (_, i) => s(`id${i}`, "Lokesh", "post"));
     const picked = pickSamples(posts, { channel: "Lokesh", kind: "slide" });
-    expect(picked).toHaveLength(6);
+    expect(picked).toHaveLength(DEFAULT_SAMPLE_COUNT);
     expect(picked.every((p) => p.channel === "Lokesh")).toBe(true);
   });
 });
@@ -256,5 +261,69 @@ describe("only human-written copy seeds the corpus", () => {
     expect(out?.channel).toBe("Konverz page");
     expect(isChannelId("Konverz page")).toBe(true);
     expect(isChannelId("Konverze page")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pasting several posts at once.
+//
+// The corpus is the strongest lever on whether copy reads as human, and the
+// thing most likely to keep it empty is friction: paste, pick a channel, save,
+// repeat six times. One box that takes six posts separated by blank lines is the
+// whole feature.
+// ---------------------------------------------------------------------------
+describe("splitPastedSamples", () => {
+  const long = (n: number) => `Post ${n}. ` + "Real sentences carrying a real thought about hiring. ".repeat(4);
+  const fields = { channel: "Kognoz page" as const, kind: "post" as const };
+
+  it("files one sample per blank-line-separated post", () => {
+    const { samples, skipped } = splitPastedSamples([long(1), long(2), long(3)].join("\n\n"), fields);
+    expect(samples).toHaveLength(3);
+    expect(skipped).toBe(0);
+    expect(samples[1].text).toContain("Post 2");
+  });
+
+  it("handles a single post with no blank lines at all", () => {
+    const { samples } = splitPastedSamples(long(1), fields);
+    expect(samples).toHaveLength(1);
+  });
+
+  it("keeps line breaks WITHIN a post — paragraphing is part of the voice", () => {
+    const withBreaks = `${long(1)}\nA second line of the same post.`;
+    const { samples } = splitPastedSamples(withBreaks, fields);
+    expect(samples).toHaveLength(1);
+    expect(samples[0].text).toContain("\nA second line");
+  });
+
+  it("drops pieces too short to teach anything, and counts them", () => {
+    const { samples, skipped } = splitPastedSamples([long(1), "see more", long(2)].join("\n\n"), fields);
+    expect(samples).toHaveLength(2);
+    expect(skipped).toBe(1);
+  });
+
+  it("tolerates ragged spacing between posts", () => {
+    const { samples } = splitPastedSamples(`${long(1)}\n   \n\n${long(2)}`, fields);
+    expect(samples).toHaveLength(2);
+  });
+
+  it("returns nothing rather than throwing on empty input", () => {
+    expect(splitPastedSamples("", fields)).toEqual({ samples: [], skipped: 0 });
+    expect(splitPastedSamples("   \n\n  ", fields)).toEqual({ samples: [], skipped: 0 });
+  });
+
+  it("carries the chosen channel and kind onto every sample", () => {
+    const { samples } = splitPastedSamples([long(1), long(2)].join("\n\n"), {
+      channel: "Konverz page",
+      kind: "slide",
+      addedBy: "someone@example.com"
+    });
+    expect(samples.every((s) => s.channel === "Konverz page" && s.kind === "slide")).toBe(true);
+    expect(samples[0].addedBy).toBe("someone@example.com");
+  });
+
+  it("mergeSamples then drops any that are already saved", () => {
+    const { samples } = splitPastedSamples([long(1), long(2)].join("\n\n"), fields);
+    const merged = mergeSamples([samples[0]], samples);
+    expect(merged).toHaveLength(2);
   });
 });

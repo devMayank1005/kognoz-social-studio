@@ -367,9 +367,42 @@ describe("buildHumanizePrompt", () => {
     expect(p.user).toMatch(/Keep every fact, every number/);
   });
 
-  it("names sentence-length uniformity as the first thing to fix", () => {
+  // Sentence-length uniformity is still item 1, but the prompt now asks for an
+  // OPERATION rather than naming a symptom: "find the longest sentence and break
+  // it" is something a model can carry out and be checked against, where "every
+  // sentence is about the same length" is a description it can agree with and
+  // then do nothing about.
+  it("opens with breaking up the longest sentence", () => {
     const { system } = buildHumanizePrompt({ shape: "text", draft: "d" });
-    expect(system).toMatch(/1\. Every sentence is about the same length/);
+    expect(system).toMatch(/1\. FIND THE LONGEST SENTENCE AND BREAK IT/);
+  });
+
+  it("gives the editor operations to perform, not principles to agree with", () => {
+    const { system } = buildHumanizePrompt({ shape: "text", draft: "d" });
+    for (const op of [
+      /DELETE THE CONNECTIVE/,
+      /CUT THE SENTENCE THAT RESTATES/,
+      /TURN ONE ABSTRACTION INTO SOMETHING THAT HAPPENED/,
+      /LET ONE PART END EARLY/,
+      /BREAK A PARALLEL ON PURPOSE/
+    ]) {
+      expect(system, String(op)).toMatch(op);
+    }
+  });
+
+  // A sentence can be made livelier and wrong at the same time. Without the
+  // brand's brief the editor has the faults and the samples but no idea whose
+  // argument it is protecting.
+  it("carries the brand's writing brief so the edit cannot drift off-voice", () => {
+    expect(buildHumanizePrompt({ shape: "text", draft: "d" }).system).toContain(KOGNOZ.writingBrief);
+    expect(buildHumanizePrompt({ shape: "text", draft: "d", brand: KONVERZ }).system).toContain(KONVERZ.writingBrief);
+  });
+
+  it("forbids the pass from padding, prettifying or touching a fact", () => {
+    const { system } = buildHumanizePrompt({ shape: "text", draft: "d" });
+    expect(system).toMatch(/Do not make it longer/);
+    expect(system).toMatch(/Do not add warmth, enthusiasm, or personality/);
+    expect(system).toMatch(/Do not touch a number, a name, a source line, or a claim/);
   });
 
   it("carries the linter findings through when there are any", () => {

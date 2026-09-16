@@ -50,16 +50,18 @@ export const MIN_SAMPLE_CHARS = 140;
 /**
  * How many samples go into a prompt.
  *
- * Was 4, chosen when the corpus was empty and four was all there would ever be.
- * With a real corpus, six gives the model a wider sense of the writer's range,
- * and it matches what the month planner already asks for. The samples sit in the
- * cached system half, so the extra two cost cache-read rates after the first call.
+ * Was 4, then 6, now 8. Each step was taken because the copy still read flat and
+ * the corpus is the strongest lever there is. The samples sit in the cached
+ * system half, so the extra two cost cache-read rates after the first call.
  *
- * This is a dial, not a truth. Past roughly six the model starts collaging
- * phrases out of the samples instead of learning their rhythm, so if generated
- * copy begins echoing a sample's actual wording, come back down.
+ * THIS IS A DIAL AND IT CAN BE TURNED TOO FAR. Past roughly six the model starts
+ * collaging phrases out of the samples instead of learning their rhythm; eight
+ * buys a wider sense of the writer's range at a real risk of that. The symptom is
+ * specific and easy to spot: generated copy echoing a sample's ACTUAL WORDING
+ * rather than its shape. If that starts happening, come straight back to 6 — a
+ * narrower voice learned properly beats a wider one plagiarised.
  */
-export const DEFAULT_SAMPLE_COUNT = 6;
+export const DEFAULT_SAMPLE_COUNT = 8;
 
 /**
  * Validation across BOTH brands, on purpose.
@@ -264,6 +266,38 @@ export function samplesFromTemplate(addedBy?: string): VoiceSample[] {
     });
   }
   return out;
+}
+
+/**
+ * Split a pasted block into one sample per post.
+ *
+ * Posts are separated by a blank line, which is how they arrive when somebody
+ * copies several out of LinkedIn in one go. Anything under MIN_SAMPLE_CHARS is
+ * dropped rather than kept: a stray line of whitespace or a "see more" fragment
+ * teaches nothing and dilutes the corpus it sits in.
+ *
+ * Returns the parsed samples and the number of pieces thrown away, so the UI can
+ * say "added 4, skipped 2 as too short" instead of silently losing half a paste.
+ */
+export function splitPastedSamples(
+  raw: string,
+  fields: { channel: ChannelId; kind: SampleKind; addedBy?: string }
+): { samples: VoiceSample[]; skipped: number } {
+  const pieces = String(raw || "")
+    .split(/\n\s*\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const samples: VoiceSample[] = [];
+  let skipped = 0;
+  for (const text of pieces) {
+    if (text.length < MIN_SAMPLE_CHARS) {
+      skipped += 1;
+      continue;
+    }
+    samples.push(newSample({ ...fields, text }));
+  }
+  return { samples, skipped };
 }
 
 /** Merge imported samples into an existing list without creating duplicates. */
