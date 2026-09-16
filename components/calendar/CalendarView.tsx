@@ -4,9 +4,17 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { storeGet, storeSet } from "@/lib/storeClient";
 import { callClaudeJSON } from "@/lib/claudeClient";
-import { buildCalendarPlanPrompt } from "@/lib/promptBuilders";
+import { buildCalendarPlanPrompt, buildMarketScanPrompt } from "@/lib/promptBuilders";
 import { coercePlan, toContentItems, occupiedDates, daysInMonth } from "@/lib/calendarPlan";
 import { brandKey } from "@/lib/brands";
+import {
+  coerceProblems,
+  coerceScan,
+  formatProblemsBlock,
+  isScanStale,
+  type MarketScan
+} from "@/lib/marketScan";
+import { MarketScanPanel } from "./MarketScanPanel";
 import { C } from "@/lib/tokens";
 import { useBrandSwitch } from "@/components/BrandProvider";
 import { coerceSamples, pickSamples } from "@/lib/voiceSamples";
@@ -69,6 +77,14 @@ export function CalendarView() {
   const { data: session } = useSession();
   const [planning, setPlanning] = useState(false);
   const [planNote, setPlanNote] = useState("");
+
+  // The market scan: real, sourced problems this brand's buyers have, which the
+  // month is planned against instead of the model's own recollection.
+  const [scan, setScan] = useState<MarketScan | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanNote, setScanNote] = useState("");
+  /** Armed by a first press of "Generate this month" when no scan exists. */
+  const [confirmUngrounded, setConfirmUngrounded] = useState(false);
 
   // Mutations read the current items from here rather than from a setState updater.
   // Updaters must be pure: React StrictMode double-invokes them, so a network write
@@ -323,6 +339,105 @@ export function CalendarView() {
    * one anyway — belt and braces, because the calendar has no undo and a button that can
    * overwrite scheduled work is worse than no button.
    */
+  const scanKey = brandKey(brand, "market-scan");
+
+  // Load this brand's scan, and drop the previous brand's the moment the brand
+  // changes — a Kognoz problem list under a Konverz month would plan 36 posts
+  // about the wrong market, silently and plausibly.
+  useEffect(() => {
+    let live = true;
+    setScan(null);
+    setScanNote("");
+    setConfirmUngrounded(false);
+    storeGet<unknown>(scanKey)
+      .then((r) => {
+        if (!live || r.stale) return;
+        setScan(coerceScan(r.value, brand.id, Object.keys(brand.lanes)));
+      })
+      .catch(() => {
+        /* the scan is an enhancement; the calendar still works without it */
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brand.id, scanKey]);
+
+  const persistScan = useCallback(
+    async (next: MarketScan | null) => {
+      setScan(next);
+      const saved = await storeSet(scanKey, next);
+      if (!saved.ok) {
+        setScanNote(
+          saved.reason === "conflict"
+            ? "Someone else changed the scan while you were editing. Reload before planning a month from it."
+            : "That change is in this browser only — the server could not be reached."
+        );
+      }
+    },
+    [scanKey]
+  );
+
+  async function runMarketScan() {
+    if (scanning) return;
+    setScanning(true);
+    setScanNote("");
+    setError("");
+    try {
+      // Existing problems are sent so a refresh WIDENS the list rather than
+      // rewriting it. A scan that returns the same eight findings every time
+      // teaches the team to stop reading it.
+      const prompt = buildMarketScanPrompt(brand, { existing: (scan?.problems ?? []).map((p) => p.problem) });
+      const reply = await callClaudeJSON("marketScan", prompt, { useSearch: true });
+      const found = coerceProblems((reply as { problems?: unknown })?.problems, Object.keys(brand.lanes)).map((p) => ({
+        ...p,
+        addedBy: p.addedBy || "scan"
+      }));
+
+      if (!found.length) {
+        setScanNote("The scan came back with nothing usable. Nothing was changed — try again, or add problems by hand.");
+        return;
+      }
+
+      // Kept problems come first: anything a person wrote or edited outranks a
+      // fresh finding, and a refresh must not quietly delete their work.
+      const fingerprint = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const kept = scan?.problems ?? [];
+      const seen = new Set(kept.map((p) => fingerprint(p.problem)));
+      const added = found.filter((p) => !seen.has(fingerprint(p.problem)));
+
+      await persistScan({ brandId: brand.id, scannedAt: new Date().toISOString(), problems: [...kept, ...added] });
+      setScanNote(
+        `Found ${added.length} new problem${added.length === 1 ? "" : "s"}${
+          kept.length ? `, alongside the ${kept.length} already here` : ""
+        }. Read them before planning a month — delete anything wrong.`
+      );
+      logActivity("market_scanned", {
+        entity: "calendar",
+        entityLabel: brand.name,
+        screen: "calendar",
+        meta: { found: added.length, total: kept.length + added.length }
+      });
+    } catch (e) {
+      setScanNote(`The scan failed (${e instanceof Error ? e.message : e}). Nothing was changed.`);
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  const removeProblem = (id: string) => {
+    if (!scan) return;
+    void persistScan({ ...scan, problems: scan.problems.filter((p) => p.id !== id) });
+  };
+
+  const editProblem = (id: string, problem: string) => {
+    if (!scan) return;
+    void persistScan({
+      ...scan,
+      problems: scan.problems.map((p) => (p.id === id ? { ...p, problem, addedBy: session?.user?.email || p.addedBy } : p))
+    });
+  };
+
   async function handlePlanMonth() {
     if (planning) return;
     const year = currentDate.getFullYear();
@@ -345,6 +460,18 @@ export function CalendarView() {
       return;
     }
 
+    // Planning without a scan is allowed, and says what it costs. Blocking it
+    // would be worse: somebody with a month to fill and no appetite for a search
+    // should still get a month. So the first press asks, and a second press goes
+    // ahead — the same two-step the editor uses for delete and discard, rather
+    // than a window.confirm this codebase uses nowhere else.
+    const problems = scan?.problems ?? [];
+    if (!problems.length && !confirmUngrounded) {
+      setConfirmUngrounded(true);
+      return;
+    }
+    setConfirmUngrounded(false);
+
     setPlanning(true);
     setPlanNote("");
     setError("");
@@ -366,10 +493,20 @@ export function CalendarView() {
         // Never ask for more than there are days to put them on.
         targetCount: Math.min(brand.cadence.postsPerMonth, availableDays.length * 2),
         voiceSamples: planSamples,
-        brand
+        brand,
+        // The problems the month is planned against. Empty when no scan exists,
+        // in which case the planner falls back to its own judgment exactly as it
+        // did before — worse, but never blocked.
+        marketProblems: formatProblemsBlock(problems)
       });
       const reply = await callClaudeJSON("calendarPlan", prompt);
-      const plan = coercePlan(reply, { year, month, occupied, brand });
+      const plan = coercePlan(reply, {
+        year,
+        month,
+        occupied,
+        brand,
+        problems: problems.map((pr) => pr.problem)
+      });
 
       // Second pass, over the topic lines only. Thirty-six topics written in one
       // call converge on a single sentence shape, and every post generated from
@@ -393,10 +530,20 @@ export function CalendarView() {
           meta: { count: fresh.length, month: `${year}-${String(month + 1).padStart(2, "0")}` }
         });
         const skipped = plan.skippedOccupied + plan.skippedInvalid;
+        // Say which of the two months this was. A month planned off real problems
+        // and one planned off the model's memory look identical on the calendar,
+        // and only one of them is worth the reader's time.
+        const grounding = problems.length
+          ? ` Planned against ${problems.length} real market problem${problems.length === 1 ? "" : "s"}${
+              isScanStale(scan) ? ", though that scan is getting old" : ""
+            }.`
+          : " Planned without a market scan, so the topics are the model's own read of this market.";
         setPlanNote(
           `Added ${fresh.length} posts to ${monthName}.` +
             (skipped ? ` ${skipped} were dropped — they landed on days already taken or could not be read.` : "") +
-            " Nothing already in the calendar was changed. " +
+            " Nothing already in the calendar was changed." +
+            grounding +
+            " " +
             plannedNote
         );
       }
@@ -513,6 +660,18 @@ export function CalendarView() {
 
       {/* Plan the whole month in one call. Sits above Quick Add because it is the
           coarse tool: fill the month, then hand-add the exceptions. */}
+      {/* The research sits ABOVE the button that spends it. A scan you can only
+          find after the month is written is a scan nobody reads. */}
+      <MarketScanPanel
+        scan={scan}
+        busy={scanning}
+        note={scanNote}
+        brandName={brand.name}
+        onScan={() => void runMarketScan()}
+        onRemove={removeProblem}
+        onEdit={editProblem}
+      />
+
       <div
         style={{
           display: "flex",
@@ -532,7 +691,7 @@ export function CalendarView() {
           title="Plans topics, authors and formats into this month's empty weekdays. Existing posts are never changed."
           style={{
             padding: "8px 16px",
-            background: planning ? C.line : C.ink,
+            background: planning ? C.line : confirmUngrounded ? "#9A5B13" : C.ink,
             color: planning ? C.inkMute : "#FFF",
             border: "none",
             borderRadius: 8,
@@ -542,12 +701,37 @@ export function CalendarView() {
             cursor: planning || isSaving ? "default" : "pointer"
           }}
         >
-          {planning ? "Planning the month…" : "✦ Generate this month"}
+          {planning ? "Planning the month…" : confirmUngrounded ? "Plan it without a scan" : "✦ Generate this month"}
         </button>
-        <span style={{ fontSize: 12, color: C.inkMute, lineHeight: 1.45 }}>
+
+        {confirmUngrounded && !planning && (
+          <button
+            type="button"
+            onClick={() => setConfirmUngrounded(false)}
+            style={{
+              padding: "8px 14px",
+              background: "transparent",
+              color: C.inkSoft,
+              border: `1px solid ${C.line}`,
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              fontFamily: FONT,
+              cursor: "pointer"
+            }}
+          >
+            Cancel
+          </button>
+        )}
+
+        <span style={{ fontSize: 12, color: confirmUngrounded ? "#9A5B13" : C.inkMute, lineHeight: 1.45, maxWidth: 520 }}>
           {planning
             ? `Writing topics for ${brand.channelIds.join(", ")} — about 30 seconds.`
-            : "Fills empty weekdays only. Nothing already scheduled is touched."}
+            : confirmUngrounded
+            ? `No market scan for ${brand.name}. The month would be planned from what the model already believes about this market, which reads plausible and cannot be checked. Running the scan above takes about a minute.`
+            : scan?.problems.length
+            ? `Fills empty weekdays only, from the ${scan.problems.length} problems above. Nothing already scheduled is touched.`
+            : "Fills empty weekdays only. Nothing already scheduled is touched. Run the market scan first for topics grounded in real problems."}
         </span>
       </div>
 

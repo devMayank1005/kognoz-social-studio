@@ -22,6 +22,15 @@ export interface PlannedEntry {
   format: string;
   pillar: string;
   topic: string;
+  /**
+   * The market problem this topic was written from, as the planner reported it.
+   *
+   * Carried through so the person who eventually writes the post can see what it
+   * came from, and so an invented topic is visible rather than merely plausible:
+   * an entry with no problem behind it, when a scan was supplied, is one the model
+   * made up. Absent when there was no scan to plan against.
+   */
+  fromProblem?: string;
 }
 
 export interface PlanCoerceOptions {
@@ -41,6 +50,11 @@ export interface PlanCoerceOptions {
    * Konverz prompt never offered and whose posts nothing downstream can write.
    */
   brand?: { channelIds: readonly string[]; pillars: Record<string, string>; defaultChannel: string };
+  /**
+   * The market problems the planner was shown, in the order they were numbered.
+   * Used to turn the reported `fromProblem` number back into readable text.
+   */
+  problems?: string[];
 }
 
 const MAX_TOPIC = 110;
@@ -100,6 +114,18 @@ export function coercePlan(parsed: unknown, opts: PlanCoerceOptions): CoercedPla
   const defaultChannel = opts.brand?.defaultChannel ?? "Kognoz page";
   const pillarList = (opts.brand ? Object.keys(opts.brand.pillars) : PILLARS_LIST) as readonly string[];
 
+  // The planner answers with the NUMBER of the problem it used, because a number
+  // is a cheap handle for a model to carry accurately. Resolve it back to the
+  // problem's own text here, so nothing downstream has to hold the list to know
+  // what an entry came from. An out-of-range or missing number resolves to
+  // undefined rather than to the wrong problem.
+  const problems = opts.problems ?? [];
+  const problemFor = (raw: unknown): string | undefined => {
+    const n = typeof raw === "number" ? raw : Number(str(raw));
+    if (!Number.isInteger(n) || n < 1 || n > problems.length) return undefined;
+    return problems[n - 1];
+  };
+
   const entries: Array<PlannedEntry & { date: string }> = [];
   const takenThisRun = new Set<string>();
   let skippedOccupied = 0;
@@ -134,7 +160,8 @@ export function coercePlan(parsed: unknown, opts: PlanCoerceOptions): CoercedPla
       topic,
       channel: snapTo(o.channel ?? o.platform, channelIds, defaultChannel) as ChannelId,
       format: snapTo(o.format ?? o.contentType, ALL_CONTENT_TYPES, "Text post"),
-      pillar: snapTo(o.pillar, pillarList, pillarList[0])
+      pillar: snapTo(o.pillar, pillarList, pillarList[0]),
+      fromProblem: problemFor(o.fromProblem)
     });
     takenThisRun.add(date);
     if (entries.length >= max) break;
@@ -176,6 +203,10 @@ export function toContentItems(
     time: i % 2 === 0 ? "10:30" : "14:00",
     status: "Planned" as const,
     pillar: e.pillar,
+    // The market problem behind this post, carried onto the card so whoever
+    // writes it can see what it was for. Undefined when the month was planned
+    // without a scan.
+    fromProblem: e.fromProblem,
     createdAt: now,
     updatedAt: now
   }));

@@ -38,6 +38,7 @@ export type ClaudeTask =
   | "verify"
   | "designNote"
   | "calendarPlan"
+  | "marketScan"
   | "humanize";
 
 export const FAST_MODEL = "claude-haiku-4-5";

@@ -577,6 +577,75 @@ Return ONLY a JSON object containing just the keys the instruction actually addr
   return { system: "", user };
 }
 
+// ---------------------------------------------------------------------------
+// marketScan() — find the problems, before anything is written about them.
+// ---------------------------------------------------------------------------
+
+/**
+ * Research the brand's market for problems its buyers actually have.
+ *
+ * This is the only prompt in the app whose job is to find out rather than to say.
+ * Two rules shape it, and both are there because the failure mode is not a blank
+ * answer, it is a confident and useless one:
+ *
+ *   A PROBLEM IS SOMETHING SOMEBODY DOES OR CANNOT DO. Not a theme, not a trend,
+ *   not "the evolving talent landscape". A model asked for market problems will
+ *   happily return twelve category names, each true of everyone and therefore
+ *   about no one — which is exactly the output an ungrounded planner already
+ *   produces, so a scan that returns it has bought nothing.
+ *
+ *   IT MUST NOT DESCRIBE THE PRODUCT. Asked to research the market for a talent
+ *   platform, a model drifts into listing what such a platform would fix. That
+ *   turns the list into a brochure, and every topic planned off it into a feature
+ *   post. The job is the problem; what this brand has to say about it comes later.
+ */
+export function buildMarketScanPrompt(brand: Brand, opts: { existing?: string[] } = {}): BuiltPrompt & { useSearch: true } {
+  const { existing = [] } = opts;
+
+  const avoid = existing.length
+    ? `\nALREADY ON THE LIST. Do not return these again; find problems the list does not yet cover:\n${existing
+        .slice(0, 40)
+        .map((p) => `- ${p}`)
+        .join("\n")}\n`
+    : "";
+
+  const lanes = Object.keys(brand.lanes);
+
+  const system = `You are a researcher. You are finding out what is actually going wrong in a market right now, for a team that will write about it. You are not writing marketing and you are not recommending anything.
+
+WHO THE AUDIENCE IS:
+${brand.voiceHeader}
+
+WHAT COUNTS AS A PROBLEM:
+- Something a named kind of person DOES, or cannot do, or keeps having to redo. "Panels re-interview the same candidate because nobody trusts the first scorecard" is a problem. "Talent acquisition is being transformed by AI" is not.
+- It has to be happening NOW, in the last year or so, and you have to have found evidence of it rather than assumed it.
+- It has to be specific enough that two different writers reading it would recognise the same situation.
+
+WHAT DOES NOT COUNT, AND WILL BE THROWN AWAY:
+- Themes, trends, categories and shifts. Anything that could be a conference track title.
+- Anything true of every company in every market. If it does not narrow, it does not help.
+- Anything you could have written without searching. That is the whole test.
+- ANY DESCRIPTION OF A PRODUCT OR A SOLUTION, including this brand's. You are finding the problem. What anyone does about it is not your job and will make the finding unusable.
+
+SOURCING, NON-NEGOTIABLE:
+- Every problem carries the publication and year you actually found it in. Not "industry reports", not "recent studies" — the real name.
+- If you cannot source it, LEAVE IT OUT. A shorter honest list is worth more than a long one carrying things you assumed. Returning eight well-sourced problems is a better answer than eighteen half-sourced ones.
+- Never invent a figure, a percentage or a report title. This list is read by people who will check.`;
+
+  const user = `Research the market this brand sells into and return the real problems in it.
+
+WHERE TO LOOK: ${brand.marketScope}
+
+Spend your searches on what changes — hiring volumes and cycle times, attrition and succession, assessment and interviewing practice, learning spend and completion, regulatory and workforce shifts in these geographies. Do not spend one confirming something you already know.
+
+Return 8 to 18 problems as ONLY valid JSON, no commentary before or after:
+{"problems": [{"problem": "one sentence, what someone does or cannot do, max ~180 chars", "who": "the specific role and sector who feels it, max ~80 chars", "evidence": "the figure or finding that shows it is real, in the source's own terms, max ~140 chars", "source": "publication and year, as you found it", "lane": "one of: ${lanes.join(", ")}"}]}
+
+Spread them across the lanes rather than clustering in one. If a lane genuinely has nothing current, leave it out rather than inventing something to fill it.${avoid}`;
+
+  return { system, user, useSearch: true };
+}
+
 /**
  * A whole month of the content calendar, in one call.
  *
@@ -605,6 +674,12 @@ export function buildCalendarPlanPrompt(opts: {
   voiceSamples?: VoiceSample[];
   seed?: number;
   brand?: Brand;
+  /**
+   * Real, sourced problems from the market scan, already rendered by
+   * formatProblemsBlock in lib/marketScan.ts. Empty string when no scan exists,
+   * in which case the planner falls back to its own judgment exactly as before.
+   */
+  marketProblems?: string;
 }): BuiltPrompt {
   const {
     year,
@@ -614,7 +689,8 @@ export function buildCalendarPlanPrompt(opts: {
     targetCount,
     voiceSamples = [],
     seed = 0,
-    brand = KOGNOZ
+    brand = KOGNOZ,
+    marketProblems = ""
   } = opts;
 
   const profiles = brand.channelIds
@@ -643,6 +719,7 @@ Formats that suit this identity: ${p.suitsFormats.join(", ")}`;
   const system = `You plan a month of LinkedIn publishing for ${brand.name} across ${brand.channelIds.length} publishing identities.
 
 ${brand.core}
+${marketProblems}
 
 THE THREE IDENTITIES. Each is a real person or a real company page, so write only what that identity can credibly say.
 
@@ -666,19 +743,25 @@ THE MONTH IS A CAMPAIGN, NOT A LIST.
 
 CADENCE. Post only on the days listed as available: ${availableDays.join(", ")}. Roughly half of them carry two posts. Aim for this split across the month: ${split}.
 
-TOPIC CRAFT. A topic is a compressed editorial description, not a headline and not a slug.
+TOPIC CRAFT. A topic is a compressed editorial description, not a headline and not a slug.${
+    marketProblems
+      ? `\n- IT NAMES A REAL SITUATION FROM THE LIST ABOVE. Not the category the situation belongs to. "Panels re-interview the same candidate because nobody trusts the first scorecard" over "interview consistency in high-volume hiring".`
+      : ""
+  }
 - 40 to 95 characters. Sentence case. No title case, no colons, no questions, no hashtags.
 - State a tension or a claim. Two clauses joined by "while" or a comma is ONE way to do that and it must not be the shape of more than about a third of the month; the rest are flat statements, single clauses, or a named moment.
 - Behavioural language: name what people do, never how they feel.
 - Every topic must be specific enough that two different writers would produce recognisably the same post.
 ${avoid}
 Return ONLY valid JSON in exactly this shape, with no commentary before or after:
-{"items": [{"day": 1, "channel": "${brand.defaultChannel}", "format": "Carousel", "pillar": "${Object.keys(brand.pillars)[0]}", "topic": "the compressed description"}]}
+{"items": [{"day": 1, "channel": "${brand.defaultChannel}", "format": "Carousel", "pillar": "${Object.keys(brand.pillars)[0]}", "topic": "the compressed description"${marketProblems ? ', "fromProblem": 1' : ""}}]}
 
 - "day" is a number from the available list above.
 - "channel" is exactly one of: ${brand.channelIds.join(", ")}.
 - "pillar" is exactly one of: ${Object.keys(brand.pillars).join(", ")}.
-- "format" is exactly one of: ${[...STUDIO_FORMATS, ...CALENDAR_ONLY_FORMATS].join(", ")}.
+- "format" is exactly one of: ${[...STUDIO_FORMATS, ...CALENDAR_ONLY_FORMATS].join(", ")}.${
+    marketProblems ? `\n- "fromProblem" is the NUMBER of the problem above that this topic came from.` : ""
+  }
 
 Return exactly ${targetCount} items, ordered by day.`;
 

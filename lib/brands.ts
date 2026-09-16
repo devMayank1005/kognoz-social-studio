@@ -166,6 +166,15 @@ export interface Brand {
   laneFallback: string;
   doNotAssert: string[];
   /**
+   * What the market scan should go and read about.
+   *
+   * Deliberately the MARKET and not the product: the geographies, the buyer
+   * roles, and the operational subjects whose facts change. A scope written in
+   * product terms turns the research into a search for validation, and the list
+   * comes back as a brochure.
+   */
+  marketScope: string;
+  /**
    * The brand's own figures, named so the fact-checker does not spend a search
    * budget re-verifying numbers the client already stands behind. Phrased as a
    * full sentence because it is dropped into the verify prompt as one.
@@ -237,6 +246,8 @@ export const KOGNOZ: Brand = {
   doNotAssert: DO_NOT_ASSERT,
   canonNumbers:
     "Kognoz's own proof numbers (650,000+ jobs architected, 50,000+ leadership assessments, 200+ enterprises, 12 countries).",
+  marketScope:
+    "CEOs, CHROs, promoters and business owners at large enterprises, conglomerates and family-led groups across India and Southeast Asia. The subjects that move: culture and engagement measurement, psychological safety and speak-up, org design, decision rights, spans and layers, succession depth and leadership readiness, regretted attrition, internal mobility, job architecture, AI adoption inside the HR function and the work redesign around it, and generational transition in family businesses.",
   voiceHeader:
     "You write for Kognoz, a people-consulting firm for CEOs, CHROs, promoters, and business owners across India and Southeast Asia. Kognoz reads what people and organizations actually do, through behavioral science and AI, and turns it into decisions leaders can trust. The audience is senior executives deciding who to bring in on their hardest people problems.",
   // NOTE: this is the repo's corrected wording, not the v4 file's. v4 still says
@@ -314,6 +325,8 @@ export const KONVERZ: Brand = {
   laneFallback:
     "SUBJECT DISCIPLINE: choose ONE Konverz lane for this piece (Hire, Nurture, Coach, Learn, Skills AI, or The Layer) and stay strictly inside it. Do not blend modules into a feature list.",
   doNotAssert: DO_NOT_ASSERT_KONVERZ,
+  marketScope:
+    "Talent-acquisition leaders in BFSI and global capability centres, and CHROs and L&D heads in large enterprises, across India, the Philippines, Malaysia and the UAE. The subjects that move: hiring volumes and time-to-hire, application volumes and screening load, panel interviewing practice and interviewer consistency, campus and high-volume recruitment, assessment and psychometrics, candidate experience and drop-off, GCC headcount growth, succession and internal mobility, skills taxonomies, mentoring and coaching programmes, and learning spend and completion.",
   canonNumbers:
     "Konverz's own site-stated proof numbers (2k+ interviews completed, 60% reduction in time-to-hire, 35% enhanced candidate quality, 40% recruitment cost savings, 2x goal achievement, 45%+ skill-gap closure, 100% workforce twin), its psychometric evidence (test-retest ICC 0.96 against a 0.72 industry standard, Cronbach's alpha averaging 0.909), and the published customer results carried by their named speakers.",
   voiceHeader:

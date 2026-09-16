@@ -29,6 +29,10 @@ export const ACTIONS = [
   "content_deleted",
   "content_status_changed",
   "month_generated",
+  // The grounded search behind a month: it costs several times a plain call and
+  // changes what 36 posts are about, so it belongs in the trail next to the
+  // month it shaped rather than only in the spend log.
+  "market_scanned",
 
   // Export. The closest thing this app has to publishing: there is no LinkedIn or
   // Instagram integration, so a download is the moment something leaves the tool.
@@ -52,6 +56,7 @@ export const CLIENT_ACTIONS: readonly Action[] = [
   "content_deleted",
   "content_status_changed",
   "month_generated",
+  "market_scanned",
   "download"
 ];
 
@@ -269,6 +274,13 @@ export function describeActivity(row: ActivityRow): string {
     case "month_generated": {
       const count = num(meta.count);
       return `Generated a month of content${count !== null ? ` — ${count} posts` : ""}${label ? ` for ${label}` : ""}`;
+    }
+
+    case "market_scanned": {
+      const found = num(meta.found);
+      const total = num(meta.total);
+      const detail = found !== null ? ` — ${found} new${total !== null ? `, ${total} in total` : ""}` : "";
+      return `Scanned the market${label ? ` for ${label}` : ""}${detail}`;
     }
 
     case "download": {

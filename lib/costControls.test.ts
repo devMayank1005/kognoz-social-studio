@@ -7,6 +7,8 @@ import {
   DEFAULT_MODEL_FOR_TASK,
   SEARCH_ALLOWED_TASKS,
   MAX_SEARCHES_PER_REQUEST,
+  SEARCH_LIMIT_PER_HOUR,
+  searchBudgetFor,
   USD_PER_SEARCH,
   clampMaxTokens,
   costUsd,
@@ -97,12 +99,37 @@ describe("model configuration", () => {
 });
 
 describe("search gating", () => {
-  it("only permits search on the two grounded tasks", () => {
-    expect(SEARCH_ALLOWED_TASKS).toEqual(["generate", "verify"]);
+  // Search is several times the cost of a plain call, so the list of tasks that
+  // may use it is pinned rather than left open. Adding one should be a decision
+  // with a reason attached, which is what the comment above the constant is for.
+  it("permits search only on the three grounded tasks", () => {
+    expect(SEARCH_ALLOWED_TASKS).toEqual(["generate", "verify", "marketScan"]);
   });
 
-  it("caps searches per request", () => {
+  it("caps searches per request at two by default", () => {
     expect(MAX_SEARCHES_PER_REQUEST).toBeLessThanOrEqual(2);
+    for (const t of TASKS) {
+      if (t === "marketScan") continue;
+      expect(searchBudgetFor(t), `${t} should take the default budget`).toBe(MAX_SEARCHES_PER_REQUEST);
+    }
+  });
+
+  // The one exception, and why. Two queries is right for checking one statistic
+  // on one slide; a market scan covers four geographies and several buyer roles,
+  // and two would produce a list narrow enough to mislead while wearing sources.
+  // Affordable because it runs once a month per brand, not once per deck.
+  it("gives the market scan a wider budget, still under the hourly cap", () => {
+    expect(searchBudgetFor("marketScan")).toBeGreaterThan(MAX_SEARCHES_PER_REQUEST);
+    expect(searchBudgetFor("marketScan")).toBeLessThanOrEqual(SEARCH_LIMIT_PER_HOUR);
+  });
+
+  it("the tool ladder carries the task's own budget through to max_uses", () => {
+    const scan = searchToolLadder("claude-sonnet-5", "marketScan");
+    const plain = searchToolLadder("claude-sonnet-5", "generate");
+    expect(scan.every((t) => t.max_uses === searchBudgetFor("marketScan"))).toBe(true);
+    expect(plain.every((t) => t.max_uses === MAX_SEARCHES_PER_REQUEST)).toBe(true);
+    // No task given: the conservative default, not the widest.
+    expect(searchToolLadder("claude-sonnet-5").every((t) => t.max_uses === MAX_SEARCHES_PER_REQUEST)).toBe(true);
   });
 });
 

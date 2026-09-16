@@ -42,7 +42,15 @@ describe("the client cannot forge a session", () => {
 
   it("accepts exactly the user actions we instrument", () => {
     expect([...CLIENT_ACTIONS].sort()).toEqual(
-      ["content_created", "content_deleted", "content_edited", "content_status_changed", "download", "month_generated"].sort()
+      [
+        "content_created",
+        "content_deleted",
+        "content_edited",
+        "content_status_changed",
+        "download",
+        "market_scanned",
+        "month_generated"
+      ].sort()
     );
     for (const a of CLIENT_ACTIONS) expect(isClientAction(a)).toBe(true);
   });

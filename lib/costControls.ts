@@ -23,6 +23,7 @@ export type Task =
   | "verify"
   | "designNote"
   | "calendarPlan"
+  | "marketScan"
   | "humanize";
 export const TASKS: Task[] = [
   "generate",
@@ -32,6 +33,7 @@ export const TASKS: Task[] = [
   "verify",
   "designNote",
   "calendarPlan",
+  "marketScan",
   "humanize"
 ];
 
@@ -45,6 +47,10 @@ export const DEFAULT_MODEL_FOR_TASK: Record<Task, AllowedModel> = {
   verify: "claude-sonnet-5",
   designNote: "claude-haiku-4-5",
   calendarPlan: "claude-sonnet-5",
+  // Grounded research, not writing. Sonnet reads search results and extracts
+  // structured facts well, and the output is a list a person then edits — so the
+  // premium a stronger model buys here lands on a step that is reviewed anyway.
+  marketScan: "claude-sonnet-5",
   // The pass that decides whether the copy reads as human, and the only task on
   // Opus. Judgment-heavy: it holds a draft, a set of human writing samples and a
   // list of faults at once, then decides which sentences to break. That is the
@@ -107,6 +113,7 @@ export const THINKING_FOR_TASK: Record<Task, ThinkingConfig> = {
   verify: { type: "disabled" },
   designNote: { type: "disabled" },
   calendarPlan: { type: "disabled" },
+  marketScan: { type: "disabled" },
   humanize: { type: "adaptive" }
 };
 
@@ -159,6 +166,11 @@ export const TOKENS: Record<Task, { def: number; cap: number; groundedDef?: numb
   // retry gets clamped straight back to 2400 and truncates identically, buying a second
   // call for nothing. 4000 x 1.75 = 7000, comfortably inside 8000.
   calendarPlan: { def: 4000, cap: 8000 },
+  // 12-18 problems at roughly 80 tokens each, plus the search loop. Grounded caps
+  // are higher because a web-search request runs server-side (search -> read ->
+  // search -> answer) and every internal turn's output_tokens accumulate, not just
+  // the final message.
+  marketScan: { def: 3000, cap: 5000, groundedDef: 4000, groundedCap: 7000 },
   // One task, three very different payloads: a deck (~800 output tokens), a
   // 1,200-word article (~2,000), or 36 rewritten calendar topics (~2,400). The
   // caller asks for what it needs and clampMaxTokens holds the ceiling.
@@ -175,12 +187,37 @@ export const TOKENS: Record<Task, { def: number; cap: number; groundedDef?: numb
 // calendarPlan is deliberately absent: the founder research is already done and written
 // down in lib/founderProfiles.ts, so grounding it again would cost roughly 3.5x per run
 // to rediscover facts nobody would review.
-export const SEARCH_ALLOWED_TASKS: Task[] = ["generate", "verify"];
+//
+// marketScan is the other half of that same argument. Founder facts are stable and
+// already written down; MARKET facts are neither, and they are what the month should
+// be planned against. So the research moves to its own task, runs once rather than
+// per-month, and produces a list somebody reads before 36 posts are built on it.
+export const SEARCH_ALLOWED_TASKS: Task[] = ["generate", "verify", "marketScan"];
 
 export const RATE_LIMIT_PER_HOUR = 60;
 export const RATE_LIMIT_PER_DAY = 200;
 export const SEARCH_LIMIT_PER_HOUR = 10;
 export const MAX_SEARCHES_PER_REQUEST = 2;
+
+/**
+ * Per-task search budget, where two is not enough.
+ *
+ * Two searches is right for grounding one statistic on one slide. A market scan
+ * is a different shape of job: it is covering four geographies and several buyer
+ * roles, and two queries would produce a list narrow enough to be misleading —
+ * which is worse than the ungrounded version it replaces, because it arrives
+ * wearing sources.
+ *
+ * Affordable because of how rarely it runs: once a month per brand, against
+ * generate's once per deck. SEARCH_LIMIT_PER_HOUR still caps the hour.
+ */
+export const SEARCHES_FOR_TASK: Partial<Record<Task, number>> = {
+  marketScan: 6
+};
+
+export function searchBudgetFor(task: Task): number {
+  return SEARCHES_FOR_TASK[task] ?? MAX_SEARCHES_PER_REQUEST;
+}
 
 /**
  * Dynamic filtering (web_search_20260209 run through code execution), OFF.
@@ -210,8 +247,8 @@ export const USE_DYNAMIC_FILTERING = false;
  * 400, so an unsupported tool version degrades grounding to a cheaper-but-working
  * variant instead of breaking it. A 400 is never billed, so stepping down is free.
  */
-export function searchToolLadder(model: AllowedModel): Array<Record<string, unknown>> {
-  const base = { name: "web_search", max_uses: MAX_SEARCHES_PER_REQUEST };
+export function searchToolLadder(model: AllowedModel, task?: Task): Array<Record<string, unknown>> {
+  const base = { name: "web_search", max_uses: task ? searchBudgetFor(task) : MAX_SEARCHES_PER_REQUEST };
   // Dynamic filtering runs search from inside code execution, so it needs a model
   // with programmatic tool calling. Sonnet has it; haiku does not.
   const canFilter = USE_DYNAMIC_FILTERING && model.startsWith("claude-sonnet");

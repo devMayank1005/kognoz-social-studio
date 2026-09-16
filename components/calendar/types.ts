@@ -35,6 +35,13 @@ export interface ContentItem {
   tags?: string[];
   set?: DesignSetId;
   style?: IdeaStyle;
+  /**
+   * The real market problem this post was planned from, when the month was
+   * planned against a market scan. Shown to whoever writes the post so they can
+   * see what it is for, and never sent anywhere as a claim — see lib/marketScan.ts
+   * on why a scanned figure does not license printing that figure on a slide.
+   */
+  fromProblem?: string;
   createdAt: string;
   updatedAt: string;
 }

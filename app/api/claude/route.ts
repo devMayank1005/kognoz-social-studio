@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
     ];
   }
 
-  const ladder = useSearch ? searchToolLadder(model) : [];
+  const ladder = useSearch ? searchToolLadder(model, task) : [];
   if (useSearch) anthropicBody.tools = [ladder[0]];
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
