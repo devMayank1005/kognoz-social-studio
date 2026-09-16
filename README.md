@@ -34,6 +34,32 @@ style load.
   `kognoz-house-prefs`, `kognoz-style-memory`, `kognoz-voice-samples`. Konverz simply
   reads keys that do not exist yet. No migration.
 
+### Where a month's topics come from
+
+`/calendar` has a **Market scan** above the Generate button. It is a grounded
+search — the only one in the app besides generation and fact-checking — that returns
+8 to 18 real problems in that brand's market, each with who feels it, the evidence,
+and the publication it was found in. You read and edit that list; the month planner
+then writes every topic from what survives and reports which problem each came from.
+
+Without it, the planner writes from what the model already believes about the market,
+which reads plausible and cannot be checked. That path still works and is never
+blocked — the first press of Generate warns, the second proceeds, and the result note
+says which of the two months you got.
+
+Three things worth knowing before changing any of it:
+
+- **A scanned figure is not a licence to print that figure.** It reaches the planner as
+  subject matter and the calendar card as context. The sourcing rules in
+  `buildGeneratePrompt` and the Verify facts button still decide what appears in copy.
+- **The scan prompt refuses two things on purpose**: themes (anything that could be a
+  conference track title) and product descriptions. A model asked to research the market
+  for a talent platform drifts into listing what such a platform would fix, and every
+  topic planned off that becomes a feature post.
+- **Scans go stale.** 45 days, then the panel says so. Market facts move; founder facts
+  do not, which is why `lib/founderProfiles.ts` is still written down by hand and this
+  is not.
+
 ### The humanize pass, per brand
 
 `lib/humanizePass.ts` runs on deck generation, the article writer, and calendar
@@ -48,7 +74,17 @@ knowing before changing anything:
    prompt and the linter, so the rule the model is given and the rule it is measured
    against cannot drift.
 
-2. **Konverz starts with an empty voice corpus, on purpose.** The 36-item Konverz month
+2. **It gets two rounds, not one.** After the rewrite the draft is re-linted; if it
+   still scores under 85 or leaves a high-severity finding, one more pass runs against
+   what is left. Two rounds is a hard cap. The draft is never lost, a round that fails
+   mid-loop keeps what the earlier round produced, and the *best* round wins rather than
+   the last. One subtlety: round one always beats the draft whatever the score says,
+   because the linter cannot see a concrete scene replacing an abstraction, and that is
+   most of what this pass is for.
+
+3. **Revise runs it too.** It used to be the one button that could undo the humanising.
+
+4. **Konverz starts with an empty voice corpus, on purpose.** The 36-item Konverz month
    plan in `lib/konverzTemplate.ts` looks seedable and is not: its copy was written by a
    model. `lib/voiceSamples.ts` exists precisely because this app once learned its voice
    from its own output, so `samplesFromTemplate()` is gated to the Kognoz plan and the
@@ -141,7 +177,7 @@ Two are worth a note:
 
 ## Tests
 
-`npm test` — 27 files, 593 tests. Several are tied directly to named PRD §16 cases:
+`npm test` — 29 files, 647 tests. Several are tied directly to named PRD §16 cases:
 the `structureBody` failure string, the `"1,700+ GCCs. One critical gap"` stat-title
 split, the mobility/AI-skills → talent lane-routing case, and the PDF builder's
 xref-offset structural check.
@@ -157,10 +193,30 @@ The two-brand work added guards for the failures that are invisible without one:
   parent line, and an unthreaded call still produces exactly the Kognoz prompt.
 - `lib/slopLint.test.ts` — "journey" is a finding for Kognoz and is not one for Konverz,
   while every structural rule fires identically for both.
+- `lib/storeKeys.test.ts` — the allowlist in `lib/supabase.ts`, the CHECK constraint in the
+  newest migration, and the seed rows in `schema.sql` must list the same keys, and every
+  brand must have all six of its own. Three hand-maintained copies of one list, carrying a
+  comment warning about drift that the second brand then walked straight past: every
+  Konverz read came back 400 and the calendar blamed the network. A comment cannot fail a
+  build.
+- `lib/marketScan.test.ts` — the scan prompt refuses themes and product descriptions, would
+  rather return a short sourced list than a long assumed one, and searches each brand's own
+  market. Plus the number-to-problem resolution, which must drop an out-of-range index
+  rather than attach the wrong problem to a post.
+- `lib/humanizePass.test.ts` — the re-edit loop: the draft survives a failure at any round,
+  the best round wins rather than the last, and an already-clean draft still keeps its edit.
 - `lib/slideStyles.test.ts` — the gradient word. `background` is a shorthand that resets
   `background-clip`, so writing it after the clip renders the marked word as a solid
   rectangle with invisible text. Nothing throws and no other test notices; this one was
   written after the defect shipped into the branch and was caught by rendering a slide.
+
+## Deploying this branch
+
+`supabase/migrations/2026-09-16_konverz_brand_keys.sql` **must be run against the live
+database** before Konverz can save anything. Paste it into the Supabase SQL editor. It is
+idempotent and touches no data — it widens the `store.key` CHECK constraint and seeds
+empty rows. Without it the allowlist gets past the route and the database rejects the
+write.
 
 ## Setup
 
