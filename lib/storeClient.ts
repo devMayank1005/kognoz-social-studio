@@ -14,6 +14,18 @@ export interface StoreRead<T> {
   version: number;
   /** true when the server could not be reached and this came from the local cache. */
   stale: boolean;
+  /**
+   * The server understood us and said no — a 4xx, which for this route means the
+   * key is not in STORE_KEYS.
+   *
+   * Worth separating from `stale` because the two need opposite responses. An
+   * unreachable server is a network problem: wait, retry, your data is fine. A
+   * rejected key is a BUG IN THIS APP that no amount of retrying fixes, and
+   * reporting it as "the server did not answer" sends people to check their wifi.
+   * That is exactly what happened when the Konverz keys shipped without being
+   * added to the allowlist.
+   */
+  rejected?: boolean;
 }
 
 export type StoreWrite<T> =
@@ -61,6 +73,13 @@ function writeLocal(key: string, value: unknown) {
 export async function storeGet<T>(key: string): Promise<StoreRead<T>> {
   try {
     const res = await fetch(`/api/store?key=${encodeURIComponent(key)}`);
+    if (res.status >= 400 && res.status < 500 && res.status !== 401) {
+      // Not a transport failure. Surface it as itself so the UI can say so, and
+      // log it once — a 400 here means a key reached production that the route
+      // was never taught about.
+      console.error(`[store] ${key} rejected with HTTP ${res.status}. Is it in STORE_KEYS and in the store_key_check constraint?`);
+      return { value: readLocal<T>(key), version: cachedVersion(key) ?? 0, stale: true, rejected: true };
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const version = typeof data?.version === "number" ? data.version : 0;

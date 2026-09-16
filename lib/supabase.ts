@@ -13,9 +13,19 @@ export function getSupabaseServerClient() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-// Keep in sync with the CHECK constraint on store.key — schema.sql and
-// supabase/migrations/2026-09-04_voice_samples.sql. A key added here but not
-// there is accepted by the route and rejected by the database.
+// Keep in sync with the CHECK constraint on store.key — schema.sql and the
+// migrations under supabase/migrations/. A key added here but not there is
+// accepted by the route and rejected by the database.
+//
+// That warning was written before the Konverz brand arrived and then ignored by
+// it: the brand-scoped keys went into neither list, so every Konverz read came
+// back 400 from the route and the calendar reported "the server did not answer".
+// lib/storeKeys.test.ts now checks this file against the migration, so the next
+// half-added key fails a test instead of a person.
+//
+// NOT derived from lib/brands.ts on purpose. That module pulls in ~300KB of
+// base64 logo data, which has no business in a server route bundle. The test
+// does the cross-check instead.
 export const STORE_KEYS = [
   "kognoz-calendar",
   "kognoz-house-prefs",
@@ -23,7 +33,24 @@ export const STORE_KEYS = [
   "kognoz-design",
   // Real, human-written posts the model imitates. See lib/voiceSamples.ts for
   // why this is not the same thing as kognoz-style-memory.
-  "kognoz-voice-samples"
+  "kognoz-voice-samples",
+  // Current, sourced problems in the brand's market, found by a grounded scan and
+  // then edited by a person. What the month planner writes topics from, so a
+  // month is built on problems somebody has rather than on plausible ones.
+  "kognoz-market-scan",
+
+  // Konverz AI. Same five blobs plus its own scan; separate data, same shapes.
+  "konverz-calendar",
+  "konverz-house-prefs",
+  "konverz-style-memory",
+  "konverz-design",
+  "konverz-voice-samples",
+  "konverz-market-scan",
+
+  // Which brand this user last worked in. Not brand-scoped, by definition. Kept
+  // on the server as well as in localStorage so the choice follows a person to
+  // another machine rather than silently reverting to Kognoz.
+  "studio-brand"
 ] as const;
 
 export type StoreKey = (typeof STORE_KEYS)[number];

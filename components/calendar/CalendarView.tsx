@@ -64,6 +64,8 @@ export function CalendarView() {
   const [error, setError] = useState("");
   /** The server could not be read. We are NOT looking at a calendar we can trust. */
   const [loadFailed, setLoadFailed] = useState(false);
+  /** The read was refused rather than unanswered — a bug here, not a network problem. */
+  const [loadRejected, setLoadRejected] = useState(false);
   const { data: session } = useSession();
   const [planning, setPlanning] = useState(false);
   const [planNote, setPlanNote] = useState("");
@@ -95,7 +97,8 @@ export function CalendarView() {
     setLoading(true);
     setError("");
     try {
-      const { value, stale } = await storeGet<unknown>(STORAGE_KEY);
+      const { value, stale, rejected } = await storeGet<unknown>(STORAGE_KEY);
+      setLoadRejected(!!rejected);
       if (!stale) {
         applyItems(migrateLegacyPlan(value, brand.template, brand.defaultChannel));
         setLoadFailed(false);
@@ -112,8 +115,10 @@ export function CalendarView() {
       if (local) {
         applyItems(migrateLegacyPlan(local, brand.template, brand.defaultChannel));
         setError(
-          "Showing the copy cached in this browser — the server is unreachable. " +
-            "Edits will not be saved until it is back."
+          rejected
+            ? `Showing the copy cached in this browser. The server refused the key "${STORAGE_KEY}" — that is a fault in this app, not your connection. Nothing will be saved until it is fixed.`
+            : "Showing the copy cached in this browser — the server is unreachable. " +
+              "Edits will not be saved until it is back."
         );
       } else {
         applyItems([]);
@@ -425,9 +430,23 @@ export function CalendarView() {
       <div style={{ padding: "60px 20px", textAlign: "center", fontFamily: FONT, color: C.ink }}>
         <div style={{ fontSize: 24, marginBottom: 10 }}>⚠️</div>
         <div style={{ fontWeight: 700, marginBottom: 6 }}>Couldn&apos;t load your calendar</div>
-        <div style={{ color: C.inkSoft, fontSize: 13, maxWidth: 420, margin: "0 auto 16px", lineHeight: 1.55 }}>
-          The server did not answer. Your calendar is safe — this browser just can&apos;t reach it
-          right now. Nothing will be saved until it can.
+        {/* Two different failures wearing one message is how the Konverz launch bug
+            hid: the key was not in the server's allowlist, and the screen blamed
+            the network. Retrying could never have fixed it. */}
+        <div style={{ color: C.inkSoft, fontSize: 13, maxWidth: 460, margin: "0 auto 16px", lineHeight: 1.55 }}>
+          {loadRejected ? (
+            <>
+              The server refused the key <code>{STORAGE_KEY}</code>. That is a fault in this app
+              rather than your connection, so trying again will not help. Your calendar is safe.
+              Whoever deployed this needs to add that key to <code>STORE_KEYS</code> and run the
+              matching migration.
+            </>
+          ) : (
+            <>
+              The server did not answer. Your calendar is safe — this browser just can&apos;t reach
+              it right now. Nothing will be saved until it can.
+            </>
+          )}
         </div>
         <button
           type="button"
@@ -444,7 +463,7 @@ export function CalendarView() {
             color: C.ink
           }}
         >
-          Try again
+          {loadRejected ? "Try again anyway" : "Try again"}
         </button>
       </div>
     );

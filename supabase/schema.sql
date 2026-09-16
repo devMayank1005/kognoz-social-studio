@@ -48,10 +48,26 @@ alter table users enable row level security;
 -- Replaces artifact window.storage with shared server storage (PRD §3.2).
 -- Same key semantics as v3: GET/PUT /api/store?key=... , JSON values, last-write-wins.
 create table if not exists store (
-  -- Keep in sync with STORE_KEYS in lib/supabase.ts. An existing database is
-  -- widened by supabase/migrations/2026-09-04_voice_samples.sql, not by this file.
+  -- Keep in sync with STORE_KEYS in lib/supabase.ts. An EXISTING database is
+  -- widened by the migrations under supabase/migrations/, not by this file —
+  -- this one only ever runs against a fresh database, so it must end up listing
+  -- exactly what the last migration leaves behind.
   key text primary key check (
-    key in ('kognoz-calendar', 'kognoz-house-prefs', 'kognoz-style-memory', 'kognoz-design', 'kognoz-voice-samples')
+    key in (
+      'kognoz-calendar',
+      'kognoz-house-prefs',
+      'kognoz-style-memory',
+      'kognoz-design',
+      'kognoz-voice-samples',
+      'kognoz-market-scan',
+      'konverz-calendar',
+      'konverz-house-prefs',
+      'konverz-style-memory',
+      'konverz-design',
+      'konverz-voice-samples',
+      'konverz-market-scan',
+      'studio-brand'
+    )
   ),
   value jsonb not null,
   updated_at timestamptz not null default now(),
@@ -72,7 +88,16 @@ insert into store (key, value) values
   ('kognoz-calendar', '{}'::jsonb),
   ('kognoz-house-prefs', '{}'::jsonb),
   ('kognoz-style-memory', '{}'::jsonb),
-  ('kognoz-design', '{}'::jsonb)
+  ('kognoz-design', '{}'::jsonb),
+  ('kognoz-voice-samples', '{}'::jsonb),
+  ('kognoz-market-scan', '{}'::jsonb),
+  ('konverz-calendar', '{}'::jsonb),
+  ('konverz-house-prefs', '{}'::jsonb),
+  ('konverz-style-memory', '{}'::jsonb),
+  ('konverz-design', '{}'::jsonb),
+  ('konverz-voice-samples', '{}'::jsonb),
+  ('konverz-market-scan', '{}'::jsonb),
+  ('studio-brand', '{}'::jsonb)
 on conflict (key) do nothing;
 
 -- Optional (P1/P2): API call log for admin spend visibility (§3.1, §14).
