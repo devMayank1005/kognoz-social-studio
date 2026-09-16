@@ -2503,6 +2503,10 @@ export default function Studio() {
         frames={fmt.frames}
         pages={previewPages}
         shared={{
+          // Was missing, so every slide inside the preview fell back to Kognoz:
+          // a Konverz deck previewed in Kognoz colours, fonts and wordmark, in
+          // the one panel whose job is showing what will actually be published.
+          brand,
           accent,
           eyebrow,
           cta,

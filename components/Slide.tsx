@@ -361,7 +361,17 @@ export const Slide = React.memo(function Slide({
   const font = brand.font;
   const displayFont = brand.displayFont;
   const EM_STYLE: React.CSSProperties = { background: GRAD, ...BASE_EM_STYLE };
-  const renderEm = (text: unknown) => renderEmWith(text, GRAD, brand.emMode);
+  /**
+   * The marked headline word, in the brand gradient.
+   *
+   * `dark` defaults to the surface, which covers every renderer that takes its
+   * ground from `S.page`. The handful that paint GRAD_DARK directly, regardless
+   * of surface, pass it explicitly — they are dark whatever the design set says.
+   * Getting this wrong is invisible in markup and obvious on a slide: Konverz's
+   * ramp ends in the same deep blue the dark page is painted in.
+   */
+  const renderEm = (text: unknown, dark: boolean = onDark) =>
+    renderEmWith(text, dark ? brand.GRAD_ON_DARK : GRAD, brand.emMode);
 
   const wrap: React.CSSProperties = { position: "relative", width: baseW, height: baseH, overflow: "hidden", fontFamily: font, boxSizing: "border-box" };
   const dz: Required<SlideDesign> = {
@@ -465,33 +475,50 @@ export const Slide = React.memo(function Slide({
 
   // Fixed footer: identical position and logo size on every card slide, so the
   // brand never moves as people swipe.
-  const Foot = ({ dark, right }: { dark?: boolean; right?: string | null }) => (
-    <>
-      {/* "Empowered by Kognoz" is the parent-company line konverz.ai runs in its
-          own footer. It sits above the logo rather than beside it so it never
-          competes with the page number or the swipe cue on the right. */}
-      {brand.empowered && (
+  /**
+   * The wordmark, with the parent-company line above it where the brand has one.
+   *
+   * THE LINE BELONGS WITH THE LOGO, not with the footer container, and that is
+   * the whole point of this helper. It used to live inside <Foot>, which 32
+   * renderer branches use — but six others hand-roll their own footer row, and
+   * every one of them silently dropped it: Article Cover in all three variants,
+   * Says vs Does, Montage and the Founder Video script. Four of the fifteen
+   * formats published without Konverz's parent attribution and nothing said so.
+   *
+   * Attached here, a renderer gets the line by drawing the logo — which is the
+   * one thing a footer cannot forget to do. components/renderSmoke.test.tsx
+   * asserts it across every format and every design set.
+   */
+  const LogoBlock = ({ dark, h = 64 }: { dark?: boolean; h?: number }) => {
+    if (!brand.empowered) return <Logo h={h} white={dark} brand={brand} />;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: Math.round(h * 0.12), alignItems: "flex-start" }}>
         <div
           style={{
-            position: "absolute",
-            left: 96,
-            bottom: 158,
             fontFamily: font,
-            fontSize: 18,
+            // Scaled off the logo rather than fixed: this sits under a 58px mark
+            // on a montage frame and an 82px one on an article cover.
+            fontSize: Math.max(13, Math.round(h * 0.28)),
             letterSpacing: "0.12em",
             textTransform: "uppercase",
-            color: dark ? "rgba(255,255,255,0.55)" : C.inkMute,
-            pointerEvents: "none"
+            lineHeight: 1,
+            color: dark ? "rgba(255,255,255,0.55)" : C.inkMute
           }}
         >
           Empowered by Kognoz
         </div>
-      )}
-      <div style={{ position: "absolute", left: 96, right: 96, bottom: 84, display: "flex", alignItems: "center", justifyContent: "space-between", pointerEvents: "none" }}>
-        <Logo h={64} white={dark} brand={brand} />
-        {right ? <div style={{ fontFamily: font, fontSize: 22, color: dark ? "rgba(255,255,255,0.65)" : C.inkMute }}>{right}</div> : <span />}
+        <Logo h={h} white={dark} brand={brand} />
       </div>
-    </>
+    );
+  };
+
+  // Fixed footer: identical position and logo size on every card slide, so the
+  // brand never moves as people swipe.
+  const Foot = ({ dark, right }: { dark?: boolean; right?: string | null }) => (
+    <div style={{ position: "absolute", left: 96, right: 96, bottom: 84, display: "flex", alignItems: "center", justifyContent: "space-between", pointerEvents: "none" }}>
+      <LogoBlock dark={dark} h={64} />
+      {right ? <div style={{ fontFamily: font, fontSize: 22, color: dark ? "rgba(255,255,255,0.65)" : C.inkMute }}>{right}</div> : <span />}
+    </div>
   );
 
   /**
@@ -596,7 +623,7 @@ export const Slide = React.memo(function Slide({
           <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
             <Eyebrow dark />
             <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
-              <h1 style={{ fontFamily: displayFont, fontSize: fit(100, cover, 44), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: 0, maxWidth: 880 }}>{renderEm(cover)}</h1>
+              <h1 style={{ fontFamily: displayFont, fontSize: fit(100, cover, 44), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: 0, maxWidth: 880 }}>{renderEm(cover, true)}</h1>
             </div>
           </div>
           <Foot dark right={COVER_R} />
@@ -670,7 +697,7 @@ export const Slide = React.memo(function Slide({
             <Eyebrow dark />
             <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
               <div style={{ ...GLASS_DARKBG, width: "100%", borderRadius: 28, padding: "76px 64px" }}>
-                <h1 style={{ fontFamily: displayFont, fontSize: fit(88, cover, 44), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: 0 }}>{renderEm(cover)}</h1>
+                <h1 style={{ fontFamily: displayFont, fontSize: fit(88, cover, 44), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: 0 }}>{renderEm(cover, true)}</h1>
               </div>
             </div>
           </div>
@@ -741,7 +768,7 @@ export const Slide = React.memo(function Slide({
                 <Standfirst max={860} />
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative" }}>
-                <Logo h={78} brand={brand} />
+                <LogoBlock h={78} />
                 <div style={{ fontFamily: font, fontSize: 24, color: C.inkMute }}>{dz.url}</div>
               </div>
             </div>
@@ -759,11 +786,11 @@ export const Slide = React.memo(function Slide({
             <div style={{ flex: showArticlePhoto ? 1.15 : 1, padding: "88px 100px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
               <div style={{ ...GLASS_DARKBG, borderRadius: 30, padding: "70px 80px", maxWidth: 1500 }}>
                 <Eyebrow dark />
-                <h1 style={{ fontFamily: displayFont, fontSize: fit(showArticlePhoto ? 78 : 96, cover, 55), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: "26px 0 0" }}>{renderEm(cover)}</h1>
+                <h1 style={{ fontFamily: displayFont, fontSize: fit(showArticlePhoto ? 78 : 96, cover, 55), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: "26px 0 0" }}>{renderEm(cover, true)}</h1>
                 <Standfirst dark max={showArticlePhoto ? 900 : 1320} />
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 44 }}>
-                <Logo h={78} white brand={brand} />
+                <LogoBlock h={78} dark />
                 <div style={{ fontFamily: font, fontSize: 26, color: "rgba(255,255,255,0.65)" }}>{dz.url}</div>
               </div>
             </div>
@@ -780,11 +807,11 @@ export const Slide = React.memo(function Slide({
           <div style={{ flex: showArticlePhoto ? 1.15 : 1, padding: "88px 100px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
             <Eyebrow dark />
             <div>
-              <h1 style={{ fontFamily: displayFont, fontSize: fit(showArticlePhoto ? 86 : 108, cover, 58), fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.015em", color: "#fff", margin: 0, maxWidth: showArticlePhoto ? 1000 : 1460 }}>{renderEm(cover)}</h1>
+              <h1 style={{ fontFamily: displayFont, fontSize: fit(showArticlePhoto ? 86 : 108, cover, 58), fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.015em", color: "#fff", margin: 0, maxWidth: showArticlePhoto ? 1000 : 1460 }}>{renderEm(cover, true)}</h1>
               <Standfirst dark max={showArticlePhoto ? 1000 : 1460} />
             </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <Logo h={82} white brand={brand} />
+              <LogoBlock h={82} dark />
               <div style={{ fontFamily: font, fontSize: 26, color: "rgba(255,255,255,0.65)" }}>{dz.url}</div>
             </div>
           </div>
@@ -1214,7 +1241,7 @@ export const Slide = React.memo(function Slide({
             </div>
           </div>
           <div style={{ padding: "36px 96px 84px", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${S.rule}` }}>
-            <Logo h={64} white={onDark} brand={brand} />
+            <LogoBlock h={64} dark={onDark} />
             <div style={{ fontFamily: font, fontSize: 22, color: S.label }}>{SINGLE_R}</div>
           </div>
         </div>
@@ -1465,7 +1492,7 @@ export const Slide = React.memo(function Slide({
                     as three separate designs rather than one piece. */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 30, gap: 16, height: 58 }}>
                   {role.cta ? <div style={{ fontFamily: font, fontSize: 22, fontWeight: 700, color: labelCol }}>{plain(cta)}</div> : <span />}
-                  {role.logo ? <Logo h={58} white={darkType} brand={brand} /> : null}
+                  {role.logo ? <LogoBlock h={58} dark={darkType} /> : null}
                 </div>
               </div>
             );
@@ -1492,7 +1519,7 @@ export const Slide = React.memo(function Slide({
           {/* auto height meant long copy grew UPWARD over the eyebrow; both children
               already use fit(), so this is a backstop rather than the mechanism. */}
           <div style={{ position: "absolute", left: 84, right: 84, bottom: 210, maxHeight: baseH - 420, overflow: "hidden", ...GLASS_DARKBG, borderRadius: 26, padding: "52px 54px" }}>
-            <h1 style={{ fontFamily: displayFont, fontSize: fit(74, cover, 42), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: "#fff", margin: "0 0 22px" }}>{renderEm(cover)}</h1>
+            <h1 style={{ fontFamily: displayFont, fontSize: fit(74, cover, 42), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: "#fff", margin: "0 0 22px" }}>{renderEm(cover, true)}</h1>
             <p style={{ fontFamily: font, fontSize: fit(33, s0.body, 180), lineHeight: 1.5, color: "rgba(255,255,255,0.9)", margin: 0 }}>{renderLines(s0.body)}</p>
           </div>
           <Foot dark right={SINGLE_R} />
@@ -1613,7 +1640,9 @@ export const Slide = React.memo(function Slide({
         <div style={{ position: "absolute", inset: 0, padding: "72px 84px", display: "flex", flexDirection: "column" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 26 }}>
             <div style={{ fontFamily: font, fontSize: 21, fontWeight: 700, letterSpacing: "0.16em", textTransform: "uppercase", color: cue }}>Founder video · shoot script</div>
-            <div style={{ fontFamily: font, fontSize: 19, fontWeight: 700, color: S.label, letterSpacing: "0.1em", textTransform: "uppercase" }}>{eyebrow}</div>
+            {/* Was a hand-rolled eyebrow, which is why the Konverz sparkle never
+                reached this format. <Eyebrow> is the only thing that draws it. */}
+            <Eyebrow dark={onDark} />
           </div>
           <h1 style={{ fontFamily: displayFont, fontSize: fit(52, cover, 60), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: S.heading, margin: `0 0 ${Math.round(34 * d)}px` }}>{renderEm(cover)}</h1>
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column", gap: Math.round(20 * d) }}>
@@ -1632,7 +1661,7 @@ export const Slide = React.memo(function Slide({
             <p style={{ fontFamily: font, fontSize: fit(23, cta, 130), lineHeight: 1.45, color: S.body, margin: 0 }}>{plain(cta)}</p>
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 26 }}>
-            <Logo h={78} white={onDark} brand={brand} />
+            <LogoBlock h={78} dark={onDark} />
             <div style={{ fontFamily: font, fontSize: 18, color: S.label }}>60–90s · talk to camera · captions on</div>
           </div>
         </div>
@@ -1646,7 +1675,7 @@ export const Slide = React.memo(function Slide({
       <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
         {dz.petals && <Petal w={620} o={0.55} style={{ position: "absolute", bottom: -190, left: -170 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-          <h2 style={{ fontFamily: displayFont, fontSize: fit(74, cta, 52), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.01em", color: "#fff", margin: 0, maxWidth: 830 }}>{renderEm(cta)}</h2>
+          <h2 style={{ fontFamily: displayFont, fontSize: fit(74, cta, 52), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.01em", color: "#fff", margin: 0, maxWidth: 830 }}>{renderEm(cta, true)}</h2>
         </div>
         <Foot dark right={dz.url} />
       </div>
@@ -1753,8 +1782,10 @@ export const Slide = React.memo(function Slide({
           />
         )}
         <div style={{ position: "absolute", left: 96, right: 96, bottom: 196, ...GLASS_DARKBG, borderRadius: 24, padding: "44px 48px" }}>
-          <div style={{ fontFamily: font, fontSize: 21, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.85)", marginBottom: 16 }}>
-            {nn} · {eyebrow}
+          {/* Same fix as the shoot script: this variant drew its own eyebrow and so
+              skipped the sparkle. <Eyebrow> takes the slide number itself. */}
+          <div style={{ marginBottom: 16 }}>
+            <Eyebrow dark n={nn} />
           </div>
           <h2 style={{ fontFamily: displayFont, fontSize: fit(50, data.title, 52), fontWeight: 600, lineHeight: 1.12, letterSpacing: "-0.01em", color: "#fff", margin: "0 0 16px" }}>{data.title}</h2>
           <p style={{ fontFamily: font, fontSize: fit(29, data.body, 220), lineHeight: 1.5, color: "rgba(255,255,255,0.88)", margin: 0 }}>{renderLines(data.body)}</p>

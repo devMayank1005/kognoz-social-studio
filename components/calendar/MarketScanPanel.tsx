@@ -23,10 +23,16 @@ interface MarketScanPanelProps {
   onScan: () => void;
   onRemove: (id: string) => void;
   onEdit: (id: string, problem: string) => void;
+  /**
+   * Start expanded. Used when there is no scan yet: a collapsed row reading "No
+   * market scan yet" explains nothing, and the paragraph inside is the only place
+   * that says what planning without one costs.
+   */
+  defaultOpen?: boolean;
 }
 
-export function MarketScanPanel({ scan, busy, note, brandName, onScan, onRemove, onEdit }: MarketScanPanelProps) {
-  const [open, setOpen] = useState(false);
+export function MarketScanPanel({ scan, busy, note, brandName, onScan, onRemove, onEdit, defaultOpen = false }: MarketScanPanelProps) {
+  const [open, setOpen] = useState(defaultOpen);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
 

@@ -36,6 +36,7 @@ import {
   KONVERZ_C,
   KONVERZ_GRAD,
   KONVERZ_GRAD_DARK,
+  KONVERZ_GRAD_ON_DARK,
   KONVERZ_FONT,
   KONVERZ_DISPLAY_FONT,
   KONVERZ_GOOGLE_FONTS_URL,
@@ -121,6 +122,15 @@ export interface Brand {
   C: PaletteTokens;
   GRAD: string;
   GRAD_DARK: string;
+  /**
+   * The gradient a marked headline word takes on a dark ground.
+   *
+   * Separate from GRAD because a brand ramp tuned for a white page can end in a
+   * colour the dark page is already painted in, and the word then disappears.
+   * Konverz's did exactly that. A brand whose gradient reads on both simply
+   * points this at its own GRAD.
+   */
+  GRAD_ON_DARK: string;
   font: string;
   displayFont: string;
   googleFontsUrl: string;
@@ -215,6 +225,8 @@ export const KOGNOZ: Brand = {
   C: KOGNOZ_C,
   GRAD: KOGNOZ_GRAD,
   GRAD_DARK: KOGNOZ_GRAD_DARK,
+  // Cyan to green: both stops read on the navy boardroom ground already.
+  GRAD_ON_DARK: KOGNOZ_GRAD,
   font: KOGNOZ_FONT,
   displayFont: KOGNOZ_DISPLAY_FONT,
   googleFontsUrl: KOGNOZ_GOOGLE_FONTS_URL,
@@ -288,6 +300,7 @@ export const KONVERZ: Brand = {
   C: KONVERZ_C,
   GRAD: KONVERZ_GRAD,
   GRAD_DARK: KONVERZ_GRAD_DARK,
+  GRAD_ON_DARK: KONVERZ_GRAD_ON_DARK,
   font: KONVERZ_FONT,
   displayFont: KONVERZ_DISPLAY_FONT,
   googleFontsUrl: KONVERZ_GOOGLE_FONTS_URL,

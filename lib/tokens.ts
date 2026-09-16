@@ -100,6 +100,22 @@ export const KONVERZ_C: PaletteTokens = {
 export const KONVERZ_GRAD = "linear-gradient(90deg, #B52879 0%, #6B4FC9 50%, #005382 100%)";
 export const KONVERZ_GRAD_DARK = "linear-gradient(150deg, #0B2A44 0%, #005382 55%, #3E2F7A 100%)";
 
+/**
+ * The gradient word, on a dark ground.
+ *
+ * The brand gradient ends in the deep blue #005382 — which is the MIDDLE STOP OF
+ * KONVERZ_GRAD_DARK above. So a marked phrase on a boardroom slide faded into the
+ * background over its last few characters: "selection in one *flow*" rendered as
+ * "selection in one" and then nothing. Caught by looking at a rendered slide; the
+ * clip was applied correctly and every test passed.
+ *
+ * Same ramp, same reading order — magenta, violet, blue — lifted until each stop
+ * carries on a dark page. Kognoz needs no equivalent: its cyan-to-green runs light
+ * the whole way and reads on navy as it is, which is why KOGNOZ.GRAD_ON_DARK is
+ * simply its own gradient.
+ */
+export const KONVERZ_GRAD_ON_DARK = "linear-gradient(90deg, #F06BAE 0%, #A88CF0 50%, #6CC5F0 100%)";
+
 // Poppins for both body and display. Konverz_Website_Inputs.md §9 lists the font
 // as OBSERVED across the deck and site but NOT yet confirmed as official. It is a
 // single pair of constants for exactly that reason — confirming or replacing it is

@@ -4,10 +4,14 @@ import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import CalendarView from "@/components/calendar/CalendarView";
 import { Logo } from "@/components/Logo";
+import { useBrandSwitch } from "@/components/BrandProvider";
 import { C, FONT } from "@/lib/tokens";
 
 export default function CalendarPage() {
   const { data: session } = useSession();
+  // Without this the header drew the Kognoz mark while the brand toggle directly
+  // beside it said Konverz — two controls on one screen contradicting each other.
+  const { brand } = useBrandSwitch();
 
   return (
     <main
@@ -33,7 +37,7 @@ export default function CalendarPage() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <Logo h={34} />
+          <Logo h={34} brand={brand} />
           <Link
             href="/"
             style={{

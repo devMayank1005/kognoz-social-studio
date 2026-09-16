@@ -670,6 +670,10 @@ export function CalendarView() {
         onScan={() => void runMarketScan()}
         onRemove={removeProblem}
         onEdit={editProblem}
+        // Open when there is nothing in it. The collapsed row says "No market
+        // scan yet", which explains neither what a scan is nor what planning
+        // without one costs; the paragraph inside does both.
+        defaultOpen={!scan?.problems.length}
       />
 
       <div

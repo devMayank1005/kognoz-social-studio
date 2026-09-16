@@ -39,8 +39,18 @@ export interface PreviewPage {
   photoOn: boolean;
 }
 
-/** Everything a Slide needs that does not change from page to page. */
-export type SharedSlideProps = Omit<SlideProps, "id" | "kind" | "data" | "idx" | "scale" | "photoOn">;
+/**
+ * Everything a Slide needs that does not change from page to page.
+ *
+ * `brand` is REQUIRED here even though Slide itself defaults it, and that is
+ * deliberate. This object is spread straight into a real <Slide>, so omitting the
+ * brand does not fail — it silently renders the whole preview in Kognoz's
+ * identity. Studio did exactly that, and a Konverz deck previewed as a Kognoz
+ * post for a whole branch. A required field makes the omission a compile error
+ * rather than something a test has to remember to look for.
+ */
+export type SharedSlideProps = Omit<SlideProps, "id" | "kind" | "data" | "idx" | "scale" | "photoOn"> &
+  Required<Pick<SlideProps, "brand">>;
 
 interface Props {
   isOpen: boolean;
@@ -102,7 +112,15 @@ export function SocialPreview({
   }, [unitCount]);
 
   const asset = useMemo(() => previewAssetSize(baseW, baseH, frames), [baseW, baseH, frames]);
-  const author = getAuthorInfo(authorName, authorEmail);
+  // shared.brand is what the slides themselves render in, so the mock's byline
+  // and the artwork inside it cannot disagree.
+  const previewBrand = shared.brand;
+  const author: Author = {
+    ...getAuthorInfo(authorName, authorEmail),
+    company: previewBrand.name,
+    // konverz.ai -> konverz, kognozconsulting.com -> kognozconsulting.
+    handle: previewBrand.url.replace(/^www\./, "").split(".")[0]
+  };
   const placements = PLACEMENTS.filter((p) => p.platform === tab);
 
   if (!isOpen) return null;
@@ -475,7 +493,15 @@ export function SocialPreview({
 /* ------------------------------------------------------------------ */
 
 type MediaFn = (props: { placement: Placement; width: number }) => JSX.Element;
-type Author = ReturnType<typeof getAuthorInfo>;
+/**
+ * Who the mock shows as the poster.
+ *
+ * `company` and `handle` come from the loaded brand rather than from constants.
+ * They used to be the literals "Kognoz" and "@kognoz" written into the LinkedIn
+ * and X cards, so a Konverz deck previewed as a Kognoz post — in the one panel
+ * whose entire job is showing what will actually be published.
+ */
+type Author = ReturnType<typeof getAuthorInfo> & { company: string; handle: string };
 
 function PagerBtn({ onClick, disabled, label }: { onClick: () => void; disabled: boolean; label: string }) {
   return (
@@ -614,7 +640,7 @@ function LinkedInMock({
         <Avatar author={author} size={40} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontFamily: FONT, fontSize: 13, fontWeight: 700, color: C.ink }}>{author.displayName}</div>
-          <div style={{ fontFamily: FONT, fontSize: 11, color: C.inkMute }}>Kognoz · 2h · 🌐</div>
+          <div style={{ fontFamily: FONT, fontSize: 11, color: C.inkMute }}>{author.company} · 2h · 🌐</div>
         </div>
         <span style={{ marginLeft: "auto", fontFamily: FONT, fontSize: 12.5, fontWeight: 700, color: "#0A66C2" }}>+ Follow</span>
       </div>
@@ -682,7 +708,7 @@ function XMock({ placement, author, caption, Media }: { placement: Placement; au
         <Avatar author={author} size={38} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontFamily: FONT, fontSize: 12.5, color: C.inkMute }}>
-            <strong style={{ color: C.ink, fontSize: 13 }}>{author.displayName}</strong> @kognoz · 2h
+            <strong style={{ color: C.ink, fontSize: 13 }}>{author.displayName}</strong> @{author.handle} · 2h
           </div>
           <div style={{ marginTop: 5 }}>
             <CaptionBlock caption={caption} placement={placement} />
