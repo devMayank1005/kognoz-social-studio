@@ -6,9 +6,10 @@ import { getSupabaseServerClient } from "@/lib/supabase";
 import { recordActivityAsync } from "@/lib/activity";
 import { currentRequestOrigin } from "@/lib/requestContext";
 import { isAdmin } from "@/lib/adminAccess";
+import { isAllowedSsoEmail } from "@/lib/ssoDomains";
 import { randomUUID } from "node:crypto";
 
-// Auth: Microsoft 365 (Entra ID) Single Sign-On for @kognozconsulting.com
+// Auth: Microsoft 365 (Entra ID) Single Sign-On for the company domains in lib/ssoDomains.ts
 // with fallback to Supabase `users` table via CredentialsProvider.
 
 export const authOptions: NextAuthOptions = {
@@ -89,8 +90,8 @@ export const authOptions: NextAuthOptions = {
             user.name = prof.name;
           }
         }
-        // Strict domain verification: Allow only @kognozconsulting.com & @kognoz.com
-        if (!email.includes("kognozconsulting.com") && !email.includes("kognoz.com")) {
+        // Strict domain verification: only the company domains in ALLOWED_SSO_DOMAINS
+        if (!isAllowedSsoEmail(email)) {
           console.warn(`Blocked sign-in attempt from unauthorized domain: ${email}`);
           const origin = currentRequestOrigin();
           recordActivityAsync({
