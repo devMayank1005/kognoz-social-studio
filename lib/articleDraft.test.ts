@@ -101,35 +101,38 @@ describe("sameTopic", () => {
 // thing a source guard is for.
 // ---------------------------------------------------------------------------
 describe("the mismatch is derived at render, not decided on mount", () => {
-  const studioSrc = readFileSync(join(__dirname, "..", "components", "Studio.tsx"), "utf8");
+  // The writer moved out of Studio.tsx into its own component so it could have a
+  // destination at /articles — it used to be reachable only from inside Studio's
+  // "Article Cover" panel. These guards follow it; what they protect is unchanged.
+  const writerSrc = readFileSync(join(__dirname, "..", "components", "ArticleWriter.tsx"), "utf8");
 
   it("computes the mismatch in render, where the topic has settled", () => {
-    expect(studioSrc).toContain("const draftTopicMismatch = Boolean(");
-    expect(studioSrc).toContain("!sameTopic(draftTopic, topic)");
+    expect(writerSrc).toContain("const draftTopicMismatch = Boolean(");
+    expect(writerSrc).toContain("!sameTopic(draftTopic, topic)");
   });
 
   it("the restore effect only records which topic the draft belongs to", () => {
-    const effect = studioSrc.slice(studioSrc.indexOf("localStorage.getItem(ARTICLE_DRAFT_KEY)"));
+    const effect = writerSrc.slice(writerSrc.indexOf("localStorage.getItem(ARTICLE_DRAFT_KEY)"));
     const body = effect.slice(0, 700);
     expect(body).toContain("setDraftTopic(draft.topic)");
     // Deciding it here is the bug: it cannot see a topic that arrives later.
-    expect(body).not.toContain("setStaleArticle(true)");
+    expect(body).not.toContain("setStale(true)");
   });
 
   it("the notice listens to both the generate flag and the derived mismatch", () => {
-    expect(studioSrc).toContain("{(staleArticle || draftTopicMismatch) && (");
+    expect(writerSrc).toContain("{(stale || draftTopicMismatch) && (");
   });
 
   it("a fresh write claims the current topic, so it is not immediately stale", () => {
-    expect(studioSrc).toContain("setDraftTopic(topic);");
+    expect(writerSrc).toContain("setDraftTopic(topic);");
   });
 
   it("saving is on blur, not on every keystroke", () => {
-    expect(studioSrc).toContain("onBlur={(e) => saveArticleDraft(e.target.value)}");
+    expect(writerSrc).toContain("onBlur={(e) => saveArticleDraft(e.target.value)}");
   });
 
   it("the disabled write button and the revise glyph both explain themselves", () => {
-    expect(studioSrc).toContain('title={!topic.trim() ? "Type a topic first" : undefined}');
-    expect(studioSrc).toContain('aria-label="Revise the article with this instruction"');
+    expect(writerSrc).toContain('title={!topic.trim() ? "Type a topic first" : undefined}');
+    expect(writerSrc).toContain('aria-label="Revise the article with this instruction"');
   });
 });

@@ -22,6 +22,7 @@ import { FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, DECK_SLIDE_LIMITS, budgetFor, type 
 import { SURFACE_LABELS, surfaceFor, lookLever, nextCardSet, setSpec, type DesignSetId } from "@/lib/designSets";
 import { brandKey } from "@/lib/brands";
 import { useBrandSwitch } from "./BrandProvider";
+import { ArticleWriter } from "./ArticleWriter";
 import { BrandSwitch } from "./BrandSwitch";
 import {
   coerceContent,
@@ -31,7 +32,6 @@ import {
 import {
   MAX_SOURCE_CHARS,
   buildGeneratePrompt,
-  buildArticlePrompt,
   buildVerifyPrompt,
   buildModifyPrompt,
   buildDesignNotePrompt,
@@ -39,7 +39,7 @@ import {
   type StyleExample,
   groundingDefault
 } from "@/lib/promptBuilders";
-import { callClaudeJSON, callClaudeText, FAST_MODEL } from "@/lib/claudeClient";
+import { callClaudeJSON, FAST_MODEL } from "@/lib/claudeClient";
 import {
   coerceSamples,
   mergeSamples,
@@ -51,14 +51,13 @@ import {
   type SampleKind,
   type VoiceSample
 } from "@/lib/voiceSamples";
-import { humanizeDeck, humanizeNote, humanizeText } from "@/lib/humanizePass";
+import { humanizeDeck, humanizeNote } from "@/lib/humanizePass";
 import { diffDecks, slideTarget, type EditDiffRow } from "@/lib/editDiff";
 import { lintContent } from "@/lib/slopLint";
 import { type ChannelId } from "@/lib/founderProfiles";
 import { storeGet, storeSet, storePeek } from "@/lib/storeClient";
-import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG, saveBlobAs } from "@/lib/exportPipeline";
+import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG } from "@/lib/exportPipeline";
 import { SocialPreview, type PreviewPage } from "@/components/SocialPreview";
-import { ARTICLE_DRAFT_KEY, isWorthSaving, makeDraft, serialiseDraft, parseDraft, sameTopic } from "@/lib/articleDraft";
 import { Slide, type SlideDesign, type SlideKind } from "./Slide";
 import { Logo } from "./Logo";
 
@@ -202,16 +201,12 @@ export default function Studio() {
   const [modTxt, setModTxt] = useState("");
   const [modLoading, setModLoading] = useState(false);
 
-  const [article, setArticle] = useState("");
-  const [artBusy, setArtBusy] = useState(false);
-  const [artInstr, setArtInstr] = useState("");
 
   // Every AI action here REPLACES what you wrote, and replacing React state wipes the
   // browser's native Cmd+Z stack — so without a snapshot the only way back to your own
   // words is paying for another generation. `undoLabel` names what would be restored.
   type DeckSnapshot = { eyebrow: string; cover: string; slides: CoercedSlide[]; cta: string; label: string };
   const [deckUndo, setDeckUndo] = useState<DeckSnapshot | null>(null);
-  const [articleUndo, setArticleUndo] = useState<{ text: string; label: string } | null>(null);
 
   const snapshotDeck = (label: string) => setDeckUndo({ eyebrow, cover, slides, cta, label });
   const restoreDeck = () => {
@@ -232,9 +227,13 @@ export default function Studio() {
   // Content is written FOR a format. Switching afterwards used to leave Carousel copy
   // sitting in a Story frame with no signal at all; now it says so.
   const [staleFormat, setStaleFormat] = useState(false);
-  const [staleArticle, setStaleArticle] = useState(false);
+  /**
+   * Bumped when the deck is regenerated, so ArticleWriter can say the article was
+   * written for the previous version. A counter, not a boolean: the writer clears
+   * its own banner when it writes again, so nothing here has to remember to.
+   */
+  const [articleStaleSignal, setArticleStaleSignal] = useState(0);
   /** The topic a restored draft was written for, so a mismatch can be spotted later. */
-  const [draftTopic, setDraftTopic] = useState<string | null>(null);
   const [staleVerify, setStaleVerify] = useState(false);
 
   // Called whenever the deck changes underneath a completed fact-check. The verdicts
@@ -257,7 +256,6 @@ export default function Studio() {
   // deck is replaced wholesale.
   const [replay, setReplay] = useState(0);
   const bumpReplay = () => setReplay((r) => r + 1);
-  const [copied, setCopied] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   // Seeded from the cover, since that is the hook, and overwritten by the calendar
   // item's own caption when we arrived from one. Free text after that.
@@ -558,7 +556,6 @@ export default function Studio() {
   // A restored draft written for a different topic than the one now in the box. Derived
   // rather than stored: the topic can arrive after the draft does (a calendar link), so a
   // value computed once on mount would always say "no mismatch".
-  const draftTopicMismatch = Boolean(article && draftTopic && topic.trim() && !sameTopic(draftTopic, topic));
 
   /**
    * The automated style check, recomputed from whatever is on screen.
@@ -640,43 +637,6 @@ export default function Studio() {
     if (!captionTouched.current) setPreviewCaption(String(cover || "").replace(/\*/g, ""));
   }, [cover]);
 
-  /**
-   * The article is the one expensive thing in the app a refresh used to destroy: it was
-   * component state only, so a reload lost a 900-1200 word piece that cost about $0.02.
-   * localStorage rather than /api/store on purpose — the store blobs are shared team-wide,
-   * and a half-written draft belongs to the person writing it.
-   */
-  const saveArticleDraft = (text: string) => {
-    if (typeof window === "undefined") return;
-    try {
-      if (!isWorthSaving(text)) {
-        localStorage.removeItem(ARTICLE_DRAFT_KEY);
-        return;
-      }
-      localStorage.setItem(ARTICLE_DRAFT_KEY, serialiseDraft(makeDraft(topic, pillar, text, new Date().toISOString())));
-    } catch {
-      /* private mode or quota — the draft is still on screen, which is the common case */
-    }
-  };
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    let raw: string | null = null;
-    try {
-      raw = localStorage.getItem(ARTICLE_DRAFT_KEY);
-    } catch {
-      return;
-    }
-    const draft = parseDraft(raw);
-    if (!draft) return;
-    setArticle(draft.text);
-    // Only record WHICH topic it was written for. Deciding staleness here would compare
-    // against an empty topic every time: this runs on mount, and the calendar priming
-    // effect that puts ?topic= into state has not run yet. The comparison is derived at
-    // render instead, so it settles whenever the topic does.
-    setDraftTopic(draft.topic);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once, on mount
-  }, []);
 
   async function markDrafted(itemN: number | string) {
     // Calendar Create-> sets the item to Draft on successful generation
@@ -781,7 +741,7 @@ export default function Studio() {
       setImgOn({});
       snapshotDeck("previous deck");
       setStaleFormat(false);
-      setStaleArticle(Boolean(article));
+      setArticleStaleSignal((n) => n + 1);
       if (verifyRes || verifyFixed) markVerifyStale();
       setCurrent(0);
       if (itemN != null) markDrafted(itemN);
@@ -857,40 +817,6 @@ export default function Studio() {
     }
   }
 
-  async function writeArticle(instruction?: string) {
-    if (artBusy || loading || !topic.trim()) return;
-    setArtBusy(true);
-    setError("");
-    try {
-      const samples = pickSamples(voiceSamples, { channel, kind: "article", seed });
-      setUsedSamples(samples);
-      const prompt = buildArticlePrompt({ brand, topic, pillar, instruction, currentArticle: article, voiceSamples: samples, channel, seed });
-      const text = await callClaudeText("article", prompt, { model: instruction && instruction.trim() ? FAST_MODEL : undefined, maxTokens: 2600 });
-
-      // Second pass. Skipped on a targeted revision: the team asked for one
-      // specific change, and a line edit on top of it would quietly rewrite the
-      // rest of a piece they had already approved.
-      let finalText = text.trim();
-      if (instruction && instruction.trim()) {
-        setPassNote("");
-      } else {
-        const edited = await humanizeText(finalText, { brand, voiceSamples: samples, channel, maxTokens: 6000 });
-        finalText = edited.value.trim();
-        setPassNote(humanizeNote(edited));
-      }
-
-      setArticleUndo(article ? { text: article, label: instruction?.trim() ? "revision" : "rewrite" } : null);
-      setArticle(finalText);
-      saveArticleDraft(finalText);
-      setDraftTopic(topic);
-      setStaleArticle(false);
-      setArtInstr("");
-    } catch (e) {
-      setError(`Article writing failed (${e instanceof Error ? e.message : e}). Try once more; tell me this message if it repeats.`);
-    } finally {
-      setArtBusy(false);
-    }
-  }
 
   async function verifyFacts() {
     if (verifying || loading || modLoading) return;
@@ -1733,85 +1659,22 @@ export default function Studio() {
         {format === "Article Cover" && (
           <div style={{ marginTop: 14, border: `1px solid ${C.line}`, borderRadius: 12, padding: 14, background: C.off }}>
             <span style={label}>The article itself · the cover is the billboard, this is the asset</span>
-            {articleUndo && (
-              <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginBottom: 8, lineHeight: 1.5 }}>
-                Claude replaced your article.{" "}
-                <button
-                  type="button"
-                  onClick={() => { setArticle(articleUndo.text); setArticleUndo(null); }}
-                  style={{ fontFamily: font, fontSize: 11.5, fontWeight: 700, color: C.blue, background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
-                >
-                  Undo the {articleUndo.label}
-                </button>
-              </div>
-            )}
-            {(staleArticle || draftTopicMismatch) && (
-              <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginBottom: 8, lineHeight: 1.5 }}>
-                Written for the previous version of this deck. Still yours to edit — rewrite only if it no longer fits.
-              </div>
-            )}
-            <button
-              onClick={() => writeArticle()}
-              disabled={artBusy || loading || !topic.trim()}
-              // It sat greyed out with no explanation, which reads as broken rather than
-              // as waiting for input. Same wording as the main Generate button.
-              title={!topic.trim() ? "Type a topic first" : undefined}
-              style={{ ...btn(true), opacity: artBusy || loading || !topic.trim() ? 0.6 : 1, marginBottom: 10 }}
-            >
-              {artBusy ? "Writing the article…" : article ? "Rewrite from scratch" : "Write the full article"}
-            </button>
-            {article && (
-              <>
-                <textarea
-                  value={article}
-                  onChange={(e) => setArticle(e.target.value)}
-                  // Saved on blur rather than on every keystroke — the same pattern House
-                  // style already uses for its textarea.
-                  onBlur={(e) => saveArticleDraft(e.target.value)}
-                  rows={16}
-                  style={{ ...inputStyle, fontFamily: font, fontSize: 12.5, lineHeight: 1.6, marginBottom: 8 }}
-                />
-                <div style={{ fontFamily: font, fontSize: 11, color: C.inkMute, marginBottom: 8 }}>{article.split(/\s+/).filter(Boolean).length} words · markdown headings paste cleanly into LinkedIn's article editor</div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                  <input value={artInstr} onChange={(e) => setArtInstr(e.target.value)} placeholder="Revise: e.g. sharpen the hook, shorten section 3, add a Gulf example" style={{ ...inputStyle, flex: 1, marginBottom: 0 }} />
-                  <button
-                    onClick={() => writeArticle(artInstr)}
-                    disabled={artBusy || loading || !artInstr.trim()}
-                    // A bare glyph with no accessible name and no tooltip.
-                    title="Revise the article with this instruction"
-                    aria-label="Revise the article with this instruction"
-                    style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "0 14px", borderRadius: 8, cursor: artBusy || loading || !artInstr.trim() ? "default" : "pointer", border: "none", color: "#fff", background: GRAD, opacity: artBusy || loading || !artInstr.trim() ? 0.55 : 1 }}
-                  >
-                    ↻
-                  </button>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    onClick={async () => {
-                      // writeText returns a promise, so a denied permission or an
-                      // insecure origin escaped the old synchronous catch as an
-                      // unhandled rejection and the button gave no feedback either way.
-                      try {
-                        await navigator.clipboard.writeText(article);
-                        setCopied(true);
-                        window.setTimeout(() => setCopied(false), 1600);
-                      } catch {
-                        setError("Couldn't copy — your browser blocked clipboard access. Select the text and copy it manually.");
-                      }
-                    }}
-                    style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "8px 14px", borderRadius: 8, cursor: "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent" }}
-                  >
-                    {copied ? "Copied ✓" : "Copy article"}
-                  </button>
-                  <button
-                    onClick={() => saveBlobAs(new Blob([article], { type: "text/markdown" }), `${brand.id}-article.md`)}
-                    style={{ fontFamily: font, fontSize: 12, fontWeight: 700, padding: "8px 14px", borderRadius: 8, cursor: "pointer", border: `1.5px solid ${C.blue}`, color: C.blue, background: "transparent" }}
-                  >
-                    ⬇ .md file
-                  </button>
-                </div>
-              </>
-            )}
+            {/* The writer now lives in components/ArticleWriter.tsx and has its own
+                destination at /articles. It is mounted here too, because when you are
+                making an Article Cover the cover and the article belong together —
+                the point of the extraction was to stop it being ONLY here. */}
+            <ArticleWriter
+              topic={topic}
+              pillar={pillar}
+              channel={channel}
+              voiceSamples={voiceSamples}
+              seed={seed}
+              busy={loading}
+              staleSignal={articleStaleSignal}
+              onUsedSamples={setUsedSamples}
+              onPassNote={setPassNote}
+              onError={setError}
+            />
           </div>
         )}
 

@@ -1,13 +1,9 @@
-import { Suspense } from "react";
-import Studio from "@/components/Studio";
+import { redirect } from "next/navigation";
+import { HOME_HREF } from "@/lib/navigation";
 
-// Studio (/) — the deck editor. Real now: format/pillar/topic -> generate
-// (via the secure /api/claude proxy) -> edit -> verify -> export. Wrapped in
-// Suspense because Studio reads useSearchParams (Calendar's Create-> link).
-export default function StudioPage() {
-  return (
-    <Suspense fallback={<div style={{ padding: 48 }}>Loading Studio…</div>}>
-      <Studio />
-    </Suspense>
-  );
+// `/` is not a page any more — Studio lives at /studio, alongside five siblings.
+// Redirecting rather than rendering Studio here keeps one canonical URL per screen, so
+// the sidebar highlight, the command palette and a shared link all agree.
+export default function RootPage() {
+  redirect(HOME_HREF);
 }

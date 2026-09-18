@@ -1,119 +1,15 @@
 "use client";
 
-import Link from "next/link";
-import { useSession, signOut } from "next-auth/react";
 import CalendarView from "@/components/calendar/CalendarView";
-import { Logo } from "@/components/Logo";
-import { useBrandSwitch } from "@/components/BrandProvider";
-import { C, FONT } from "@/lib/tokens";
+import { AppShell } from "@/components/shell/AppShell";
 
+// The page-level header this used to carry — logo, "Back to Studio", the brand switch,
+// the user pill, Sign out — now lives in the shell. Three screens each hand-rolled a
+// version of it and they had already drifted apart.
 export default function CalendarPage() {
-  const { data: session } = useSession();
-  // Without this the header drew the Kognoz mark while the brand toggle directly
-  // beside it said Konverz — two controls on one screen contradicting each other.
-  const { brand } = useBrandSwitch();
-
   return (
-    <main
-      style={{
-        padding: "24px 32px 48px",
-        maxWidth: 1380,
-        margin: "0 auto",
-        fontFamily: FONT,
-        minHeight: "100vh",
-        boxSizing: "border-box"
-      }}
-    >
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 24,
-          paddingBottom: 16,
-          borderBottom: `1px solid ${C.line}`,
-          flexWrap: "wrap",
-          gap: 12
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <Logo h={34} brand={brand} />
-          <Link
-            href="/"
-            style={{
-              fontFamily: FONT,
-              fontSize: 12.5,
-              fontWeight: 700,
-              color: C.blue,
-              textDecoration: "none",
-              background: C.mist,
-              padding: "7px 14px",
-              borderRadius: 8,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6
-            }}
-          >
-            <span>←</span>
-            <span>Back to Studio</span>
-          </Link>
-        </div>
-
-        {session?.user && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {/* Only shown to admins — a link nobody can follow is worse than no link.
-                Both API routes re-check independently; this is discoverability only. */}
-            {session.user.isAdmin && (
-              <Link
-                href="/admin/activity"
-                style={{
-                  fontFamily: FONT,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: C.blue,
-                  textDecoration: "none",
-                  background: C.mist,
-                  padding: "5px 12px",
-                  borderRadius: 14
-                }}
-              >
-                Activity
-              </Link>
-            )}
-            <span
-              style={{
-                fontFamily: FONT,
-                fontSize: 12,
-                fontWeight: 700,
-                color: C.blue,
-                background: C.mist,
-                padding: "5px 12px",
-                borderRadius: 14
-              }}
-            >
-              {session.user.name || session.user.email}
-            </span>
-            <button
-              onClick={() => signOut({ callbackUrl: "/login" })}
-              style={{
-                fontFamily: FONT,
-                border: `1px solid ${C.line}`,
-                background: "#fff",
-                color: C.inkMute,
-                fontSize: 12,
-                fontWeight: 600,
-                borderRadius: 6,
-                padding: "5px 10px",
-                cursor: "pointer"
-              }}
-            >
-              Sign out
-            </button>
-          </div>
-        )}
-      </header>
-
+    <AppShell>
       <CalendarView />
-    </main>
+    </AppShell>
   );
 }

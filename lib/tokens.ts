@@ -2,6 +2,8 @@
 // Ported verbatim from kognoz-social-studio-v3.jsx (the `C` const, GRAD, GRAD_DARK,
 // fonts, glass tokens). Do not "improve" these — they're the proven values.
 
+import { slideFontsUrl } from "./fontRegistry";
+
 export const C = {
   blue: "#005184",
   green: "#88B787",
@@ -25,8 +27,32 @@ export const GRAD_DARK = `linear-gradient(150deg, #063D5E 0%, ${C.blue} 60%, #0A
 export const FONT = "'Open Sans', system-ui, sans-serif";
 export const DISPLAY_FONT = "'Fraunces', Georgia, 'Times New Roman', serif";
 
-export const GOOGLE_FONTS_URL =
-  "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Open+Sans:wght@400;600;700;800&display=swap";
+// ---------------------------------------------------------------------------
+// Chrome type (PRD §2.1). APPLICATION UI ONLY — never a slide.
+//
+// A slide's typefaces are the brand's and are embedded in exports. These two are the
+// shell's: sidebar, topbar, tables, timestamps. Putting either on a slide would put it
+// in the export path, which is the one thing lib/fontRegistry.ts exists to prevent.
+// ---------------------------------------------------------------------------
+export const UI_FONT = "'Plus Jakarta Sans', 'Open Sans', system-ui, sans-serif";
+/** Tabular numerals — for metrics, timestamps, IDs and anything that lines up in a column. */
+export const MONO_FONT = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+
+// Semantic status colours (PRD §2.2). The only two roles the brand palettes do not
+// already cover: a verified fact and one that needs attention. Everything else in the
+// PRD's token table maps onto C above.
+export const AUDIT_OK = "#059669";
+export const AUDIT_WARN = "#EA580C";
+
+/**
+ * The stylesheet an export EMBEDS for Kognoz — not the one the browser loads.
+ *
+ * lib/exportFonts.ts fetches this and inlines every face as base64 inside the exported
+ * SVG, so anything added here lands in the bytes of every PNG and PDF. It is derived
+ * from lib/fontRegistry.ts, which keeps UI faces out by construction and pins this
+ * exact string in a test so exports cannot change by accident.
+ */
+export const GOOGLE_FONTS_URL = slideFontsUrl("kognoz");
 
 // Glass tokens (§5 / jsx) — translucent fill + border + blur + deep shadow.
 // Blur renders live in preview; exports keep translucency/border/shadow even if
@@ -123,8 +149,8 @@ export const KONVERZ_GRAD_ON_DARK = "linear-gradient(90deg, #F06BAE 0%, #A88CF0 
 export const KONVERZ_FONT = "'Poppins', 'Segoe UI', system-ui, sans-serif";
 export const KONVERZ_DISPLAY_FONT = "'Poppins', 'Segoe UI', system-ui, sans-serif";
 
-export const KONVERZ_GOOGLE_FONTS_URL =
-  "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap";
+/** Konverz's export stylesheet. See GOOGLE_FONTS_URL — same rules, same registry. */
+export const KONVERZ_GOOGLE_FONTS_URL = slideFontsUrl("konverz");
 
 // Konverz module tints (brand kit §1.2). The panel background for a given accent:
 // journey columns and card panels are tinted per module rather than sharing one

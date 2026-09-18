@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useSession, signOut } from "next-auth/react";
-import { Logo } from "@/components/Logo";
-import { C, FONT } from "@/lib/tokens";
+import { useSession } from "next-auth/react";
+import { C, FONT, MONO_FONT } from "@/lib/tokens";
+import { AppShell } from "@/components/shell/AppShell";
 import { describeActivity, describeDevice } from "@/lib/activityEvents";
 
 // The activity timeline.
@@ -52,7 +51,8 @@ function accentFor(action: string): string {
 }
 
 export default function ActivityPage() {
-  const { data: session, status } = useSession();
+  // Only the load state is needed now — the shell renders the user block.
+  const { status } = useSession();
 
   const [rows, setRows] = useState<Row[]>([]);
   const [people, setPeople] = useState<string[]>([]);
@@ -159,83 +159,8 @@ export default function ActivityPage() {
   const isDenied = /administrator/i.test(error);
 
   return (
-    <main
-      style={{
-        padding: "24px 32px 64px",
-        maxWidth: 1100,
-        margin: "0 auto",
-        fontFamily: FONT,
-        minHeight: "100vh",
-        boxSizing: "border-box"
-      }}
-    >
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 20,
-          paddingBottom: 16,
-          borderBottom: `1px solid ${C.line}`,
-          flexWrap: "wrap",
-          gap: 12
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <Logo h={34} />
-          <Link
-            href="/"
-            style={{
-              fontSize: 12.5,
-              fontWeight: 700,
-              color: C.blue,
-              textDecoration: "none",
-              background: C.mist,
-              padding: "7px 14px",
-              borderRadius: 8,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6
-            }}
-          >
-            <span>←</span>
-            <span>Back to Studio</span>
-          </Link>
-        </div>
-
-        {session?.user && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span
-              style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: C.blue,
-                background: C.mist,
-                padding: "5px 12px",
-                borderRadius: 14
-              }}
-            >
-              {session.user.name || session.user.email}
-            </span>
-            <button
-              onClick={() => signOut({ callbackUrl: "/login" })}
-              style={{
-                fontFamily: FONT,
-                border: `1px solid ${C.line}`,
-                background: "#fff",
-                color: C.inkMute,
-                fontSize: 12,
-                fontWeight: 600,
-                borderRadius: 6,
-                padding: "5px 10px",
-                cursor: "pointer"
-              }}
-            >
-              Sign out
-            </button>
-          </div>
-        )}
-      </header>
+    <AppShell>
+      <div style={{ maxWidth: 1100, fontFamily: FONT }}>
 
       <div style={{ marginBottom: 18 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: C.ink, margin: "0 0 4px" }}>Activity</h1>
@@ -383,6 +308,9 @@ export default function ActivityPage() {
                         <li key={i} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 13 }}>
                           <span
                             style={{
+                              // PRD §2.1 — timestamps in the mono face so the column
+                              // lines up. 12px clears the 11px floor in §7.
+                              fontFamily: MONO_FONT,
                               fontVariantNumeric: "tabular-nums",
                               color: C.inkMute,
                               fontSize: 12,
@@ -440,6 +368,7 @@ export default function ActivityPage() {
         Downloads are the closest thing to publishing this tool records — it does not post to LinkedIn or
         Instagram, so “Posted” is a status somebody set by hand. IP addresses are retained for 180 days.
       </p>
-    </main>
+      </div>
+    </AppShell>
   );
 }
