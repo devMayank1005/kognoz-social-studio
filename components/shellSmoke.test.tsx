@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ArticleWriter } from "./ArticleWriter";
-import { NavIcon } from "./shell/NavIcon";
+import { NAV_ICONS } from "./shell/navIcons";
 import { Placeholder } from "./shell/Placeholder";
 import { NAV_ITEMS } from "@/lib/navigation";
 
@@ -21,33 +21,19 @@ import { NAV_ITEMS } from "@/lib/navigation";
 
 const html = (el: React.ReactElement) => renderToStaticMarkup(el);
 
-describe("NavIcon", () => {
-  it("renders a glyph for every destination, so no sidebar row is blank", () => {
+describe("nav icons", () => {
+  it("has a glyph for every destination, so no sidebar row is blank", () => {
     for (const item of NAV_ITEMS) {
-      const out = html(<NavIcon id={item.id} />);
+      const Icon = NAV_ICONS[item.id];
+      expect(Icon, `no icon for "${item.id}"`).toBeTruthy();
+      const out = html(<Icon className="w-4 h-4" />);
       expect(out).toContain("<svg");
-      expect(out.length).toBeGreaterThan(80);
     }
   });
 
-  it("is hidden from screen readers when a label sits beside it", () => {
-    // The sidebar always shows the label too. Announcing both says everything twice.
-    const out = html(<NavIcon id="studio" />);
-    expect(out).toContain('aria-hidden="true"');
-    expect(out).not.toContain("<title>");
-  });
-
-  it("becomes a named image when it stands alone", () => {
-    const out = html(<NavIcon id="studio" title="Studio" />);
-    expect(out).toContain('role="img"');
-    expect(out).toContain("<title>Studio</title>");
-    expect(out).not.toContain('aria-hidden="true"');
-  });
-
-  it("takes its colour from the row, not from itself", () => {
-    // Hardcoding a colour here would break the active/inactive state and dark grounds.
-    const out = html(<NavIcon id="calendar" />);
-    expect(out).toContain('stroke="currentColor"');
+  it("renders icons that inherit colour from the row", () => {
+    // The active/inactive colour is decided by the row, never hardcoded in the glyph.
+    expect(html(<NAV_ICONS.studio className="w-4 h-4" />)).toContain('stroke="currentColor"');
   });
 });
 

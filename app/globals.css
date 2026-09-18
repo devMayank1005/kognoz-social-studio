@@ -1,3 +1,26 @@
+/* ---------------------------------------------------------------------------
+   Tailwind v4 — UTILITIES ONLY. Preflight is deliberately NOT imported.
+   ---------------------------------------------------------------------------
+   Preflight resets base element styles across the whole document: margins,
+   border widths, heading sizes, list markers. That is normally what you want.
+
+   Here it would be a bug. lib/exportPipeline.ts serialises a slide into an SVG
+   <foreignObject> and STRIPS <style> tags, so only INLINE styles survive
+   rasterisation. Anything preflight contributed would render on screen and
+   vanish from the exported PNG or PDF — the same preview/export mismatch that
+   made a title render as a synthesised bold on screen and a true Open Sans 800
+   in the file.
+
+   The rule that follows from it:
+
+     CHROME       Tailwind utility classes. Never exported.
+     Slide.tsx    inline styles only. It IS the export.
+
+   A test asserts Slide.tsx never gains a className.
+   --------------------------------------------------------------------------- */
+@import "tailwindcss/theme.css";
+@import "tailwindcss/utilities.css";
+
 :root {
   --color-blue: #005184;
   --color-green: #88b787;

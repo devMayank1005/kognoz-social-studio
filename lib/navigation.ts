@@ -1,34 +1,155 @@
 // The app's destinations, in one place.
 //
 // Pure and I/O-free, like lib/formats.ts, so three things that must agree cannot drift:
-// the sidebar, the ⌘K command palette, and the active-state highlight. Before this
-// existed there was no list at all — Studio, Calendar and the activity log each built
-// their own header, and the article writer was reachable only from inside a
-// 2,564-line component, which is why nobody could find it.
+// the sidebar, the ⌘K command palette, and the active-state highlight.
 //
-// Adding a destination is one entry here. It then appears in the sidebar and the
-// palette automatically.
+// Shape follows the reference UI (github.com/devMayank1005/demo-frontend,
+// src/components/Sidebar.tsx) — four sections, badges on the right of a row. Two
+// deliberate differences:
+//
+//   Routes, not state.  The reference is one page switching on an `activeNav` union.
+//                       We keep real Next routes, so URLs are shareable and the back
+//                       button works.
+//   Settings is a modal. It sits in the ADMIN section but opens an overlay rather than
+//                       navigating, exactly as the reference does.
 
-export type NavId = "studio" | "calendar" | "articles" | "style" | "design" | "audit";
+export type NavId =
+  | "studio"
+  | "calendar"
+  | "articles"
+  | "assets"
+  | "style"
+  | "voice"
+  | "design"
+  | "audit"
+  | "settings";
+
+export type NavSection = "workspace" | "style" | "admin";
+
+/** Section order and headings, as the sidebar prints them. */
+export const SECTIONS: { id: NavSection; label: string }[] = [
+  { id: "workspace", label: "Workspace" },
+  { id: "style", label: "Style" },
+  { id: "admin", label: "Admin" }
+];
+
+export type BadgeKind =
+  /** A small chip, e.g. Studio's "AI". */
+  | "chip"
+  /** A mono count supplied at render time, e.g. Calendar's item total. */
+  | "count"
+  /** A status dot, e.g. Activity's health indicator. */
+  | "dot";
 
 export interface NavItem {
   id: NavId;
-  /** Sidebar label. Short — the rail is 232px wide. */
+  /** Sidebar label. Short — the rail is 232px. */
   label: string;
-  href: string;
+  /** Where it goes. Absent for an item that opens a modal instead. */
+  href?: string;
+  section: NavSection;
   /** One line, shown in the command palette. Says what the screen is FOR. */
   hint: string;
+  /**
+   * The heading the topbar prints, which is longer and more formal than the rail's
+   * label — "Calendar" in 232px, "Content Calendar" across the top. Taken from the
+   * reference UI's getPageTitle(). Kept here so the two cannot drift.
+   */
+  pageTitle: string;
   /** Hidden from people outside ADMIN_EMAILS. The API re-checks; this is not the gate. */
   adminOnly?: boolean;
+  badge?: BadgeKind;
+  /** Literal text for a "chip" badge. */
+  badgeText?: string;
+  /** Opens an overlay rather than navigating. */
+  modal?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { id: "studio", label: "Studio", href: "/studio", hint: "Write and design a post" },
-  { id: "calendar", label: "Calendar", href: "/calendar", hint: "Plan the month" },
-  { id: "articles", label: "Articles", href: "/articles", hint: "Write a long-form article" },
-  { id: "style", label: "Style & Voice", href: "/style", hint: "Brand voice, house rules, banned words" },
-  { id: "design", label: "Design System", href: "/design", hint: "Type scale and design families" },
-  { id: "audit", label: "Activity", href: "/admin/activity", hint: "Who did what, and when", adminOnly: true }
+  // ---- Workspace ----
+  {
+    id: "studio",
+    label: "Studio",
+    href: "/studio",
+    section: "workspace",
+    hint: "Write and design a post",
+    pageTitle: "Studio",
+    badge: "chip",
+    badgeText: "AI"
+  },
+  {
+    id: "calendar",
+    label: "Calendar",
+    href: "/calendar",
+    section: "workspace",
+    hint: "Plan the month",
+    pageTitle: "Content Calendar",
+    badge: "count"
+  },
+  {
+    id: "articles",
+    label: "Articles",
+    href: "/articles",
+    section: "workspace",
+    hint: "Write a long-form article",
+    pageTitle: "Article Writer"
+  },
+  {
+    id: "assets",
+    label: "Assets",
+    href: "/assets",
+    section: "workspace",
+    hint: "Images and files for your posts",
+    pageTitle: "Asset Library"
+  },
+
+  // ---- Style ----
+  {
+    id: "style",
+    label: "House Style",
+    href: "/style",
+    section: "style",
+    hint: "Tone, writing rules, banned words",
+    pageTitle: "House Style & Editorial Guidelines"
+  },
+  {
+    id: "voice",
+    label: "Voice",
+    href: "/voice",
+    section: "style",
+    hint: "Real writing the model imitates",
+    pageTitle: "Brand Voice Samples",
+    badge: "count"
+  },
+  {
+    id: "design",
+    label: "Design",
+    href: "/design",
+    section: "style",
+    hint: "Type scale and design families",
+    pageTitle: "Design System & Visual Standards"
+  },
+
+  // ---- Admin ----
+  {
+    id: "audit",
+    label: "Activity",
+    href: "/admin/activity",
+    section: "admin",
+    hint: "Who did what, and when",
+    pageTitle: "Admin Audit & Activity",
+    adminOnly: true,
+    badge: "dot"
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    section: "admin",
+    hint: "Workspace configuration",
+    pageTitle: "Workspace Settings",
+    adminOnly: true,
+    modal: true
+  }
 ];
 
 /** The default destination. `/` redirects here. */
@@ -39,13 +160,18 @@ export function visibleNavItems(isAdmin: boolean | undefined): NavItem[] {
   return NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin === true);
 }
 
+/** The visible items of one section, in declared order. Empty sections are not rendered. */
+export function sectionItems(section: NavSection, isAdmin: boolean | undefined): NavItem[] {
+  return visibleNavItems(isAdmin).filter((i) => i.section === section);
+}
+
 /**
  * Which destination a path belongs to.
  *
  * Longest match wins, and a match must be the whole href or a path SEGMENT under it —
- * so `/studio` never claims `/studio-archive`, and `/admin/activity` is not swallowed
- * by a shorter entry. Returns null for a path outside the app's navigation (`/login`),
- * so the sidebar highlights nothing rather than guessing.
+ * so `/studio` never claims `/studio-archive`, and `/admin/activity` is not swallowed by
+ * a shorter entry. Returns null for a path outside the app's navigation (`/login`), so
+ * the sidebar highlights nothing rather than guessing.
  */
 export function activeNavId(pathname: string | null | undefined): NavId | null {
   const path = (pathname || "").split("?")[0].replace(/\/+$/, "") || "/";
@@ -53,8 +179,9 @@ export function activeNavId(pathname: string | null | undefined): NavId | null {
 
   let best: NavItem | null = null;
   for (const item of NAV_ITEMS) {
+    if (!item.href) continue; // a modal has no path to match
     if (path === item.href || path.startsWith(item.href + "/")) {
-      if (!best || item.href.length > best.href.length) best = item;
+      if (!best || !best.href || item.href.length > best.href.length) best = item;
     }
   }
   return best ? best.id : null;

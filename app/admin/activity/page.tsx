@@ -160,7 +160,8 @@ export default function ActivityPage() {
 
   return (
     <AppShell>
-      <div style={{ maxWidth: 1100, fontFamily: FONT }}>
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div style={{ maxWidth: 1100, fontFamily: FONT }}>
 
       <div style={{ marginBottom: 18 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: C.ink, margin: "0 0 4px" }}>Activity</h1>
@@ -368,6 +369,7 @@ export default function ActivityPage() {
         Downloads are the closest thing to publishing this tool records — it does not post to LinkedIn or
         Instagram, so “Posted” is a status somebody set by hand. IP addresses are retained for 180 days.
       </p>
+      </div>
       </div>
     </AppShell>
   );

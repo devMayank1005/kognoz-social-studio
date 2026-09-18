@@ -9,7 +9,9 @@ import { AppShell } from "@/components/shell/AppShell";
 export default function CalendarPage() {
   return (
     <AppShell>
-      <CalendarView />
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <CalendarView />
+      </div>
     </AppShell>
   );
 }
