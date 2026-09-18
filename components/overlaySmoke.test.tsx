@@ -3,6 +3,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HelpModal } from "./overlays/HelpModal";
 import { ExportDrawer, type ExportAction } from "./overlays/ExportDrawer";
+import { VerifyFactsModal } from "./overlays/VerifyFactsModal";
 
 // Render checks for the overlays, in the same spirit as renderSmoke.test.tsx.
 //
@@ -104,5 +105,65 @@ describe("ExportDrawer exports for real", () => {
     const a = action("pdf", run);
     expect(typeof a.run).toBe("function");
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("VerifyFactsModal keeps 'not confirmed' apart from 'wrong'", () => {
+  const checks = [
+    { where: "cover", claim: "Attrition fell 14%", verdict: "wrong", note: "The figure is 9%.", realSource: "Report 2026" },
+    { where: "slide 2", claim: "Most firms restructure yearly", verdict: "unverifiable", note: "No source found." },
+    { where: "cta", claim: "Skills decay in 18 months", verdict: "verified", note: "Matches the study." }
+  ];
+  const out = html(<VerifyFactsModal isOpen onClose={() => {}} checks={checks} />);
+
+  it("labels the three states differently", () => {
+    // One red ✗ for both "contradicted" and "could not confirm" makes someone delete a
+    // true sentence because a search came back thin.
+    expect(out).toContain("Contradicted");
+    expect(out).toContain("Not confirmed");
+    expect(out).toContain("Confirmed");
+  });
+
+  it("leads with the contradiction, not the green ticks", () => {
+    expect(out.indexOf("Attrition fell 14%")).toBeLessThan(out.indexOf("Skills decay in 18 months"));
+  });
+
+  it("warns against cutting an unconfirmed claim", () => {
+    expect(out).toMatch(/not the same as false/i);
+  });
+
+  it("never says 'all confirmed' when something was only unconfirmed", () => {
+    const partial = html(
+      <VerifyFactsModal
+        isOpen
+        onClose={() => {}}
+        checks={[
+          { where: "cover", claim: "A", verdict: "verified", note: "" },
+          { where: "cta", claim: "B", verdict: "unverifiable", note: "" }
+        ]}
+      />
+    );
+    expect(partial).not.toMatch(/all \d+ claims? confirmed/i);
+    expect(partial).toMatch(/could not be confirmed/i);
+  });
+
+  it("says nothing has run rather than implying a clean pass", () => {
+    const fresh = html(<VerifyFactsModal isOpen onClose={() => {}} checks={[]} />);
+    expect(fresh).toMatch(/nothing checked yet/i);
+    expect(fresh).not.toMatch(/confirmed\./i);
+  });
+
+  it("warns that a grounded check costs more, since it is billed per run", () => {
+    expect(html(<VerifyFactsModal isOpen onClose={() => {}} checks={[]} />)).toMatch(/costs several times/i);
+  });
+
+  it("offers Apply only when a corrected deck came back", () => {
+    expect(out).not.toContain("Apply corrections");
+    const withFix = html(<VerifyFactsModal isOpen onClose={() => {}} checks={checks} canApply onApply={() => {}} />);
+    expect(withFix).toContain("Apply corrections");
+  });
+
+  it("is nothing when closed", () => {
+    expect(html(<VerifyFactsModal isOpen={false} onClose={() => {}} checks={checks} />)).toBe("");
   });
 });
