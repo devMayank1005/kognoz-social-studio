@@ -25,6 +25,10 @@ import {
   MIN_SIZE,
   containsPoint,
   hitTest,
+  sanitiseHtml,
+  textOfHtml,
+  sameBox,
+  resizeElement,
   cornersOf,
   boundsOf,
   type SlideElement,
@@ -337,5 +341,106 @@ describe("geometry for chrome", () => {
     // and still centred on the same point
     expect(b.x + b.w / 2).toBeCloseTo(200, 6);
     expect(b.y + b.h / 2).toBeCloseTo(150, 6);
+  });
+});
+
+describe("sanitiseHtml", () => {
+  const GRADIENT =
+    'background:linear-gradient(120deg, #009bdd, #75a02f);-webkit-background-clip:text;background-clip:text;color:transparent';
+
+  it("keeps the renderer's own span and its inline style untouched", () => {
+    // This is the gradient word from a cover headline. Losing it is the whole reason
+    // markup is carried across instead of textContent.
+    const html = `Culture is what your people <span style="${GRADIENT}">do</span>`;
+    expect(sanitiseHtml(html)).toBe(`Culture is what your people <span style="${GRADIENT}">do</span>`);
+  });
+
+  it("keeps the display:block spans a multi-line body is made of", () => {
+    const html = '<span style="display:block">One</span><span style="display:block">Two</span>';
+    expect(sanitiseHtml(html)).toBe(html);
+  });
+
+  it("removes a script and its contents, not just its tags", () => {
+    expect(sanitiseHtml('a<script>alert(1)</script>b')).toBe("ab");
+  });
+
+  it("unwraps a tag it does not allow, keeping the words", () => {
+    expect(sanitiseHtml("<div>hello</div>")).toBe("hello");
+    expect(sanitiseHtml("<img src=x>gone")).toBe("gone");
+  });
+
+  it("drops every attribute except style", () => {
+    expect(sanitiseHtml('<span class="x" id="y" onclick="boom()">t</span>')).toBe("<span>t</span>");
+  });
+
+  it("drops a style that could pull in a remote image", () => {
+    // A remote url() taints the export canvas and kills the download with a SecurityError.
+    expect(sanitiseHtml('<span style="background:url(https://evil/x.png)">t</span>')).toBe("<span>t</span>");
+  });
+
+  it("normalises br, the one void tag the exporter can handle", () => {
+    expect(sanitiseHtml("a<br>b<br/>c")).toBe("a<br/>b<br/>c");
+  });
+
+  it("introduces no void tag the exporter would choke on", () => {
+    const out = sanitiseHtml("<hr><wbr>text<col>");
+    for (const tag of ["hr", "wbr", "col"]) expect(out).not.toMatch(new RegExp(`<${tag}`));
+  });
+
+  it("is empty for empty input", () => {
+    expect(sanitiseHtml("")).toBe("");
+  });
+});
+
+describe("textOfHtml", () => {
+  it("gives back the words, with line breaks preserved", () => {
+    expect(textOfHtml('One<br/>Two <span style="x">three</span>')).toBe("One\nTwo three");
+  });
+});
+
+describe("sameBox", () => {
+  const a = text({ id: "el_1", x: 10, y: 10, w: 100, h: 50, rot: 0, fontSize: 40 });
+
+  it("is true for a gesture that moved nothing", () => {
+    expect(sameBox(a, { ...a })).toBe(true);
+  });
+
+  it("is false once anything geometric changed", () => {
+    expect(sameBox(a, { ...a, x: 11 })).toBe(false);
+    expect(sameBox(a, { ...a, rot: 1 })).toBe(false);
+  });
+
+  it("notices a font size change, since a corner resize is the thing that causes one", () => {
+    expect(sameBox(a, { ...a, fontSize: 41 })).toBe(false);
+  });
+});
+
+describe("resizeElement", () => {
+  const t = text({ id: "el_1", x: 0, y: 0, w: 200, h: 100, fontSize: 50 });
+  const shape = createShape([], "rect", { id: "el_2", x: 0, y: 0, w: 200, h: 100 });
+
+  it("scales the type when a corner is dragged", () => {
+    const out = resizeElement(t, "se", 100, 0) as typeof t;
+    expect(out.w).toBeCloseTo(300, 5);
+    expect(out.fontSize).toBeCloseTo(75, 5); // 50 * 300/200
+  });
+
+  it("locks aspect on a corner, so the type and the box stay in proportion", () => {
+    const out = resizeElement(t, "se", 100, 0);
+    expect(out.w / out.h).toBeCloseTo(t.w / t.h, 4);
+  });
+
+  it("leaves the type alone when an edge is dragged, so the text re-wraps instead", () => {
+    const out = resizeElement(t, "e", 100, 0) as typeof t;
+    expect(out.w).toBeCloseTo(300, 5);
+    expect(out.fontSize).toBe(50);
+    expect(out.h).toBe(100);
+  });
+
+  it("does not lock a shape's aspect or invent a font size for it", () => {
+    const out = resizeElement(shape, "se", 100, 0);
+    expect(out.w).toBeCloseTo(300, 5);
+    expect(out.h).toBe(100);
+    expect(out).not.toHaveProperty("fontSize");
   });
 });

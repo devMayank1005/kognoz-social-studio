@@ -52,6 +52,18 @@ export interface TextElement extends BaseElement {
   align: "left" | "center" | "right";
   lineHeight: number;
   from?: TemplateSlot;
+  /**
+   * The element's rendered markup, when it came from the template.
+   *
+   * The template does not draw plain strings: a starred word becomes a `<span>` carrying a
+   * clipped gradient, and a multi-line body becomes one `display:block` span per line. Both
+   * are lost by reading `textContent` — the gradient turns flat, and two lines concatenate
+   * into one with no space between them. Carrying the markup keeps an unlocked element
+   * pixel-identical to the template it replaced.
+   *
+   * Absent on text boxes somebody added by hand; those are plain strings and stay that way.
+   */
+  html?: string;
 }
 
 export type ShapeKind = "rect" | "ellipse" | "line";
@@ -129,13 +141,18 @@ export function nextZ(elements: readonly SlideElement[]): number {
 }
 
 export function createText(elements: readonly SlideElement[], patch: Partial<TextElement> = {}): TextElement {
+  const fontSize = patch.fontSize ?? 48;
+  const lineHeight = patch.lineHeight ?? 1.2;
   return {
     id: nextElementId(elements),
     kind: "text",
     x: 120,
     y: 120,
     w: 520,
-    h: 120,
+    // One line of the chosen size. The box hugs its text rather than padding it out: text
+    // renders as a block, so a box taller than its content would sit the words at the top
+    // of an obviously oversized selection frame.
+    h: Math.round(fontSize * lineHeight),
     rot: 0,
     z: nextZ(elements),
     text: "Text",
@@ -429,6 +446,92 @@ export function resetSlot(elements: readonly SlideElement[], slot: TemplateSlot)
  */
 export function applyRegenerate(elements: readonly SlideElement[]): SlideElement[] {
   return renumber(sortByZ(elements.filter((el) => !(el.kind === "text" && el.from))));
+}
+
+// --- markup -----------------------------------------------------------------
+
+/**
+ * Tags an element's markup may contain.
+ *
+ * Only what the slide renderer itself emits. `<br>` is here because the exporter normalises
+ * it (lib/exportPipeline.ts) — a void element it does NOT normalise would throw an XML parse
+ * error and take the whole slide's export down with it.
+ */
+const ALLOWED_TAGS = new Set(["span", "br", "b", "i", "em", "strong"]);
+
+/**
+ * Reduce markup to the subset the renderer produces and the exporter can survive.
+ *
+ * The HTML here is our own output, so this is not defending against a hostile author. It is
+ * defending the export: this value round-trips through /api/store as JSON, and a row edited
+ * by hand — or by a future version of this app — must not be able to put a `<script>`, an
+ * external `url(...)` (which taints the export canvas) or an unnormalised void tag inside
+ * the node the rasteriser clones.
+ *
+ * Attributes other than `style` are dropped wholesale: nothing the renderer emits needs one.
+ */
+export function sanitiseHtml(html: string): string {
+  if (!html) return "";
+  return html
+    .replace(/<!--[\s\S]*?-->/g, "")
+    // Drop these with their contents, not just their tags.
+    .replace(/<(script|style|iframe|object|embed)[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<\/?([a-zA-Z][a-zA-Z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)\/?>/g, (full, rawTag: string, attrs: string) => {
+      const tag = rawTag.toLowerCase();
+      if (!ALLOWED_TAGS.has(tag)) return "";
+      if (full.startsWith("</")) return `</${tag}>`;
+      if (tag === "br") return "<br/>";
+      const m = /\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
+      const style = m ? (m[1] ?? m[2] ?? "") : "";
+      // url() would let a remote image in, and a remote image taints the export canvas.
+      const safe = style && !/url\(|expression|javascript:|@import|<|>/i.test(style) ? style : "";
+      return safe ? `<${tag} style="${safe}">` : `<${tag}>`;
+    });
+}
+
+/** The words, with the markup removed — for search, budgets and a plain-text fallback. */
+export function textOfHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+}
+
+// --- gestures ---------------------------------------------------------------
+
+/**
+ * Did this gesture actually change anything?
+ *
+ * A plain click arms a move gesture and ends it with zero delta. Committing that writes an
+ * identical element and — because every commit snapshots the deck — leaves an undo entry
+ * behind, so ten clicks cost ten presses of Cmd+Z before anything real is undone.
+ */
+export function sameBox(a: SlideElement, b: SlideElement): boolean {
+  if (a.x !== b.x || a.y !== b.y || a.w !== b.w || a.h !== b.h || a.rot !== b.rot) return false;
+  if (a.kind === "text" && b.kind === "text" && a.fontSize !== b.fontSize) return false;
+  return true;
+}
+
+const isCorner = (h: Handle) => (h.includes("n") || h.includes("s")) && (h.includes("e") || h.includes("w"));
+
+/**
+ * Resize, scaling the type when the gesture says to.
+ *
+ * Corner handles on TEXT scale the font with the box, which is what Canva does and what
+ * people expect when they grab a corner: the words get bigger, they do not re-wrap. Edge
+ * handles change the box only, so the text re-flows at the size it already had. Shapes are
+ * unaffected either way.
+ */
+export function resizeElement(el: SlideElement, handle: Handle, dx: number, dy: number, opts: ResizeOptions = {}): SlideElement {
+  const scalesType = el.kind === "text" && isCorner(handle);
+  const resized = resizeBy(el, handle, dx, dy, { ...opts, lockAspect: opts.lockAspect || scalesType });
+  if (!scalesType || el.w <= 0) return resized;
+  const factor = resized.w / el.w;
+  return { ...(resized as TextElement), fontSize: Math.max(1, round((el as TextElement).fontSize * factor)) };
 }
 
 // --- collection helpers ----------------------------------------------------

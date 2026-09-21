@@ -62,10 +62,10 @@ import { diffDecks, slideTarget, type EditDiffRow } from "@/lib/editDiff";
 import { lintContent } from "@/lib/slopLint";
 import { type ChannelId } from "@/lib/founderProfiles";
 import { storeGet, storeSet, storePeek } from "@/lib/storeClient";
-import ElementLayer from "@/components/slide/ElementLayer";
+import ElementLayer, { type EditCommit } from "@/components/slide/ElementLayer";
 import CanvasEditor from "@/components/studio/CanvasEditor";
 import SlideCanvas from "@/components/studio/SlideCanvas";
-import { NO_ELEMENTS, applyRegenerate, createShape, createText, hiddenSlots, updateElement, type SlideElement } from "@/lib/slideElements";
+import { NO_ELEMENTS, applyRegenerate, createShape, createText, hiddenSlots, updateElement, type SlideElement, type TextElement } from "@/lib/slideElements";
 import ElementInspector, { type FontChoice } from "@/components/studio/ElementInspector";
 import { exportFontsUrl, extraFonts, familyOf, fontsUrlFor, slideFonts, weightsFor } from "@/lib/fontRegistry";
 import { coerceStoredDeck, deckChanged, serialiseDeck, type StoredDeck } from "@/lib/deckStore";
@@ -184,6 +184,8 @@ export default function Studio() {
   const [canvasEdit, setCanvasEdit] = useState(false);
   const [selectedElId, setSelectedElId] = useState<string | null>(null);
   const [draggingElId, setDraggingElId] = useState<string | null>(null);
+  /** The element with a live caret in it. Preview only — the export copies never get it. */
+  const [editingElId, setEditingElId] = useState<string | null>(null);
 
   /**
    * Undo for canvas edits, kept separate from the deck snapshot above.
@@ -197,6 +199,8 @@ export default function Studio() {
    * arrays, and only the slide that changed allocates a new one.
    */
   const elementsRef = useRef<Record<number, SlideElement[]>>({});
+  /** The slide on screen, readable from callbacks that must not re-bind every slide change. */
+  const currentRef = useRef(0);
   const elementHistory = useRef<{ past: Record<number, SlideElement[]>[]; future: Record<number, SlideElement[]>[] }>({
     past: [],
     future: []
@@ -206,6 +210,14 @@ export default function Studio() {
   useEffect(() => {
     elementsRef.current = elements;
   }, [elements]);
+
+  useEffect(() => {
+    currentRef.current = current;
+    // Moving to another slide ends any edit and drops the selection with it, rather than
+    // leaving a caret pointing at an element that is no longer on screen.
+    setSelectedElId(null);
+    setEditingElId(null);
+  }, [current]);
 
   const commitElements = useCallback((deckIdx: number, next: SlideElement[]) => {
     // Recorded here rather than inside the state updater: React runs updaters during
@@ -228,8 +240,32 @@ export default function Studio() {
     elementsRef.current = target;
     setElements(target);
     setSelectedElId(null);
+    setEditingElId(null);
     return true;
   }, []);
+
+  /**
+   * An inline edit finished — once per edit, never per keystroke.
+   *
+   * Every commit snapshots the deck for undo, so writing on each input event would burn the
+   * whole history in one sentence. The editable is uncontrolled while the caret is live and
+   * read back here; `h` is the height the text actually rendered at, so the box that grew
+   * while typing keeps its new size in the export.
+   */
+  const commitElementText = useCallback(
+    (c: EditCommit) => {
+      const list = elementsRef.current[currentRef.current] ?? NO_ELEMENTS;
+      const el = list.find((x) => x.id === c.id);
+      if (!el || el.kind !== "text") return;
+      const h = Math.max(1, Math.round(c.h));
+      if (el.html === c.html && el.text === c.text && el.h === h) return;
+      commitElements(
+        currentRef.current,
+        updateElement(list, c.id, (x) => ({ ...(x as TextElement), html: c.html, text: c.text, h }))
+      );
+    },
+    [commitElements]
+  );
 
   const undoElements = useCallback(() => stepElements("past", "future"), [stepElements]);
   const redoElements = useCallback(() => stepElements("future", "past"), [stepElements]);
@@ -2432,6 +2468,7 @@ export default function Studio() {
             onClick={() => {
               setCanvasEdit((v) => !v);
               setSelectedElId(null);
+              setEditingElId(null);
             }}
             style={{
               cursor: "pointer",
@@ -2542,7 +2579,15 @@ export default function Studio() {
               photoOn={!!imgOn[current]}
               replay={replay}
             />
-            <ElementLayer elements={elements[current] ?? NO_ELEMENTS} baseW={baseW} baseH={baseH} hideId={draggingElId} />
+            <ElementLayer
+              elements={elements[current] ?? NO_ELEMENTS}
+              baseW={baseW}
+              baseH={baseH}
+              hideId={draggingElId}
+              editingId={editingElId}
+              onEditCommit={commitElementText}
+              onEditExit={() => setEditingElId(null)}
+            />
             </SlideCanvas>
           </div>
           <CanvasEditor
@@ -2556,6 +2601,8 @@ export default function Studio() {
             onSelect={setSelectedElId}
             onCommit={(next) => commitElements(current, next)}
             onDraggingChange={setDraggingElId}
+            editingId={editingElId}
+            onEditingChange={setEditingElId}
           />
         </div>
 

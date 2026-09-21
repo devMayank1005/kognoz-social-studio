@@ -82,3 +82,58 @@ describe("ElementLayer ordering and hiding", () => {
     expect(html([aText, aRect])).toContain("Hello");
   });
 });
+
+const render = (els: SlideElement[], editingId?: string | null) =>
+  renderToStaticMarkup(<ElementLayer elements={els} baseW={1080} baseH={1350} editingId={editingId} />);
+
+describe("inline text editing", () => {
+  it("never marks anything editable in the export tree", () => {
+    // `editingId` is threaded only at the preview mount. The exporter's sanitiser does not
+    // strip `contenteditable`, and a valueless one is invalid XML — it would kill the export.
+    expect(render([aText, aRect])).not.toMatch(/contenteditable/i);
+  });
+
+  it("marks exactly the element being typed into", () => {
+    const out = render([aText, aRect], "el_1");
+    expect((out.match(/contenteditable/gi) ?? []).length).toBe(1);
+  });
+
+  it("hands the editable no children, because React must not own them under a caret", () => {
+    // Re-rendering children while a caret is live collapses the selection to the start on
+    // every keystroke. The node is filled imperatively when editing begins instead.
+    expect(render([aText], "el_1")).not.toContain("Hello");
+  });
+
+  it("still renders the words normally when nothing is being edited", () => {
+    expect(render([aText])).toContain("Hello");
+  });
+});
+
+describe("template markup", () => {
+  it("renders the markup an unlocked template element carries", () => {
+    // The gradient word from a cover headline. Flattening it to text is what made unlocking
+    // visibly change the slide.
+    const withHtml = createText([], {
+      id: "el_9",
+      html: '<span style="color:red">do</span>',
+      text: "do"
+    });
+    expect(render([withHtml])).toContain('<span style="color:red">do</span>');
+  });
+
+  it("leaves a hand-made text box as plain text", () => {
+    const out = render([aText]);
+    expect(out).toContain("Hello");
+    expect(out).not.toContain("<span");
+  });
+});
+
+describe("text layout", () => {
+  it("is block, not flex — a contentEditable flex box puts the caret in the wrong place", () => {
+    expect(render([aText])).toContain("display:block");
+  });
+
+  it("never clips, so text typed past the edge is not swallowed", () => {
+    expect(render([aText])).not.toContain("overflow:hidden");
+  });
+});

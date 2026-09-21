@@ -2,10 +2,13 @@
 
 // The contextual styling bar for whichever element is selected.
 //
-// Editor chrome: it renders outside the node the exporter clones, so it is free to use
-// form controls the slide itself may never contain — lib/exportPipeline.ts deletes every
-// <input> it finds inside a slide, which is why text content is edited here in a textarea
-// rather than typed directly onto the canvas.
+// Editor chrome: it renders outside the node the exporter clones, so it is free to use form
+// controls the slide itself may never contain.
+//
+// It does NOT edit the words. That happens on the canvas, by double-clicking the text — see
+// components/slide/ElementLayer.tsx. An earlier version had a textarea here and justified it
+// by pointing at the exporter deleting every <input>; that reasoning never applied to a
+// contentEditable div, and two places writing the same string is how caret bugs ship.
 //
 // Everything it writes is a patch onto one element; the geometry (x/y/w/h/rot) belongs to
 // CanvasEditor and is deliberately not editable here.
@@ -108,16 +111,6 @@ export default function ElementInspector({
     >
       {element.kind === "text" ? (
         <>
-          <div style={{ ...group, flex: "1 1 240px", minWidth: 200 }}>
-            <span style={label}>Text</span>
-            <textarea
-              value={element.text}
-              onChange={(e) => onChange({ text: e.target.value })}
-              rows={2}
-              style={{ ...field, resize: "vertical", lineHeight: 1.35 }}
-            />
-          </div>
-
           <div style={group}>
             <span style={label}>Font</span>
             <select value={element.fontFamily} onChange={(e) => onChange({ fontFamily: e.target.value })} style={field}>

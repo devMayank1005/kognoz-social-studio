@@ -10,7 +10,7 @@
 // takes `unknown` and snaps it onto something the app already understands.
 
 import type { CoercedSlide } from "./coerce";
-import { sortByZ, type ShapeKind, type SlideElement, type TemplateSlot } from "./slideElements";
+import { sanitiseHtml, sortByZ, type ShapeKind, type SlideElement, type TemplateSlot } from "./slideElements";
 
 export interface StoredDeck {
   version: 1;
@@ -77,7 +77,10 @@ export function coerceElement(raw: unknown): SlideElement | null {
       color: str(o.color, 64) || "#000000",
       align,
       lineHeight: num(o.lineHeight, 1.2) || 1.2,
-      ...(from ? { from } : {})
+      ...(from ? { from } : {}),
+      // Re-sanitised on the way in, not just on the way out: this row is JSON in a database
+      // and the markup ends up inside the node the exporter rasterises.
+      ...(typeof o.html === "string" && o.html ? { html: sanitiseHtml(o.html) } : {})
     };
   }
 

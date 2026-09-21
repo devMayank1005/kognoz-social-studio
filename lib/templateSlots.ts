@@ -10,14 +10,19 @@
 // exactly baseW x baseH, so a rect read from it is already in slide pixels and needs no
 // division and no rounding. The two trees render from the same state, so they agree.
 
-import type { TemplateSlot } from "./slideElements";
+import { sanitiseHtml, textOfHtml, type TemplateSlot } from "./slideElements";
 
-// Known limitation, verified in a browser: ejecting takes `textContent`, so inline
-// emphasis is flattened. A cover headline written "Culture is what your people *do*" renders
-// its last word in the brand gradient through renderEm(); the unlocked copy is plain text in
-// a single colour. The words are all there, the gradient is not. Carrying it across means
-// parsing the marked-up children rather than reading the text, which is worth doing when
-// somebody asks for it and is not worth guessing at now.
+// What it captures, and why it is markup rather than text.
+//
+// The template does not render plain strings. `renderEmWith` turns a starred word into a
+// `<span>` carrying a clipped gradient, and `renderLines` turns each line of a body into its
+// own `display:block` span. Reading `textContent` loses both: the gradient word comes out
+// flat black, and a two-line body comes out as "Line oneLine two" with nothing between them,
+// because textContent concatenates block-level children without a separator.
+//
+// So the markup is taken and sanitised instead, and an unlocked element is a pixel-identical
+// copy of what it replaced. `text` is kept alongside it as the plain-text reading, with the
+// line breaks put back.
 
 export interface SlotHit {
   slot: TemplateSlot;
@@ -26,6 +31,9 @@ export interface SlotHit {
   y: number;
   w: number;
   h: number;
+  /** The rendered markup, sanitised. What the element actually draws. */
+  html: string;
+  /** The same content as plain text, line breaks intact. */
   text: string;
   fontFamily: string;
   fontSize: number;
@@ -78,6 +86,7 @@ export function slotAt(root: HTMLElement, bx: number, by: number): SlotHit | nul
     const area = r.width * r.height;
     if (area >= bestArea) continue;
 
+    const html = sanitiseHtml(node.innerHTML ?? "");
     const cs = getComputedStyle(node);
     const fontSize = parseFloat(cs.fontSize) || 16;
     const lh = parseFloat(cs.lineHeight);
@@ -88,7 +97,8 @@ export function slotAt(root: HTMLElement, bx: number, by: number): SlotHit | nul
       y,
       w: r.width,
       h: r.height,
-      text: (node.textContent ?? "").trim(),
+      html,
+      text: textOfHtml(html),
       fontFamily: cs.fontFamily,
       fontSize,
       fontWeight: weightOf(cs.fontWeight),
