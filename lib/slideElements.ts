@@ -1,0 +1,453 @@
+// The element model for direct manipulation on the slide canvas.
+//
+// Pure and I/O-free, like lib/calendarPlan.ts and lib/activityEvents.ts: no DOM, no clock,
+// no randomness. Every function here is geometry, so it can be tested without a browser —
+// which matters more than usual, because nothing in this repo's test suite can actually
+// rasterise a slide (vitest runs in `node`), and drag maths that is wrong by a factor of
+// `previewScale` looks plausible right up until somebody exports a PNG.
+//
+// Three rules the rest of the feature depends on:
+//
+//   base pixels     Every coordinate here is in SLIDE space — 0..baseW, 0..baseH, the same
+//                   1080x1350 the renderer lays out in and the exporter rasterises at.
+//                   Screen pixels never enter this module. The caller divides pointer
+//                   deltas by `previewScale` before calling in.
+//   ids are stable  An element's id is derived from the ids already present, never from a
+//                   clock, so the same sequence of edits always produces the same document
+//                   and a test can assert on it.
+//   `from` means    An element carrying `from` started life as part of the template and was
+//   ejected         ejected into a free object. That single field is what tells the renderer
+//                   to hide the original, and what a regenerate throws away.
+
+/** The template text slots an element can be ejected from. */
+export type TemplateSlot = "eyebrow" | "headline" | "body" | "cta" | "kicker" | "number";
+
+export interface BaseElement {
+  id: string;
+  /** Top-left corner in base pixels, before rotation. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Degrees, normalised to (-180, 180]. Rotation is about the element's centre. */
+  rot: number;
+  z: number;
+}
+
+export interface TextElement extends BaseElement {
+  kind: "text";
+  text: string;
+  fontFamily: string;
+  /**
+   * Absolute base pixels — NOT the renderer's `fit()` result.
+   *
+   * `fit()` (components/Slide.tsx) derives a size from character count and then multiplies
+   * by the per-slide text scale. Once an element is ejected it carries the size it had at
+   * that moment and stops responding to either, which is the behaviour a canvas editor
+   * needs and the reason we do not have to touch ~200 `fit()` call sites.
+   */
+  fontSize: number;
+  fontWeight: number;
+  color: string;
+  align: "left" | "center" | "right";
+  lineHeight: number;
+  from?: TemplateSlot;
+}
+
+export type ShapeKind = "rect" | "ellipse" | "line";
+
+export interface ShapeElement extends BaseElement {
+  kind: ShapeKind;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  /** Corner radius, `rect` only. Ignored by the other kinds. */
+  radius: number;
+  opacity: number;
+}
+
+export type SlideElement = TextElement | ShapeElement;
+
+/**
+ * The eight resize grips, named for the compass point they sit on.
+ * The corners resize two axes; the edges resize one.
+ */
+export type Handle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+
+/** Shared empty array, frozen, so a slide with no elements never makes a new object. */
+export const NO_ELEMENTS: readonly SlideElement[] = Object.freeze([]);
+
+/** Nothing may be resized smaller than this, or it becomes impossible to grab again. */
+export const MIN_SIZE = 8;
+
+/** How much of an element must stay on the canvas, so it can never be dragged out of reach. */
+const KEEP_VISIBLE = 24;
+
+const rad = (deg: number) => (deg * Math.PI) / 180;
+const round = (n: number) => Math.round(n * 100) / 100;
+
+/** Rotate a vector about the origin. */
+function rotateVec(x: number, y: number, deg: number): { x: number; y: number } {
+  const r = rad(deg);
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  return { x: x * c - y * s, y: x * s + y * c };
+}
+
+/** Takes a bare box, not a whole element, so callers can ask about a drag draft too. */
+export function centerOf(el: { x: number; y: number; w: number; h: number }): { x: number; y: number } {
+  return { x: el.x + el.w / 2, y: el.y + el.h / 2 };
+}
+
+/** Normalise to (-180, 180] so two rotations that look identical compare equal. */
+export function normaliseRotation(deg: number): number {
+  let d = deg % 360;
+  if (d > 180) d -= 360;
+  if (d <= -180) d += 360;
+  // -0 and 0 are the same angle but not the same value; callers compare rot === 0.
+  return round(d) === 0 ? 0 : round(d);
+}
+
+/**
+ * Next free id.
+ *
+ * Derived from the ids already in the slide rather than from a counter or a clock, so the
+ * function stays pure and re-running the same edits produces the same document.
+ */
+export function nextElementId(elements: readonly SlideElement[]): string {
+  let max = 0;
+  for (const el of elements) {
+    const m = /^el_(\d+)$/.exec(el.id);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `el_${max + 1}`;
+}
+
+/** One above everything present, so a new element lands on top. */
+export function nextZ(elements: readonly SlideElement[]): number {
+  return elements.reduce((n, e) => Math.max(n, e.z), 0) + 1;
+}
+
+export function createText(elements: readonly SlideElement[], patch: Partial<TextElement> = {}): TextElement {
+  return {
+    id: nextElementId(elements),
+    kind: "text",
+    x: 120,
+    y: 120,
+    w: 520,
+    h: 120,
+    rot: 0,
+    z: nextZ(elements),
+    text: "Text",
+    fontFamily: "'Open Sans', system-ui, sans-serif",
+    fontSize: 48,
+    fontWeight: 700,
+    color: "#212121",
+    align: "left",
+    lineHeight: 1.2,
+    ...patch
+  };
+}
+
+export function createShape(
+  elements: readonly SlideElement[],
+  kind: ShapeKind,
+  patch: Partial<ShapeElement> = {}
+): ShapeElement {
+  return {
+    id: nextElementId(elements),
+    kind,
+    x: 120,
+    y: 120,
+    w: kind === "line" ? 360 : 280,
+    // A line still needs a box with height: it is what the grips attach to and what the
+    // renderer sizes its <svg> from. A zero-height box renders nothing and cannot be grabbed.
+    h: kind === "line" ? 4 : 280,
+    rot: 0,
+    z: nextZ(elements),
+    fill: kind === "line" ? "transparent" : "#005184",
+    stroke: kind === "line" ? "#212121" : "transparent",
+    strokeWidth: kind === "line" ? 4 : 0,
+    radius: 0,
+    opacity: 1,
+    ...patch
+  };
+}
+
+/**
+ * Keep an element reachable.
+ *
+ * The slide root is `overflow: hidden`, so anything pushed past the edge is clipped
+ * identically on screen and in the export — consistent, but a fully off-canvas element
+ * can never be clicked again. Leave a grabbable sliver on the canvas instead.
+ */
+export function clampToCanvas<T extends BaseElement>(el: T, baseW: number, baseH: number): T {
+  const x = Math.min(Math.max(el.x, KEEP_VISIBLE - el.w), baseW - KEEP_VISIBLE);
+  const y = Math.min(Math.max(el.y, KEEP_VISIBLE - el.h), baseH - KEEP_VISIBLE);
+  return { ...el, x: round(x), y: round(y) };
+}
+
+export function moveTo<T extends BaseElement>(el: T, x: number, y: number): T {
+  return { ...el, x: round(x), y: round(y) };
+}
+
+export function moveBy<T extends BaseElement>(el: T, dx: number, dy: number): T {
+  return moveTo(el, el.x + dx, el.y + dy);
+}
+
+export function rotateTo<T extends BaseElement>(el: T, deg: number, snapStep = 0): T {
+  const d = snapStep > 0 ? Math.round(deg / snapStep) * snapStep : deg;
+  return { ...el, rot: normaliseRotation(d) };
+}
+
+export interface ResizeOptions {
+  /** Corner handles only: keep the original aspect ratio. */
+  lockAspect?: boolean;
+  min?: number;
+}
+
+/**
+ * Resize by dragging one grip, with the opposite edge or corner pinned.
+ *
+ * The delta arrives in world (canvas) space but the box grows along its OWN axes, so the
+ * delta is rotated into the element's local frame first, applied there, and the resulting
+ * centre shift rotated back out. Skipping that is the classic rotated-resize bug: the box
+ * appears to drift sideways as you drag, and it only shows up once something is rotated.
+ */
+export function resizeBy<T extends BaseElement>(
+  el: T,
+  handle: Handle,
+  dxWorld: number,
+  dyWorld: number,
+  opts: ResizeOptions = {}
+): T {
+  const min = opts.min ?? MIN_SIZE;
+  const local = rotateVec(dxWorld, dyWorld, -el.rot);
+
+  const east = handle.includes("e");
+  const west = handle.includes("w");
+  const south = handle.includes("s");
+  const north = handle.includes("n");
+
+  let w = el.w;
+  let h = el.h;
+  if (east) w = Math.max(min, el.w + local.x);
+  if (west) w = Math.max(min, el.w - local.x);
+  if (south) h = Math.max(min, el.h + local.y);
+  if (north) h = Math.max(min, el.h - local.y);
+
+  // Corner drags with aspect locked follow whichever axis moved further, so the pointer
+  // stays near the grip instead of the box snapping to one axis.
+  if (opts.lockAspect && (east || west) && (north || south) && el.w > 0 && el.h > 0) {
+    const ratio = el.w / el.h;
+    if (Math.abs(w - el.w) >= Math.abs(h - el.h)) h = Math.max(min, w / ratio);
+    else w = Math.max(min, h * ratio);
+  }
+
+  // The pinned edge must not move, so the centre shifts by half of whatever the size
+  // actually changed by — "actually" because a min-size clamp may have eaten the drag.
+  const dw = w - el.w;
+  const dh = h - el.h;
+  const shiftLocal = {
+    x: east ? dw / 2 : west ? -dw / 2 : 0,
+    y: south ? dh / 2 : north ? -dh / 2 : 0
+  };
+  const shiftWorld = rotateVec(shiftLocal.x, shiftLocal.y, el.rot);
+  const c = centerOf(el);
+  const cx = c.x + shiftWorld.x;
+  const cy = c.y + shiftWorld.y;
+
+  return { ...el, x: round(cx - w / 2), y: round(cy - h / 2), w: round(w), h: round(h) };
+}
+
+// --- hit testing -----------------------------------------------------------
+
+/**
+ * Is this canvas point inside the element?
+ *
+ * The point is moved into the element's own frame before the comparison, because a rotated
+ * box is not an axis-aligned rectangle and testing its bounding box instead would let you
+ * select a rotated element by clicking empty space near its corners.
+ *
+ * `slop` widens the target. A 4px line is honest geometry and an impossible click target,
+ * so thin shapes get a few pixels of forgiveness in every direction.
+ */
+export function containsPoint(el: BaseElement, px: number, py: number, slop = 0): boolean {
+  const c = centerOf(el);
+  const local = rotateVec(px - c.x, py - c.y, -el.rot);
+  return Math.abs(local.x) <= el.w / 2 + slop && Math.abs(local.y) <= el.h / 2 + slop;
+}
+
+/** The element a click lands on: topmost first, so the one you can see is the one you get. */
+export function hitTest(elements: readonly SlideElement[], px: number, py: number, slop = 6): SlideElement | null {
+  const ordered = sortByZ(elements);
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    if (containsPoint(ordered[i], px, py, slop)) return ordered[i];
+  }
+  return null;
+}
+
+/** The four corners in canvas space, for drawing grips on a rotated element. */
+export function cornersOf(el: BaseElement): { x: number; y: number }[] {
+  const c = centerOf(el);
+  return [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1]
+  ].map(([sx, sy]) => {
+    const v = rotateVec((sx * el.w) / 2, (sy * el.h) / 2, el.rot);
+    return { x: c.x + v.x, y: c.y + v.y };
+  });
+}
+
+/** Axis-aligned bounds of a possibly-rotated element — where to park a toolbar. */
+export function boundsOf(el: BaseElement): { x: number; y: number; w: number; h: number } {
+  const pts = cornersOf(el);
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+// --- z-order ---------------------------------------------------------------
+
+/** Render order. A stable tiebreak on id keeps two elements sharing a z from flickering. */
+export function sortByZ(elements: readonly SlideElement[]): SlideElement[] {
+  return [...elements].sort((a, b) => a.z - b.z || a.id.localeCompare(b.id));
+}
+
+/** Rewrite z as 1..n in current order, so the numbers never drift apart. */
+function renumber(ordered: SlideElement[]): SlideElement[] {
+  return ordered.map((el, i) => ({ ...el, z: i + 1 }));
+}
+
+function reorder(elements: readonly SlideElement[], id: string, to: (i: number, n: number) => number): SlideElement[] {
+  const ordered = sortByZ(elements);
+  const i = ordered.findIndex((e) => e.id === id);
+  if (i === -1) return [...elements];
+  const target = Math.min(Math.max(to(i, ordered.length), 0), ordered.length - 1);
+  if (target === i) return renumber(ordered);
+  const [moved] = ordered.splice(i, 1);
+  ordered.splice(target, 0, moved);
+  return renumber(ordered);
+}
+
+export const bringForward = (els: readonly SlideElement[], id: string) => reorder(els, id, (i) => i + 1);
+export const sendBackward = (els: readonly SlideElement[], id: string) => reorder(els, id, (i) => i - 1);
+export const bringToFront = (els: readonly SlideElement[], id: string) => reorder(els, id, (_i, n) => n - 1);
+export const sendToBack = (els: readonly SlideElement[], id: string) => reorder(els, id, () => 0);
+
+// --- snapping --------------------------------------------------------------
+
+export interface SnapGuide {
+  axis: "x" | "y";
+  /** Base-pixel position of the line to draw. */
+  at: number;
+}
+
+export interface SnapResult {
+  x: number;
+  y: number;
+  guides: SnapGuide[];
+}
+
+/**
+ * Nudge a dragged box onto the nearest edge or centre line.
+ *
+ * Only applied to unrotated elements: the edges of a rotated box are not axis-aligned, so
+ * "align its left edge" has no single answer, and snapping one anyway makes the element
+ * jump in a direction the user did not drag.
+ */
+export function snapPosition(
+  box: { x: number; y: number; w: number; h: number; rot: number; id?: string },
+  others: readonly SlideElement[],
+  baseW: number,
+  baseH: number,
+  tolerance = 8
+): SnapResult {
+  if (box.rot !== 0) return { x: box.x, y: box.y, guides: [] };
+
+  const xTargets = [0, baseW / 2, baseW];
+  const yTargets = [0, baseH / 2, baseH];
+  for (const o of others) {
+    if (o.id === box.id || o.rot !== 0) continue;
+    xTargets.push(o.x, o.x + o.w / 2, o.x + o.w);
+    yTargets.push(o.y, o.y + o.h / 2, o.y + o.h);
+  }
+
+  // Each axis offers three anchors — leading edge, centre, trailing edge — and the closest
+  // pairing within tolerance wins.
+  const best = (edges: number[], targets: number[]) => {
+    let delta = 0;
+    let at: number | null = null;
+    let dist = tolerance + 1;
+    for (const e of edges) {
+      for (const t of targets) {
+        const d = Math.abs(t - e);
+        if (d <= tolerance && d < dist) {
+          dist = d;
+          delta = t - e;
+          at = t;
+        }
+      }
+    }
+    return { delta, at };
+  };
+
+  const sx = best([box.x, box.x + box.w / 2, box.x + box.w], xTargets);
+  const sy = best([box.y, box.y + box.h / 2, box.y + box.h], yTargets);
+
+  const guides: SnapGuide[] = [];
+  if (sx.at !== null) guides.push({ axis: "x", at: sx.at });
+  if (sy.at !== null) guides.push({ axis: "y", at: sy.at });
+
+  return { x: round(box.x + sx.delta), y: round(box.y + sy.delta), guides };
+}
+
+// --- template ejection -----------------------------------------------------
+
+/** Which template slots are currently ejected, and so must not be drawn by the renderer. */
+export function hiddenSlots(elements: readonly SlideElement[]): Set<TemplateSlot> {
+  const out = new Set<TemplateSlot>();
+  for (const el of elements) if (el.kind === "text" && el.from) out.add(el.from);
+  return out;
+}
+
+/** Put an ejected element back under template control. */
+export function resetSlot(elements: readonly SlideElement[], slot: TemplateSlot): SlideElement[] {
+  return elements.filter((el) => !(el.kind === "text" && el.from === slot));
+}
+
+/**
+ * What survives a regenerate.
+ *
+ * Shapes and text boxes somebody added are their own work and stay. An ejected element is a
+ * copy of template text that the model has just replaced, so keeping it would leave the old
+ * wording sitting on the slide next to the new — worse than losing the positioning.
+ */
+export function applyRegenerate(elements: readonly SlideElement[]): SlideElement[] {
+  return renumber(sortByZ(elements.filter((el) => !(el.kind === "text" && el.from))));
+}
+
+// --- collection helpers ----------------------------------------------------
+
+export function updateElement(
+  elements: readonly SlideElement[],
+  id: string,
+  patch: (el: SlideElement) => SlideElement
+): SlideElement[] {
+  return elements.map((el) => (el.id === id ? patch(el) : el));
+}
+
+export function removeElement(elements: readonly SlideElement[], id: string): SlideElement[] {
+  return renumber(sortByZ(elements.filter((el) => el.id !== id)));
+}
+
+/** Families in use, so the exporter embeds those faces and only those. */
+export function fontFamiliesUsed(elements: readonly SlideElement[]): string[] {
+  const out = new Set<string>();
+  for (const el of elements) if (el.kind === "text" && el.fontFamily) out.add(el.fontFamily);
+  return [...out].sort();
+}

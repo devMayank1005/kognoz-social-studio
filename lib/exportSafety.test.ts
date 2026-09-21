@@ -14,12 +14,23 @@ import { join } from "node:path";
 
 const read = (...parts: string[]) => readFileSync(join(__dirname, "..", ...parts), "utf8");
 
+// Every file whose output lands INSIDE the node lib/exportPipeline.ts clones. Editor
+// chrome is not on this list: it mounts outside the exported node and may use Tailwind
+// freely. Add a file here the moment it renders anything into a slide.
+const EXPORTED_RENDERERS: string[][] = [
+  ["components", "Slide.tsx"],
+  ["components", "slide", "ElementLayer.tsx"]
+];
+
 describe("the slide renderer stays inline-styles-only", () => {
-  it("components/Slide.tsx has no className", () => {
-    const src = read("components", "Slide.tsx");
-    const hits = [...src.matchAll(/className\s*=/g)];
-    expect(hits, `Slide.tsx gained ${hits.length} className(s) — those will not survive export`).toHaveLength(0);
-  });
+  for (const parts of EXPORTED_RENDERERS) {
+    const name = parts.join("/");
+    it(`${name} has no className`, () => {
+      const src = read(...parts);
+      const hits = [...src.matchAll(/className\s*=/g)];
+      expect(hits, `${name} gained ${hits.length} className(s) — those will not survive export`).toHaveLength(0);
+    });
+  }
 
   it("components/Slide.tsx still styles with inline objects", () => {
     // The positive half: proves the file is actually styled, so a future refactor that

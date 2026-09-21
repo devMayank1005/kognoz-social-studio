@@ -454,7 +454,7 @@ export const Slide = React.memo(function Slide({
 
   // Site-language eyebrow: small, letterspaced, uppercase. No bars, no capsules.
   const Eyebrow = ({ dark, n }: { dark?: boolean; n?: string }) => (
-    <div
+    <div data-slot="eyebrow"
       style={{
         fontFamily: font,
         fontSize: 24,
@@ -623,7 +623,7 @@ export const Slide = React.memo(function Slide({
           <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
             <Eyebrow dark />
             <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
-              <h1 style={{ fontFamily: displayFont, fontSize: fit(100, cover, 44), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: 0, maxWidth: 880 }}>{renderEm(cover, true)}</h1>
+              <h1 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(100, cover, 44), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: 0, maxWidth: 880 }}>{renderEm(cover, true)}</h1>
             </div>
           </div>
           <Foot dark right={COVER_R} />
@@ -651,7 +651,7 @@ export const Slide = React.memo(function Slide({
                 beside it, which threw "do" out to the right of its own line. Every
                 other cover in this file already uses this wrapper pattern. */}
             <div style={{ flex: 1, display: "flex", alignItems: photoOn ? "flex-start" : "center", marginTop: 26 }}>
-              <h1
+              <h1 data-slot="headline"
                 style={{
                   fontFamily: displayFont,
                   fontSize: fit(photoOn ? 66 : 104, cover, photoOn ? 56 : 44),
@@ -680,7 +680,7 @@ export const Slide = React.memo(function Slide({
           <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
             <Eyebrow />
             <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
-              <h1 style={{ fontFamily: displayFont, fontSize: fit(104, cover, 40), fontWeight: 600, lineHeight: 1.04, letterSpacing: "-0.02em", color: C.ink, margin: 0, maxWidth: 760, position: "relative" }}>{renderEm(cover)}</h1>
+              <h1 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(104, cover, 40), fontWeight: 600, lineHeight: 1.04, letterSpacing: "-0.02em", color: C.ink, margin: 0, maxWidth: 760, position: "relative" }}>{renderEm(cover)}</h1>
             </div>
           </div>
           <Foot right={COVER_R} />
@@ -697,7 +697,7 @@ export const Slide = React.memo(function Slide({
             <Eyebrow dark />
             <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
               <div style={{ ...GLASS_DARKBG, width: "100%", borderRadius: 28, padding: "76px 64px" }}>
-                <h1 style={{ fontFamily: displayFont, fontSize: fit(88, cover, 44), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: 0 }}>{renderEm(cover, true)}</h1>
+                <h1 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(88, cover, 44), fontWeight: 600, lineHeight: 1.06, letterSpacing: "-0.015em", color: "#fff", margin: 0 }}>{renderEm(cover, true)}</h1>
               </div>
             </div>
           </div>
@@ -711,7 +711,7 @@ export const Slide = React.memo(function Slide({
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow />
           <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
-            <h1 style={{ fontFamily: displayFont, fontSize: fit(100, cover, 44), fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.015em", color: C.ink, margin: 0, maxWidth: 860 }}>{renderEm(cover)}</h1>
+            <h1 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(100, cover, 44), fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.015em", color: C.ink, margin: 0, maxWidth: 860 }}>{renderEm(cover)}</h1>
           </div>
         </div>
         <Foot right={COVER_R} />
@@ -1675,7 +1675,7 @@ export const Slide = React.memo(function Slide({
       <div id={id} style={{ ...wrap, background: GRAD_DARK }}>
         {dz.petals && <Petal w={620} o={0.55} style={{ position: "absolute", bottom: -190, left: -170 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-          <h2 style={{ fontFamily: displayFont, fontSize: fit(74, cta, 52), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.01em", color: "#fff", margin: 0, maxWidth: 830 }}>{renderEm(cta, true)}</h2>
+          <h2 data-slot="cta" style={{ fontFamily: displayFont, fontSize: fit(74, cta, 52), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.01em", color: "#fff", margin: 0, maxWidth: 830 }}>{renderEm(cta, true)}</h2>
         </div>
         <Foot dark right={dz.url} />
       </div>
@@ -1691,8 +1691,8 @@ export const Slide = React.memo(function Slide({
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark n={nn} />
           <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", maxWidth: 860 }}>
-            <h2 style={{ fontFamily: displayFont, fontSize: fit(66, data.title, 54), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: "#fff", margin: "0 0 32px" }}>{data.title}</h2>
-            <p style={{ fontFamily: font, fontSize: fit(36, data.body, 230), lineHeight: 1.55, color: "rgba(255,255,255,0.82)", margin: 0 }}>{renderLines(data.body)}</p>
+            <h2 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(66, data.title, 54), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: "#fff", margin: "0 0 32px" }}>{data.title}</h2>
+            <p data-slot="body" style={{ fontFamily: font, fontSize: fit(36, data.body, 230), lineHeight: 1.55, color: "rgba(255,255,255,0.82)", margin: 0 }}>{renderLines(data.body)}</p>
           </div>
         </div>
         <Foot dark right={CONTENT_R} />
@@ -1708,8 +1708,8 @@ export const Slide = React.memo(function Slide({
             <Eyebrow />
           </div>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", maxWidth: 820 }}>
-            <h2 style={{ fontFamily: displayFont, fontSize: fit(66, data.title, 54), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: C.ink, margin: "0 0 30px" }}>{data.title}</h2>
-            <p style={{ fontFamily: font, fontSize: fit(36, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>{renderLines(data.body)}</p>
+            <h2 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(66, data.title, 54), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: C.ink, margin: "0 0 30px" }}>{data.title}</h2>
+            <p data-slot="body" style={{ fontFamily: font, fontSize: fit(36, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>{renderLines(data.body)}</p>
           </div>
         </div>
         <Foot dark={onDark} right={CONTENT_R} />
@@ -1728,8 +1728,8 @@ export const Slide = React.memo(function Slide({
         )}
         <div style={{ position: "absolute", top: photoOn ? "44%" : 0, left: 0, right: 0, bottom: 0, padding: photoOn ? "50px 96px 180px" : "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow n={nn} />
-          <h2 style={{ fontFamily: displayFont, fontSize: fit(photoOn ? 58 : 74, data.title, 56), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: C.ink, margin: photoOn ? "26px 0 24px" : "40px 0 28px" }}>{data.title}</h2>
-          <p style={{ fontFamily: font, fontSize: fit(photoOn ? 33 : 38, data.body, 220), lineHeight: 1.5, color: C.inkSoft, margin: 0, flex: 1 }}>{renderLines(data.body)}</p>
+          <h2 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(photoOn ? 58 : 74, data.title, 56), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: C.ink, margin: photoOn ? "26px 0 24px" : "40px 0 28px" }}>{data.title}</h2>
+          <p data-slot="body" style={{ fontFamily: font, fontSize: fit(photoOn ? 33 : 38, data.body, 220), lineHeight: 1.5, color: C.inkSoft, margin: 0, flex: 1 }}>{renderLines(data.body)}</p>
         </div>
         <Foot right={CONTENT_R} />
       </div>
@@ -1745,8 +1745,8 @@ export const Slide = React.memo(function Slide({
           <Eyebrow dark n={nn} />
           <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
             <div style={{ ...GLASS_DARKBG, width: "100%", borderRadius: 26, padding: "64px 58px" }}>
-              <h2 style={{ fontFamily: displayFont, fontSize: fit(58, data.title, 52), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: "#fff", margin: "0 0 26px" }}>{data.title}</h2>
-              <p style={{ fontFamily: font, fontSize: fit(34, data.body, 230), lineHeight: 1.55, color: "rgba(255,255,255,0.85)", margin: 0 }}>{renderLines(data.body)}</p>
+              <h2 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(58, data.title, 52), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: "#fff", margin: "0 0 26px" }}>{data.title}</h2>
+              <p data-slot="body" style={{ fontFamily: font, fontSize: fit(34, data.body, 230), lineHeight: 1.55, color: "rgba(255,255,255,0.85)", margin: 0 }}>{renderLines(data.body)}</p>
             </div>
           </div>
         </div>
@@ -1787,8 +1787,8 @@ export const Slide = React.memo(function Slide({
           <div style={{ marginBottom: 16 }}>
             <Eyebrow dark n={nn} />
           </div>
-          <h2 style={{ fontFamily: displayFont, fontSize: fit(50, data.title, 52), fontWeight: 600, lineHeight: 1.12, letterSpacing: "-0.01em", color: "#fff", margin: "0 0 16px" }}>{data.title}</h2>
-          <p style={{ fontFamily: font, fontSize: fit(29, data.body, 220), lineHeight: 1.5, color: "rgba(255,255,255,0.88)", margin: 0 }}>{renderLines(data.body)}</p>
+          <h2 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(50, data.title, 52), fontWeight: 600, lineHeight: 1.12, letterSpacing: "-0.01em", color: "#fff", margin: "0 0 16px" }}>{data.title}</h2>
+          <p data-slot="body" style={{ fontFamily: font, fontSize: fit(29, data.body, 220), lineHeight: 1.5, color: "rgba(255,255,255,0.88)", margin: 0 }}>{renderLines(data.body)}</p>
         </div>
         <Foot dark right={CONTENT_R} />
       </div>
@@ -1816,7 +1816,7 @@ export const Slide = React.memo(function Slide({
         {dz.petals && <Petal w={520} o={0.9 * S.petal} style={{ position: "absolute", top: -260, right: -300 }} brand={brand} />}
         <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
           <Eyebrow dark={onDark} n={nn} />
-          <h2
+          <h2 data-slot="headline"
             style={{
               fontFamily: displayFont,
               fontSize: fit(60, data.title, 52),
@@ -1850,7 +1850,7 @@ export const Slide = React.memo(function Slide({
               ))}
             </div>
           ) : (
-            <p style={{ fontFamily: font, fontSize: fit(34, data.body, 230), lineHeight: 1.55, color: S.body, margin: 0 }}>
+            <p data-slot="body" style={{ fontFamily: font, fontSize: fit(34, data.body, 230), lineHeight: 1.55, color: S.body, margin: 0 }}>
               {renderLines(data.body)}
             </p>
           )}
@@ -1870,7 +1870,7 @@ export const Slide = React.memo(function Slide({
           <Eyebrow n={nn} />
           <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
             <div style={{ ...GLASS_LIGHTBG, width: "100%", borderRadius: 28, padding: "64px 58px" }}>
-              <h2
+              <h2 data-slot="headline"
                 style={{
                   fontFamily: displayFont,
                   fontSize: fit(56, data.title, 52),
@@ -1883,7 +1883,7 @@ export const Slide = React.memo(function Slide({
               >
                 {data.title}
               </h2>
-              <p style={{ fontFamily: font, fontSize: fit(33, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>
+              <p data-slot="body" style={{ fontFamily: font, fontSize: fit(33, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>
                 {renderLines(data.body)}
               </p>
             </div>
@@ -1903,7 +1903,7 @@ export const Slide = React.memo(function Slide({
             <Eyebrow n={nn} />
           </div>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", maxWidth: 850 }}>
-            <p style={{ fontFamily: displayFont, fontSize: fit(52, data.body, 150), fontStyle: "italic", lineHeight: 1.3, letterSpacing: "-0.01em", color: C.ink, margin: "0 0 36px", position: "relative" }}>{renderLines(data.body)}</p>
+            <p data-slot="body" style={{ fontFamily: displayFont, fontSize: fit(52, data.body, 150), fontStyle: "italic", lineHeight: 1.3, letterSpacing: "-0.01em", color: C.ink, margin: "0 0 36px", position: "relative" }}>{renderLines(data.body)}</p>
             <div style={{ fontFamily: font, fontSize: sz(23), fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: accent }}>{data.title}</div>
           </div>
         </div>
@@ -1932,8 +1932,8 @@ export const Slide = React.memo(function Slide({
                 padding: "64px 60px"
               }}
             >
-              <h2 style={{ fontFamily: displayFont, fontSize: fit(56, data.title, 52), fontWeight: 600, lineHeight: 1.12, letterSpacing: "-0.01em", color: C.ink, margin: "0 0 26px" }}>{data.title}</h2>
-              <p style={{ fontFamily: font, fontSize: fit(34, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>{renderLines(data.body)}</p>
+              <h2 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(56, data.title, 52), fontWeight: 600, lineHeight: 1.12, letterSpacing: "-0.01em", color: C.ink, margin: "0 0 26px" }}>{data.title}</h2>
+              <p data-slot="body" style={{ fontFamily: font, fontSize: fit(34, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>{renderLines(data.body)}</p>
             </div>
           </div>
         </div>
@@ -1950,8 +1950,8 @@ export const Slide = React.memo(function Slide({
           <Eyebrow n={nn} />
           <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
             <div style={{ width: "100%", background: C.off, border: `1px solid ${C.line}`, borderTop: `6px solid ${accent}`, borderRadius: 20, padding: "64px 60px" }}>
-              <h2 style={{ fontFamily: displayFont, fontSize: fit(56, data.title, 52), fontWeight: 600, lineHeight: 1.12, letterSpacing: "-0.01em", color: accent, margin: "0 0 26px" }}>{data.title}</h2>
-              <p style={{ fontFamily: font, fontSize: fit(34, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>{renderLines(data.body)}</p>
+              <h2 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(56, data.title, 52), fontWeight: 600, lineHeight: 1.12, letterSpacing: "-0.01em", color: accent, margin: "0 0 26px" }}>{data.title}</h2>
+              <p data-slot="body" style={{ fontFamily: font, fontSize: fit(34, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>{renderLines(data.body)}</p>
             </div>
           </div>
         </div>
@@ -1965,8 +1965,8 @@ export const Slide = React.memo(function Slide({
       <div style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
         <Eyebrow n={nn} />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", maxWidth: 840 }}>
-          <h2 style={{ fontFamily: displayFont, fontSize: fit(64, data.title, 54), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: C.ink, margin: "0 0 32px" }}>{data.title}</h2>
-          <p style={{ fontFamily: font, fontSize: fit(36, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>{renderLines(data.body)}</p>
+          <h2 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(64, data.title, 54), fontWeight: 600, lineHeight: 1.1, letterSpacing: "-0.01em", color: C.ink, margin: "0 0 32px" }}>{data.title}</h2>
+          <p data-slot="body" style={{ fontFamily: font, fontSize: fit(36, data.body, 230), lineHeight: 1.55, color: C.inkSoft, margin: 0 }}>{renderLines(data.body)}</p>
         </div>
       </div>
       <Foot right={CONTENT_R} />

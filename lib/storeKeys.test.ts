@@ -74,8 +74,8 @@ describe("store key allowlist", () => {
 
   // The actual regression: every brand needs every blob, and half a brand is worse
   // than none — it works until the first save.
-  it("every brand has all six of its keys allowlisted", () => {
-    const perBrand = ["calendar", "house-prefs", "style-memory", "design", "voice-samples", "market-scan"];
+  it("every brand has all seven of its keys allowlisted", () => {
+    const perBrand = ["calendar", "house-prefs", "style-memory", "design", "voice-samples", "market-scan", "deck"];
     const missing: string[] = [];
     for (const id of BRAND_IDS) {
       for (const suffix of perBrand) {

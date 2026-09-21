@@ -38,6 +38,9 @@ export const STORE_KEYS = [
   // then edited by a person. What the month planner writes topics from, so a
   // month is built on problems somebody has rather than on plausible ones.
   "kognoz-market-scan",
+  // The working deck: slides, images, per-slide text scale and the canvas elements.
+  // Until this existed a refresh threw away an afternoon of hand-positioning.
+  "kognoz-deck",
 
   // Konverz AI. Same five blobs plus its own scan; separate data, same shapes.
   "konverz-calendar",
@@ -46,6 +49,7 @@ export const STORE_KEYS = [
   "konverz-design",
   "konverz-voice-samples",
   "konverz-market-scan",
+  "konverz-deck",
 
   // Which brand this user last worked in. Not brand-scoped, by definition. Kept
   // on the server as well as in localStorage so the choice follows a person to

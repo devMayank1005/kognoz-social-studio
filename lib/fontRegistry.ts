@@ -21,7 +21,15 @@
 import type { BrandId } from "./brands";
 
 /** Where a family is allowed to appear. */
-export type FontUse = "kognoz-slide" | "konverz-slide" | "chrome";
+/**
+ * `extra` is the opt-in set.
+ *
+ * Deliberately NOT a slide use: slideFontsUrl(brandId) must keep producing the exact
+ * strings it shipped with (a test pins them byte for byte), and every family in that URL
+ * is base64-embedded into every export. An extra family is fetched only for a deck that
+ * actually uses one.
+ */
+export type FontUse = "kognoz-slide" | "konverz-slide" | "chrome" | "extra";
 
 export interface FontEntry {
   /** Family name exactly as the css2 API spells it; spaces become "+" in the URL. */
@@ -79,6 +87,28 @@ const BASE = "https://fonts.googleapis.com/css2";
 const SUFFIX = "&display=swap";
 
 /** One css2 stylesheet URL for the given families, in registry order. */
+/**
+ * The curated extras offered in the canvas text picker.
+ *
+ * Appended after every existing entry on purpose: fontsUrlFor joins in array order, so
+ * putting these last leaves slideFontsUrl(kognoz) and slideFontsUrl(konverz) byte-identical
+ * to what shipped. Each axis lists only weights Google actually serves for that family —
+ * offering one it does not is how you get a synthesised bold on screen and a different
+ * weight in the downloaded file.
+ */
+export const EXTRA_FONTS: FontEntry[] = [
+  { family: "Inter", axis: "wght@400;500;600;700;800", uses: ["extra"] },
+  { family: "Montserrat", axis: "wght@400;500;600;700;800", uses: ["extra"] },
+  { family: "Archivo", axis: "wght@400;500;600;700;800", uses: ["extra"] },
+  { family: "Playfair Display", axis: "wght@400;500;600;700;800", uses: ["extra"] },
+  { family: "Lora", axis: "wght@400;500;600;700", uses: ["extra"] },
+  { family: "DM Sans", axis: "wght@400;500;700", uses: ["extra"] },
+  { family: "Space Grotesk", axis: "wght@400;500;600;700", uses: ["extra"] },
+  { family: "Bebas Neue", axis: "wght@400", uses: ["extra"] }
+];
+
+FONTS.push(...EXTRA_FONTS);
+
 export function fontsUrlFor(entries: FontEntry[]): string {
   if (!entries.length) return "";
   const families = entries.map((e) => `family=${e.family.replace(/ /g, "+")}:${e.axis}`).join("&");
@@ -113,10 +143,56 @@ export function slideFontsUrl(brandId: BrandId): string {
  * requested at the same weights the export embeds, so what you see is what you get.
  */
 export function browserFontsUrl(): string {
-  return fontsUrlFor(FONTS);
+  // Extras are excluded: loading eight more families on every page load to serve the rare
+  // deck that picks one is a cost every visit pays. They are injected when chosen instead.
+  return fontsUrlFor(FONTS.filter((f) => !f.uses.includes("extra")));
 }
 
 /** Chrome families only. Exposed so a test can prove none of them reach an export. */
 export function chromeFonts(): FontEntry[] {
   return FONTS.filter((f) => f.uses.includes("chrome"));
+}
+
+/** The opt-in families, offered beside the brand's own in the canvas text picker. */
+export function extraFonts(): FontEntry[] {
+  return FONTS.filter((f) => f.uses.includes("extra"));
+}
+
+/** "'Open Sans', system-ui, sans-serif" -> "Open Sans". */
+export function familyOf(cssStack: string): string {
+  return (cssStack.split(",")[0] || "").trim().replace(/^['"]|['"]$/g, "");
+}
+
+/**
+ * The weights a family is actually served at.
+ *
+ * Parses the axis rather than assuming a ladder, because Fraunces is a variable font
+ * addressed as `opsz,wght@9..144,400;9..144,500;...` — the weight is the last component of
+ * each tuple, not the whole of it.
+ */
+export function weightsFor(family: string): number[] {
+  const entry = FONTS.find((f) => f.family === family);
+  if (!entry) return [400, 700];
+  const spec = entry.axis.split("@")[1];
+  if (!spec) return [400, 700];
+  const out = new Set<number>();
+  for (const tuple of spec.split(";")) {
+    const last = tuple.split(",").pop() ?? "";
+    const n = Number(last);
+    if (Number.isFinite(n) && n >= 100 && n <= 900) out.add(n);
+  }
+  return out.size ? [...out].sort((a, b) => a - b) : [400, 700];
+}
+
+/**
+ * The stylesheet an export embeds, widened to cover the families on the canvas.
+ *
+ * With no extra family in use this returns exactly slideFontsUrl(brandId), so an ordinary
+ * deck's export is byte-for-byte what it was and costs nothing more to produce.
+ */
+export function exportFontsUrl(brandId: BrandId, usedFamilies: readonly string[]): string {
+  const used = new Set(usedFamilies.map(familyOf));
+  return fontsUrlFor(
+    FONTS.filter((f) => f.uses.includes(SLIDE_USE[brandId]) || (f.uses.includes("extra") && used.has(f.family)))
+  );
 }

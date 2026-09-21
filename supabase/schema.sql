@@ -60,12 +60,14 @@ create table if not exists store (
       'kognoz-design',
       'kognoz-voice-samples',
       'kognoz-market-scan',
+      'kognoz-deck',
       'konverz-calendar',
       'konverz-house-prefs',
       'konverz-style-memory',
       'konverz-design',
       'konverz-voice-samples',
       'konverz-market-scan',
+      'konverz-deck',
       'studio-brand'
     )
   ),
@@ -91,12 +93,14 @@ insert into store (key, value) values
   ('kognoz-design', '{}'::jsonb),
   ('kognoz-voice-samples', '{}'::jsonb),
   ('kognoz-market-scan', '{}'::jsonb),
+  ('kognoz-deck', '{}'::jsonb),
   ('konverz-calendar', '{}'::jsonb),
   ('konverz-house-prefs', '{}'::jsonb),
   ('konverz-style-memory', '{}'::jsonb),
   ('konverz-design', '{}'::jsonb),
   ('konverz-voice-samples', '{}'::jsonb),
   ('konverz-market-scan', '{}'::jsonb),
+  ('konverz-deck', '{}'::jsonb),
   ('studio-brand', '{}'::jsonb)
 on conflict (key) do nothing;
 

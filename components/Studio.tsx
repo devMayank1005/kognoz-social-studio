@@ -13,7 +13,7 @@
 //     ported in this pass — flagged in README as the one remaining gap.
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
@@ -62,6 +62,13 @@ import { diffDecks, slideTarget, type EditDiffRow } from "@/lib/editDiff";
 import { lintContent } from "@/lib/slopLint";
 import { type ChannelId } from "@/lib/founderProfiles";
 import { storeGet, storeSet, storePeek } from "@/lib/storeClient";
+import ElementLayer from "@/components/slide/ElementLayer";
+import CanvasEditor from "@/components/studio/CanvasEditor";
+import SlideCanvas from "@/components/studio/SlideCanvas";
+import { NO_ELEMENTS, applyRegenerate, createShape, createText, hiddenSlots, updateElement, type SlideElement } from "@/lib/slideElements";
+import ElementInspector, { type FontChoice } from "@/components/studio/ElementInspector";
+import { exportFontsUrl, extraFonts, familyOf, fontsUrlFor, slideFonts, weightsFor } from "@/lib/fontRegistry";
+import { coerceStoredDeck, deckChanged, serialiseDeck, type StoredDeck } from "@/lib/deckStore";
 import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG } from "@/lib/exportPipeline";
 import { SocialPreview, type PreviewPage } from "@/components/SocialPreview";
 import { Slide, type SlideDesign, type SlideKind } from "./Slide";
@@ -158,6 +165,155 @@ export default function Studio() {
   const setImg = (key: string, url: string) => setImages((m) => ({ ...m, [key]: url }));
   const [scales, setScales] = useState<Record<number, number>>({});
   const [imgOn, setImgOn] = useState<Record<number, boolean>>({});
+  /**
+   * Elements placed on the canvas, keyed by DECK index like `scales` and `imgOn`.
+   *
+   * Lives here rather than inside Slide because the deck is rendered twice — once scaled
+   * for the preview and once at full size off-screen for export. State held in the preview
+   * would never reach the export copy, and the downloaded PNG would quietly show the
+   * untouched template. See lib/slideIndex.ts on keeping these maps aligned.
+   */
+  const [elements, setElements] = useState<Record<number, SlideElement[]>>({});
+  /**
+   * Canvas editing is a mode, not an always-on overlay.
+   *
+   * The editor covers the preview to catch pointer events, which would otherwise swallow
+   * clicks meant for the slide's own "Add image" slots. Off by default, so a deck that
+   * nobody is laying out by hand behaves exactly as it did before this existed.
+   */
+  const [canvasEdit, setCanvasEdit] = useState(false);
+  const [selectedElId, setSelectedElId] = useState<string | null>(null);
+  const [draggingElId, setDraggingElId] = useState<string | null>(null);
+
+  /**
+   * Undo for canvas edits, kept separate from the deck snapshot above.
+   *
+   * `deckUndo` exists to take back one big AI action ("Undo the revision") and is surfaced
+   * as a labelled button. Canvas work is dozens of small moves, and folding them into that
+   * one slot would throw the labelled undo away on the first nudge. So: while the canvas is
+   * editable Cmd+Z walks this stack, and falls through to the deck snapshot when it is empty.
+   *
+   * Snapshots are of the whole per-slide map, which is cheap — the entries are shared
+   * arrays, and only the slide that changed allocates a new one.
+   */
+  const elementsRef = useRef<Record<number, SlideElement[]>>({});
+  const elementHistory = useRef<{ past: Record<number, SlideElement[]>[]; future: Record<number, SlideElement[]>[] }>({
+    past: [],
+    future: []
+  });
+  const ELEMENT_HISTORY_LIMIT = 60;
+
+  useEffect(() => {
+    elementsRef.current = elements;
+  }, [elements]);
+
+  const commitElements = useCallback((deckIdx: number, next: SlideElement[]) => {
+    // Recorded here rather than inside the state updater: React runs updaters during
+    // render and may run them twice, which would push the same snapshot twice.
+    const prev = elementsRef.current;
+    const h = elementHistory.current;
+    h.past.push(prev);
+    if (h.past.length > ELEMENT_HISTORY_LIMIT) h.past.shift();
+    h.future = [];
+    const updated = { ...prev, [deckIdx]: next };
+    elementsRef.current = updated;
+    setElements(updated);
+  }, []);
+
+  const stepElements = useCallback((from: "past" | "future", to: "past" | "future") => {
+    const h = elementHistory.current;
+    const target = h[from].pop();
+    if (!target) return false;
+    h[to].push(elementsRef.current);
+    elementsRef.current = target;
+    setElements(target);
+    setSelectedElId(null);
+    return true;
+  }, []);
+
+  const undoElements = useCallback(() => stepElements("past", "future"), [stepElements]);
+  const redoElements = useCallback(() => stepElements("future", "past"), [stepElements]);
+
+  /** Set once the saved deck has been read, so autosave cannot race the load and blank it. */
+  const deckLoaded = useRef(false);
+  const lastSavedDeck = useRef<StoredDeck | null>(null);
+  const [deckSaveNote, setDeckSaveNote] = useState("");
+
+  /**
+   * What survives new copy landing on the slides.
+   *
+   * Shapes and text boxes somebody placed are their own work and stay put. An element
+   * unlocked from the template is a copy of wording the model has just replaced, so keeping
+   * it would leave the old sentence sitting on the slide beside the new one.
+   */
+  const resetEjectedElements = useCallback(() => {
+    const prev = elementsRef.current;
+    const next: Record<number, SlideElement[]> = {};
+    let changed = false;
+    for (const [k, list] of Object.entries(prev)) {
+      const kept = applyRegenerate(list);
+      if (kept.length !== list.length) changed = true;
+      next[Number(k)] = kept;
+    }
+    if (!changed) return;
+    elementsRef.current = next;
+    setElements(next);
+    setSelectedElId(null);
+  }, []);
+
+  /**
+   * Only the faces this brand actually embeds at export time.
+   *
+   * lib/exportFonts.ts base64s exactly the families in the brand's css2 URL and the
+   * rasteriser cannot fetch anything, so a family outside this list renders on screen and
+   * falls back to a system face in the downloaded PNG.
+   */
+  const elementFonts: FontChoice[] = useMemo(
+    () =>
+      [...slideFonts(brand.id), ...extraFonts()].map((f) => ({
+        label: f.family,
+        value: `'${f.family}', sans-serif`,
+        weights: weightsFor(f.family)
+      })),
+    [brand.id]
+  );
+
+  /** Every family the canvas uses, across the whole deck. */
+  const canvasFamilies = useMemo(() => {
+    const out = new Set<string>();
+    for (const list of Object.values(elements)) {
+      for (const el of list) if (el.kind === "text" && el.fontFamily) out.add(el.fontFamily);
+    }
+    return [...out].sort();
+  }, [elements]);
+
+  /**
+   * The stylesheet the exporters embed.
+   *
+   * Identical to the brand's own until somebody picks one of the opt-in families, at which
+   * point that face is added — otherwise it renders on screen and silently falls back to a
+   * system font in the downloaded file, because the rasteriser cannot fetch anything.
+   */
+  const exportFontsHref = useMemo(
+    () => (canvasFamilies.length ? exportFontsUrl(brand.id, canvasFamilies) : brand.googleFontsUrl),
+    [brand.id, brand.googleFontsUrl, canvasFamilies]
+  );
+
+  // Opt-in families are not in the page's stylesheet, so fetch one the first time it is
+  // chosen. Without this the preview shows a fallback while the export shows the real face.
+  useEffect(() => {
+    const needed = extraFonts().filter((f) => canvasFamilies.some((u) => familyOf(u) === f.family));
+    const href = fontsUrlFor(needed);
+    const id = "kz-canvas-extra-fonts";
+    const existing = document.getElementById(id) as HTMLLinkElement | null;
+    if (!href) {
+      existing?.remove();
+      return;
+    }
+    const link = existing ?? Object.assign(document.createElement("link"), { id, rel: "stylesheet" });
+    if (link.getAttribute("href") !== href) link.setAttribute("href", href);
+    if (!existing) document.head.appendChild(link);
+  }, [canvasFamilies]);
   const [ideaStyle, setIdeaStyle] = useState<IdeaStyle>("signals");
 
   // Web-search grounding is opt-in and visible. It tracks the format/pillar
@@ -316,18 +472,40 @@ export default function Studio() {
   // generation fired in that window is written from the wrong brand's samples.
   useEffect(() => {
     let cancelled = false;
+    deckLoaded.current = false;
+    lastSavedDeck.current = null;
     setDesignLocal(defaultDesign(brand));
     setHousePrefsLocal("");
     setStyleMem([]);
     setVoiceSamples([]);
     (async () => {
-      const [d, hp, sm, vs] = await Promise.all([
+      const [d, hp, sm, vs, savedDeck] = await Promise.all([
         storeGet<Partial<SlideDesign>>(k("design")).then((r) => r.value),
         storeGet<string>(k("house-prefs")).then((r) => r.value),
         storeGet<StyleExample[]>(k("style-memory")).then((r) => r.value),
-        storeGet<unknown>(k("voice-samples")).then((r) => r.value)
+        storeGet<unknown>(k("voice-samples")).then((r) => r.value),
+        storeGet<unknown>(k("deck")).then((r) => r.value).catch(() => null)
       ]);
       if (cancelled) return;
+
+      // The working deck, if this brand has one. Restored before `deckLoaded` is set so the
+      // autosave below cannot fire against half-applied state and overwrite the saved row.
+      const restored = coerceStoredDeck(savedDeck);
+      if (restored) {
+        if (restored.format && restored.format in FORMATS) setFormat(restored.format as FormatId);
+        setEyebrow(restored.eyebrow);
+        setCover(restored.cover);
+        setCta(restored.cta);
+        setSlides(restored.slides);
+        setImages(restored.images);
+        setScales(restored.scales);
+        setImgOn(restored.imgOn);
+        setElements(restored.elements);
+        elementsRef.current = restored.elements;
+        elementHistory.current = { past: [], future: [] };
+        lastSavedDeck.current = restored;
+      }
+      deckLoaded.current = true;
       if (d && Object.keys(d).length) setDesignLocal((cur) => ({ ...cur, ...d }));
       if (typeof hp === "string") setHousePrefsLocal(hp);
       if (Array.isArray(sm)) setStyleMem(sm);
@@ -584,6 +762,21 @@ export default function Studio() {
   );
 
   const accent = design.accent || PILLARS[pillar] || C.blue;
+
+  const curElements = elements[current] ?? NO_ELEMENTS;
+  const selectedEl = curElements.find((e) => e.id === selectedElId) ?? null;
+  /** Template slots this slide has unlocked, so SlideCanvas can hide the originals. */
+  const slotsHiddenFor = (deckIdx: number) => [...hiddenSlots(elements[deckIdx] ?? NO_ELEMENTS)];
+
+  /** New elements land in the middle of the canvas, where they are obvious. */
+  const centred = (w: number, h: number) => ({ x: Math.round((baseW - w) / 2), y: Math.round((baseH - h) / 2) });
+
+  const addElement = (make: (els: readonly SlideElement[]) => SlideElement) => {
+    const el = make(curElements);
+    commitElements(current, [...curElements, el]);
+    setSelectedElId(el.id);
+    setCanvasEdit(true);
+  };
   const fmt = FORMATS[format];
   // How many slides THIS format will actually draw. Single-asset renderers read a
   // fixed number and silently ignore the rest, so the editor must not offer more.
@@ -660,12 +853,32 @@ export default function Studio() {
   const undoRef = useRef<{ restore: () => void; can: boolean; busy: boolean }>({ restore: () => {}, can: false, busy: false });
   undoRef.current = { restore: restoreDeck, can: Boolean(deckUndo), busy };
 
+  // Same ref trick for the canvas stack, and for the same reason.
+  const canvasUndoRef = useRef<{ undo: () => boolean; redo: () => boolean; active: boolean }>({
+    undo: () => false,
+    redo: () => false,
+    active: false
+  });
+  canvasUndoRef.current = { undo: undoElements, redo: redoElements, active: canvasEdit };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.shiftKey) return;
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
       const el = e.target as HTMLElement | null;
       if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
       if (el?.isContentEditable) return;
+
+      // Canvas edits come first while the canvas is editable, and Shift redoes them.
+      // Falls through once that stack is empty, so the labelled deck undo still works.
+      if (canvasUndoRef.current.active) {
+        const handled = e.shiftKey ? canvasUndoRef.current.redo() : canvasUndoRef.current.undo();
+        if (handled) {
+          e.preventDefault();
+          return;
+        }
+      }
+
+      if (e.shiftKey) return; // the deck snapshot is one step; there is nothing to redo.
       // Undoing into a generation that is about to overwrite the result is not an undo.
       if (!undoRef.current.can || undoRef.current.busy) return;
       e.preventDefault();
@@ -674,6 +887,62 @@ export default function Studio() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  /**
+   * Autosave the working deck.
+   *
+   * Debounced rather than saved per keystroke because this is one jsonb blob holding every
+   * slide, every base64 photo and every canvas element — and refused outright past a size
+   * limit, since a couple of large photos would otherwise make each save a multi-megabyte
+   * upload. Silence on failure would be worse than the old behaviour, so a refusal says so.
+   */
+  useEffect(() => {
+    if (!deckLoaded.current) return;
+    const timer = setTimeout(() => {
+      const payload: StoredDeck = {
+        version: 1,
+        format,
+        eyebrow,
+        cover,
+        cta,
+        slides,
+        images: Object.fromEntries(
+          Object.entries(images).filter((pair): pair is [string, string] => typeof pair[1] === "string" && pair[1].startsWith("data:"))
+        ),
+        scales,
+        imgOn,
+        elements,
+        updatedAt: new Date().toISOString()
+      };
+      if (!deckChanged(lastSavedDeck.current, payload)) return;
+
+      const { tooLarge, bytes } = serialiseDeck(payload);
+      if (tooLarge) {
+        setDeckSaveNote(
+          `This deck is ${(bytes / 1e6).toFixed(1)}MB — too large to save automatically. ` +
+            `Its photos are the bulk of that; export what you have rather than relying on a reload.`
+        );
+        return;
+      }
+
+      void storeSet(k("deck"), payload)
+        .then((res) => {
+          if (res.ok) {
+            lastSavedDeck.current = payload;
+            setDeckSaveNote("");
+          } else if (res.reason === "conflict") {
+            setDeckSaveNote("Someone else saved this deck while you were working — reload to pick up their version.");
+          } else {
+            // "Saved locally, sync pending" is a promise this app cannot keep: there is no
+            // retry queue and the next load takes the server's copy. Say what is true.
+            setDeckSaveNote("Could not reach the server — this deck is not saved and will be lost if you reload.");
+          }
+        })
+        .catch(() => setDeckSaveNote("Could not reach the server — this deck is not saved."));
+    }, 2500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brand.id, format, eyebrow, cover, cta, slides, images, scales, imgOn, elements]);
 
   // The caption follows the cover until the user edits it, so opening the preview on
   // a fresh deck shows something real rather than an empty box.
@@ -779,6 +1048,7 @@ export default function Studio() {
       setEyebrow(gPillar);
       setCover(final.cover);
       setSlides(final.slides);
+      resetEjectedElements();
       setCta(final.cta || "Start the conversation");
       bumpReplay();
       setImages({});
@@ -851,6 +1121,7 @@ export default function Studio() {
       setEyebrow(final.eyebrow || eyebrow);
       setCover(final.cover || cover);
       setSlides(final.slides);
+      resetEjectedElements();
       setCta(final.cta || cta);
       setModTxt("");
       bumpReplay();
@@ -892,6 +1163,7 @@ export default function Studio() {
     setEyebrow(parsed.eyebrow || eyebrow);
     setCover(parsed.cover || cover);
     setSlides(parsed.slides && parsed.slides.length ? parsed.slides : slides);
+    resetEjectedElements();
     setCta(parsed.cta || cta);
     bumpReplay();
     setVerifyRes(null);
@@ -1053,7 +1325,7 @@ export default function Studio() {
   /** Export one slide. Returns the failure text, or null on success. */
   async function exportOne(i: number): Promise<string | null> {
     try {
-      await exportPNG({ elId: `exp-${i}`, baseW, baseH, frames: fmt.frames, filenameBase: filenameBase(i), fontsUrl: brand.googleFontsUrl });
+      await exportPNG({ elId: `exp-${i}`, baseW, baseH, frames: fmt.frames, filenameBase: filenameBase(i), fontsUrl: exportFontsHref });
       return null;
     } catch (e) {
       return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
@@ -1105,7 +1377,7 @@ export default function Studio() {
     if (pdfBusy) return;
     setError("");
     try {
-      await exportPdf(elIds, baseW, baseH, (n) => setPdfBusy(n), `${brand.id}-${format.toLowerCase().replace(/\s+/g, "-")}-deck`, brand.googleFontsUrl);
+      await exportPdf(elIds, baseW, baseH, (n) => setPdfBusy(n), `${brand.id}-${format.toLowerCase().replace(/\s+/g, "-")}-deck`, exportFontsHref);
     } catch (e) {
       setError(`Deck PDF failed (${e instanceof Error ? e.name + ": " + e.message : e}). Per-slide downloads still work; tell me this message if it repeats.`);
     } finally {
@@ -1124,9 +1396,9 @@ export default function Studio() {
     const base = `${brand.id}-${format.toLowerCase().replace(/\s+/g, "-")}`;
     try {
       if (fmt.frames) {
-        await exportFramesPdf("exp-0", baseW, baseH, fmt.frames, `${base}-linkedin`, (k) => setPdfBusy(k), brand.googleFontsUrl);
+        await exportFramesPdf("exp-0", baseW, baseH, fmt.frames, `${base}-linkedin`, (k) => setPdfBusy(k), exportFontsHref);
       } else {
-        await exportPdf(elIds, baseW, baseH, (k) => setPdfBusy(k), `${base}-deck`, brand.googleFontsUrl);
+        await exportPdf(elIds, baseW, baseH, (k) => setPdfBusy(k), `${base}-deck`, exportFontsHref);
       }
     } catch (e) {
       setError(`LinkedIn PDF failed (${e instanceof Error ? e.name + ": " + e.message : e}). The PNGs still work; tell me this message if it repeats.`);
@@ -1159,7 +1431,7 @@ export default function Studio() {
       // "exp-0" is right only because the button is gated on fmt.frames and Montage is
       // the sole format that sets it, so its deck is a single node. Assert that rather
       // than leaving a silent cover-only export for whatever gains `frames` next.
-      await exportPanorama("exp-0", baseW, baseH, `${brand.id}-montage-panorama`, brand.googleFontsUrl);
+      await exportPanorama("exp-0", baseW, baseH, `${brand.id}-montage-panorama`, exportFontsHref);
     } catch (e) {
       setError(`Panorama failed (${e instanceof Error ? e.name + ": " + e.message : e}).`);
     } finally {
@@ -1171,7 +1443,7 @@ export default function Studio() {
     setExportBusy(true);
     setError("");
     try {
-      await exportStrip(elIds, baseW, baseH, `${brand.id}-${format.toLowerCase().replace(/\s+/g, "-")}-strip`, brand.googleFontsUrl);
+      await exportStrip(elIds, baseW, baseH, `${brand.id}-${format.toLowerCase().replace(/\s+/g, "-")}-strip`, exportFontsHref);
     } catch (e) {
       setError(`Whole-deck export failed (${e instanceof Error ? e.name + ": " + e.message : e}). Per-slide downloads still work.`);
     } finally {
@@ -2155,12 +2427,98 @@ export default function Studio() {
           {cur.kind === "cover" ? "Cover" : cur.kind === "end" ? "Closing" : cur.kind === "content" ? `Slide ${current} of ${total}` : format} · {baseW}×{baseH}
         </div>
 
+        <div style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexShrink: 0, flexWrap: "wrap" }}>
+          <div
+            onClick={() => {
+              setCanvasEdit((v) => !v);
+              setSelectedElId(null);
+            }}
+            style={{
+              cursor: "pointer",
+              userSelect: "none",
+              fontFamily: font,
+              fontSize: 12.5,
+              fontWeight: 700,
+              padding: "7px 13px",
+              borderRadius: 999,
+              border: `1px solid ${canvasEdit ? "#7C3AED" : C.line}`,
+              background: canvasEdit ? "#7C3AED" : C.white,
+              color: canvasEdit ? C.white : C.ink
+            }}
+          >
+            {canvasEdit ? "✓ Editing canvas" : "Edit canvas"}
+          </div>
+          {canvasEdit &&
+            (
+              [
+                { key: "text", label: "+ Text", make: (els: readonly SlideElement[]) => createText(els, { ...centred(560, 130), fontFamily: displayFont, fontSize: 64, color: C.ink }) },
+                { key: "rect", label: "Rectangle", make: (els: readonly SlideElement[]) => createShape(els, "rect", { ...centred(300, 300), fill: accent }) },
+                { key: "round", label: "Rounded", make: (els: readonly SlideElement[]) => createShape(els, "rect", { ...centred(300, 300), fill: accent, radius: 36 }) },
+                { key: "ellipse", label: "Ellipse", make: (els: readonly SlideElement[]) => createShape(els, "ellipse", { ...centred(300, 300), fill: accent }) },
+                { key: "line", label: "Line", make: (els: readonly SlideElement[]) => createShape(els, "line", { ...centred(420, 6), stroke: C.ink, strokeWidth: 6 }) }
+              ] as const
+            ).map((b) => (
+              <div
+                key={b.key}
+                onClick={() => addElement(b.make)}
+                style={{ cursor: "pointer", userSelect: "none", fontFamily: font, fontSize: 12.5, fontWeight: 700, padding: "7px 12px", borderRadius: 999, border: `1px solid ${C.line}`, background: C.white, color: C.ink }}
+              >
+                {b.label}
+              </div>
+            ))}
+          {canvasEdit && (
+            <span style={{ fontFamily: font, fontSize: 12, color: C.inkMute }}>
+              Drag to move · Shift locks aspect and snaps rotation · Delete removes
+            </span>
+          )}
+        </div>
+
+        {/* A deck that is not being saved has to say so. The old behaviour lost everything
+            on a refresh; silently going back to that would be worse than never having
+            offered to save it. */}
+        {deckSaveNote && (
+          <div style={{ alignSelf: "stretch", marginBottom: 12, padding: "9px 12px", borderRadius: 10, border: "1px solid #F7D8B5", background: "#FEF6EC", fontFamily: font, fontSize: 12.5, color: "#B86B14" }}>
+            {deckSaveNote}
+          </div>
+        )}
+
+        {/* The bar's space is reserved whenever the canvas is editable, even with nothing
+            selected. It sits above the preview, so letting it appear and disappear shifted
+            the canvas down by its own height at the exact moment you pressed on an element
+            — the slide jumped out from under the pointer mid-drag. */}
+        {canvasEdit && (
+          <div style={{ alignSelf: "stretch", minHeight: 100, flexShrink: 0 }}>
+            {selectedEl ? (
+              <ElementInspector
+            element={selectedEl}
+            fonts={elementFonts}
+            swatches={[C.ink, C.blue, C.teal, C.cyan, C.green, C.white]}
+            font={font}
+            ink={C.ink}
+            line={C.line}
+            inkMute={C.inkMute}
+            onChange={(patch) =>
+              commitElements(
+                current,
+                updateElement(curElements, selectedEl.id, (el) => ({ ...el, ...patch }) as SlideElement)
+                  )
+                }
+              />
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", height: 84, padding: "0 12px", marginBottom: 12, borderRadius: 12, border: `1px dashed ${C.line}`, fontFamily: font, fontSize: 12.5, color: C.inkMute }}>
+                Select something on the slide — or click the headline or body text to unlock it from the template.
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ position: "relative", width: previewW, height: baseH * previewScale, flexShrink: 0, borderRadius: 14 * previewScale, overflow: "hidden", boxShadow: "0 24px 60px rgba(0,40,70,0.22)", background: "#fff" }}>
           {fmt.frames &&
             [...Array(fmt.frames - 1)].map((_, k) => (
               <div key={k} style={{ position: "absolute", top: 0, bottom: 0, left: `${((k + 1) / (fmt.frames as number)) * 100}%`, width: 0, borderLeft: "2px dashed rgba(0,81,132,0.35)", zIndex: 5, pointerEvents: "none" }} />
             ))}
           <div style={{ transform: `scale(${previewScale})`, transformOrigin: "top left", width: baseW, height: baseH }}>
+            <SlideCanvas id="preview-slide" hidden={slotsHiddenFor(current)} width={baseW} height={baseH}>
             <Slide
               brand={brand}
               kind={cur.kind}
@@ -2172,7 +2530,7 @@ export default function Studio() {
               baseH={baseH}
               idx={cur.kind === "content" ? current : 0}
               total={total}
-              id="preview-slide"
+              id="preview-slide-body"
               cover={cover}
               slides={slides}
               seed={seed}
@@ -2184,7 +2542,21 @@ export default function Studio() {
               photoOn={!!imgOn[current]}
               replay={replay}
             />
+            <ElementLayer elements={elements[current] ?? NO_ELEMENTS} baseW={baseW} baseH={baseH} hideId={draggingElId} />
+            </SlideCanvas>
           </div>
+          <CanvasEditor
+            active={canvasEdit}
+            elements={elements[current] ?? NO_ELEMENTS}
+            baseW={baseW}
+            baseH={baseH}
+            previewScale={previewScale}
+            exportRootId={`exp-${current}`}
+            selectedId={selectedElId}
+            onSelect={setSelectedElId}
+            onCommit={(next) => commitElements(current, next)}
+            onDraggingChange={setDraggingElId}
+          />
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 22, flexShrink: 0 }}>
@@ -2518,10 +2890,10 @@ export default function Studio() {
       {/* hidden full-resolution renders used for export */}
       <div style={{ position: "absolute", left: -99999, top: 0, pointerEvents: "none" }} aria-hidden>
         {deck.map((d, i) => (
+          <SlideCanvas key={i} id={`exp-${i}`} hidden={slotsHiddenFor(i)} width={baseW} height={baseH}>
           <Slide
             brand={brand}
-            key={i}
-            id={`exp-${i}`}
+            id={`exp-${i}-body`}
             kind={d.kind}
             data={d as CoercedSlide}
             accent={accent}
@@ -2542,6 +2914,8 @@ export default function Studio() {
             photoOn={!!imgOn[i]}
             replay={replay}
           />
+          <ElementLayer elements={elements[i] ?? NO_ELEMENTS} baseW={baseW} baseH={baseH} />
+          </SlideCanvas>
         ))}
       </div>
     </>

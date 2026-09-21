@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { FONTS, fontsUrlFor, slideFonts, slideFontsUrl, browserFontsUrl, chromeFonts } from "./fontRegistry";
+import { FONTS, fontsUrlFor, slideFonts, slideFontsUrl, browserFontsUrl, chromeFonts,
+  extraFonts,
+  exportFontsUrl,
+  familyOf,
+  weightsFor,
+  slideFontsUrl as slideFontsUrlAgain
+} from "./fontRegistry";
 import { BRAND_IDS } from "./brands";
 
 // Two properties matter here, and both are expensive to get wrong in ways nobody
@@ -134,5 +140,55 @@ describe("the registry itself", () => {
 
   it("gives every brand at least one slide family", () => {
     for (const brand of BRAND_IDS) expect(slideFonts(brand).length).toBeGreaterThan(0);
+  });
+});
+
+describe("the opt-in extra families", () => {
+  it("never widen a brand's export URL on their own", () => {
+    // The whole point of the separate use tag: a deck that picks none of them must produce
+    // exactly the stylesheet that shipped, byte for byte, and embed exactly what it did.
+    for (const brand of ["kognoz", "konverz"] as const) {
+      expect(exportFontsUrl(brand, [])).toBe(slideFontsUrlAgain(brand));
+      expect(exportFontsUrl(brand, ["'Open Sans', sans-serif"])).toBe(slideFontsUrlAgain(brand));
+    }
+  });
+
+  it("are added to the export URL only when the canvas uses them", () => {
+    const url = exportFontsUrl("kognoz", ["'Bebas Neue', sans-serif"]);
+    expect(url).toContain("family=Bebas+Neue");
+    expect(url).toContain("family=Fraunces");
+    expect(url).not.toContain("family=Inter");
+  });
+
+  it("stay out of the stylesheet every page load fetches", () => {
+    const browser = browserFontsUrl();
+    for (const f of extraFonts()) expect(browser).not.toContain(`family=${f.family.replace(/ /g, "+")}`);
+  });
+
+  it("are never also a slide or chrome family", () => {
+    for (const f of extraFonts()) expect(f.uses).toEqual(["extra"]);
+  });
+});
+
+describe("familyOf and weightsFor", () => {
+  it("reads the family name out of a CSS stack", () => {
+    expect(familyOf("'Open Sans', system-ui, sans-serif")).toBe("Open Sans");
+    expect(familyOf('"Bebas Neue", sans-serif')).toBe("Bebas Neue");
+    expect(familyOf("Inter")).toBe("Inter");
+  });
+
+  it("reads weights off a plain wght axis", () => {
+    expect(weightsFor("Open Sans")).toEqual([400, 600, 700, 800]);
+    expect(weightsFor("Bebas Neue")).toEqual([400]);
+  });
+
+  it("reads weights off a variable font's two-axis spec", () => {
+    // Fraunces is "opsz,wght@9..144,400;9..144,500;..." — the weight is the last component
+    // of each tuple. Taking the whole tuple would offer nonsense weights in the picker.
+    expect(weightsFor("Fraunces")).toEqual([400, 500, 600, 700]);
+  });
+
+  it("falls back rather than throwing on a family it has never heard of", () => {
+    expect(weightsFor("Comic Papyrus")).toEqual([400, 700]);
   });
 });
