@@ -23,6 +23,12 @@ import { SURFACE_LABELS, surfaceFor, lookLever, nextCardSet, setSpec, type Desig
 import { brandKey } from "@/lib/brands";
 import { useBrandSwitch } from "./BrandProvider";
 import { ArticleWriter } from "./ArticleWriter";
+import { ShieldCheck, Download, Plus } from "lucide-react";
+import { StudioLayout, MonoChip } from "./studio/StudioLayout";
+import { SlideList, SlidePager } from "./studio/SlideStrip";
+import { Inspector, type InspectorTab } from "./studio/Inspector";
+import { ExportDrawer, type ExportAction } from "./overlays/ExportDrawer";
+import { VerifyFactsModal } from "./overlays/VerifyFactsModal";
 import { BrandSwitch } from "./BrandSwitch";
 import {
   coerceContent,
@@ -233,6 +239,14 @@ export default function Studio() {
    * its own banner when it writes again, so nothing here has to remember to.
    */
   const [articleStaleSignal, setArticleStaleSignal] = useState(0);
+
+  // --- three-column layout state ---
+  /** Which inspector panel is showing. Content first: it is what you edit most. */
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("content");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  /** "+ Create New Content" focuses the topic field rather than opening a second screen. */
+  const topicRef = useRef<HTMLTextAreaElement | null>(null);
   /** The topic a restored draft was written for, so a mismatch can be spotted later. */
   const [staleVerify, setStaleVerify] = useState(false);
 
@@ -596,6 +610,37 @@ export default function Studio() {
     : [{ kind: (fmt.single as SlideKind) || "cover" }];
   const total = slides.length;
   const cur = deck[Math.min(current, deck.length - 1)];
+
+  /**
+   * The deck as rows for the left-hand list and the pager beneath the canvas.
+   *
+   * Derived from `deck`, not from `slides`, so the numbering matches what `current`
+   * actually indexes — a deck format prepends a cover and appends a closing card, and a
+   * list built from `slides` alone would be off by one against the canvas.
+   */
+  /**
+   * What the export drawer can offer for THIS format.
+   *
+   * Panorama only exists for a montage, and PDF/strip only for a multi-page deck —
+   * offering them elsewhere would produce an empty file rather than an error, which is
+   * the worst of both.
+   */
+  const exportActions: ExportAction[] = [
+    { kind: "pdf", available: Boolean(fmt.deck || fmt.frames), run: async () => { await (fmt.frames ? handleExportDocPdf() : handleExportPdf()); } },
+    { kind: "png", available: true, run: async () => { await handleExportPngSet(); } },
+    { kind: "strip", available: Boolean(fmt.deck), run: async () => { await handleExportStrip(); } },
+    { kind: "panorama", available: Boolean(fmt.frames), run: async () => { await handleExportPanorama(); } }
+  ];
+
+  const stripSlides = deck.map((d, i) => ({
+    n: i + 1,
+    title:
+      d.kind === "cover"
+        ? (cover || "Cover").replace(/\*/g, "")
+        : d.kind === "end"
+          ? (cta || "Closing").replace(/\*/g, "")
+          : d.title || d.body || ""
+  }));
 
   // `cur` is clamped for display, but the raw `current` is what the export node id,
   // the text-scale map and the photo-toggle map are keyed on. Keep the real value in
@@ -1244,33 +1289,55 @@ export default function Studio() {
   const btn = (primary: boolean): React.CSSProperties => ({ fontFamily: font, fontSize: 13.5, fontWeight: 700, padding: "11px 18px", borderRadius: 8, cursor: loading ? "default" : "pointer", border: "none", color: "#fff", background: primary ? GRAD : C.blue, opacity: loading ? 0.6 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%" });
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: C.off, fontFamily: font, color: C.ink, overflowX: "hidden" }}>
-      {/* ---------------- CONTROLS SIDEBAR (Fully Collapsible) ---------------- */}
-      <div
-        style={{
-          width: sidebarCollapsed ? 0 : isMobile ? "100vw" : 400,
-          minWidth: sidebarCollapsed ? 0 : isMobile ? "100vw" : 400,
-          maxWidth: sidebarCollapsed ? 0 : isMobile ? "100vw" : 400,
-          flexShrink: 0,
-          background: C.white,
-          borderRight: sidebarCollapsed ? "none" : `1px solid ${C.line}`,
-          overflowY: sidebarCollapsed ? "hidden" : "auto",
-          overflowX: "hidden",
-          padding: sidebarCollapsed ? 0 : isMobile ? "20px 18px" : "26px 24px",
-          opacity: sidebarCollapsed ? 0 : 1,
-          pointerEvents: sidebarCollapsed ? "none" : "auto",
-          transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease, opacity 0.2s ease",
-          display: "flex",
-          flexDirection: "column",
-          position: isMobile ? "fixed" : "relative",
-          top: 0,
-          left: 0,
-          height: isMobile ? "100vh" : "auto",
-          zIndex: 50,
-          boxSizing: "border-box"
-        }}
-      >
-        <div style={{ width: "100%", maxWidth: 352, display: "flex", flexDirection: "column", margin: isMobile ? "0 auto" : 0 }}>
+    <>
+    <StudioLayout
+      subHeader={
+        <>
+          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+            <span className="font-semibold text-slate-800 truncate max-w-xs md:max-w-md">{cover ? cover.replace(/\*/g, "") : "Untitled deck"}</span>
+            <MonoChip>{format} · {stripSlides.length} slide{stripSlides.length === 1 ? "" : "s"}</MonoChip>
+            {passNote && <span className="hidden lg:inline text-slate-400 text-[10px] truncate max-w-[18rem]">{passNote}</span>}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button type="button" onClick={() => setVerifyOpen(true)} disabled={busy} className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 disabled:opacity-50 transition-colors font-medium">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{verifying ? "Checking…" : "Verify Facts"}</span>
+            </button>
+            <button type="button" onClick={() => setExportOpen(true)} className="flex items-center gap-1.5 px-3 py-1 rounded-md text-white bg-[#0F172A] hover:bg-slate-800 transition-colors font-medium">
+              <Download className="w-3.5 h-3.5" />
+              <span>Export</span>
+            </button>
+          </div>
+        </>
+      }
+      left={
+        <>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        <div className="p-4 space-y-3 flex-1">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <Logo h={32} brand={brand} />
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1535,7 +1602,22 @@ export default function Studio() {
           </div>
         )}
         {error && <div style={{ fontFamily: font, fontSize: 12, color: "#B4442E", marginTop: 10, lineHeight: 1.5 }}>{error}</div>}
+        </div>
+        <SlideList slides={stripSlides} current={current} onSelect={setCurrent} />
+        <div className="p-3 border-t border-slate-100 bg-slate-50/70">
+          <button type="button" onClick={() => topicRef.current?.focus()} className="w-full py-2 px-3 rounded-lg border border-slate-300 hover:bg-white text-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors">
+            <Plus className="w-3.5 h-3.5 text-[#0A6E8F]" />
+            <span>Create New Content</span>
+          </button>
+        </div>
+        </>
+      }
+      right={
+        <Inspector tab={inspectorTab} onTab={setInspectorTab}>
+          <div className="p-4">
 
+          {inspectorTab === "ai" && (
+            <>
         {/*
           What the automated style check makes of what is on screen. It is a nudge,
           not a verdict: the lexical findings (a banned word, an em dash) are
@@ -1764,6 +1846,10 @@ export default function Studio() {
           </div>
         </div>
 
+            </>
+          )}
+          {inspectorTab === "design" && (
+            <>
         <div style={{ marginTop: 18, padding: "14px 14px 12px", background: C.off, borderRadius: 10, border: `1px solid ${C.line}` }}>
           <span style={label}>Design set · one family per deck</span>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
@@ -1922,18 +2008,28 @@ export default function Studio() {
           </div>
         </div>
 
-        <div style={{ height: 1, background: C.line, margin: "24px 0 20px" }} />
+            </>
+          )}
+          {inspectorTab === "content" && (
+            <>
+            <div style={{ height: 1, background: C.line, margin: "4px 0 16px" }} />
 
         <span style={label}>Cover headline · mark one word *like this* for the gradient</span>
         <textarea value={cover} onChange={(e) => setCover(e.target.value)} rows={2} style={{ ...inputStyle, marginBottom: 18, fontFamily: displayFont, fontSize: 15 }} />
 
         <span style={label}>Closing / CTA</span>
         <textarea value={cta} onChange={(e) => setCta(e.target.value)} rows={2} style={{ ...inputStyle, fontFamily: displayFont, fontSize: 15 }} />
-        </div>
-      </div>
 
-      {/* ---------------- PREVIEW CANVAS ---------------- */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", background: "#E6ECF0", padding: sidebarCollapsed ? (isMobile ? "14px 12px 40px" : "24px 24px 40px") : (isMobile ? "18px 12px 40px" : "56px 24px 40px"), position: "relative", overflowY: "auto", overflowX: "hidden", transition: "padding 0.28s ease", width: "100%", boxSizing: "border-box" }}>
+            </>
+          )}
+          </div>
+        </Inspector>
+      }
+
+
+      center={
+        <>
+        <div className="flex-1 overflow-y-auto flex flex-col items-center px-6 pt-6 pb-2 min-h-0 w-full">
         {/* Floating Top Navbar when Sidebar is Minimized */}
         {sidebarCollapsed && (
           <div
@@ -2355,7 +2451,11 @@ export default function Studio() {
         <div style={{ fontFamily: font, fontSize: 11, color: C.inkMute, marginTop: 12, maxWidth: 380, textAlign: "center", lineHeight: 1.5 }}>
           PNGs export at full size, with the Fraunces/Open Sans font files embedded so they render correctly outside the browser. A Design set holds ONE layout across the whole deck. &quot;Next look&quot; cycles 30 uniform looks (6 sets × 5 accent tones); pick a set or accent directly in Design elements to pin it. Photo slots appear on Carousel, Square, Article, Story and Montage — click “Add photo”, then click the slot to upload or use “Image URL”. Montage slices into carousel frames (dashed lines show the cuts). Multi-page formats — Carousel, Square, Idea Deck and Montage — offer the same content two ways: &quot;LinkedIn PDF&quot; is the file a document post uploads directly, one page per slide (per frame on Montage), and &quot;LinkedIn PNGs&quot; is the same set as separate images for a native carousel. &quot;Review strip&quot; is a half-size single image for quick sharing.
         </div>
-      </div>
+        </div>
+        <SlidePager slides={stripSlides} current={current} onSelect={setCurrent} />
+        </>
+      }
+    />
 
       <SocialPreview
         isOpen={previewOpen}
@@ -2393,6 +2493,28 @@ export default function Studio() {
         authorEmail={session?.user?.email}
       />
 
+      {/* The two overlays that act on a deck, so only Studio can supply them. The
+          drawer's actions carry the REAL exporters — element ids, dimensions and this
+          brand's font stylesheet — which is why they cannot live in the shell. */}
+      <ExportDrawer
+        isOpen={exportOpen}
+        onClose={() => setExportOpen(false)}
+        deckTitle={cover ? cover.replace(/\*/g, "") : undefined}
+        slideCount={stripSlides.length}
+        actions={exportActions}
+      />
+
+      <VerifyFactsModal
+        isOpen={verifyOpen}
+        onClose={() => setVerifyOpen(false)}
+        checks={verifyRes}
+        busy={verifying}
+        error={error}
+        canApply={Boolean(verifyFixed)}
+        onRun={verifyFacts}
+        onApply={applyVerified}
+      />
+
       {/* hidden full-resolution renders used for export */}
       <div style={{ position: "absolute", left: -99999, top: 0, pointerEvents: "none" }} aria-hidden>
         {deck.map((d, i) => (
@@ -2422,6 +2544,6 @@ export default function Studio() {
           />
         ))}
       </div>
-    </div>
+    </>
   );
 }
