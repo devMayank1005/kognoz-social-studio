@@ -8,6 +8,7 @@ import { storeGet } from "@/lib/storeClient";
 import { brandKey } from "@/lib/brands";
 import { coerceSamples, type VoiceSample } from "@/lib/voiceSamples";
 import { FONT } from "@/lib/tokens";
+import { PageBody } from "@/components/shell/PageBody";
 
 // The article writer as a destination of its own.
 //
@@ -75,7 +76,7 @@ export function ArticlesView() {
 
   return (
     <AppShell>
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <PageBody>
         <div style={{ maxWidth: COLUMN, margin: "0 auto", fontFamily: FONT }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: C.ink, margin: "0 0 6px" }}>Write an article</h2>
         <p style={{ fontSize: 13.5, color: C.inkSoft, lineHeight: 1.6, margin: "0 0 20px" }}>
@@ -168,7 +169,7 @@ export function ArticlesView() {
           onError={setError}
         />
       </div>
-      </div>
+      </PageBody>
     </AppShell>
   );
 }

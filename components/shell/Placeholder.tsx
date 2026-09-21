@@ -3,6 +3,7 @@
 import React from "react";
 import { useBrand } from "@/components/BrandProvider";
 import { UI_FONT } from "@/lib/tokens";
+import { Panel } from "@/components/ui";
 
 // A destination that exists in the navigation but is not built yet.
 //
@@ -26,19 +27,14 @@ export function Placeholder({
       <h2 style={{ fontSize: 20, fontWeight: 700, color: C.ink, margin: "0 0 6px" }}>{title}</h2>
       <p style={{ fontSize: 13.5, color: C.inkSoft, lineHeight: 1.6, margin: "0 0 18px" }}>{summary}</p>
 
-      <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, background: C.off, padding: "16px 18px" }}>
-        <div
-          style={{
-            fontSize: 10.5,
-            fontWeight: 700,
-            letterSpacing: 0.6,
-            textTransform: "uppercase",
-            color: C.inkMute,
-            marginBottom: 10
-          }}
-        >
-          Not built yet — this screen will hold
-        </div>
+      <Panel
+        title={
+          <span style={{ fontSize: 10.5, letterSpacing: 0.6, textTransform: "uppercase", color: C.inkMute }}>
+            Not built yet — this screen will hold
+          </span>
+        }
+        bodyClassName="p-4"
+      >
         <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
           {willInclude.map((line) => (
             <li key={line} style={{ fontSize: 13, color: C.inkSoft, lineHeight: 1.55 }}>
@@ -60,7 +56,7 @@ export function Placeholder({
             {todayInstead}
           </p>
         )}
-      </div>
+      </Panel>
     </div>
   );
 }

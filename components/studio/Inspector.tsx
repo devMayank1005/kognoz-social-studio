@@ -47,7 +47,7 @@ export function Inspector({
                 on ? "bg-white text-slate-900 shadow-sm font-semibold" : "text-slate-500 hover:text-slate-900"
               }`}
             >
-              <Icon className={`w-3.5 h-3.5 ${t.accent ? "text-[#43AFCD]" : "text-slate-600"}`} />
+              <Icon className={`w-3.5 h-3.5 ${t.accent ? "text-[var(--brand-accent-soft)]" : "text-slate-600"}`} />
               <span>{t.label}</span>
             </button>
           );

@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { X, ShieldCheck, AlertTriangle, HelpCircle, Loader2 } from "lucide-react";
+import { ShieldCheck, AlertTriangle, HelpCircle, Loader2 } from "lucide-react";
+import { Modal, Button } from "@/components/ui";
 import { coerceClaims, summarise, sortClaims, summaryLine, type Verdict } from "@/lib/verifyClaims";
 
 // Fact verification, ported from the reference UI's VerifyFactsModal — over our real
@@ -59,104 +60,27 @@ export function VerifyFactsModal({
   onRun?: () => void;
   onApply?: () => void;
 }) {
-  if (!isOpen) return null;
-
   const claims = sortClaims(coerceClaims(checks));
   const summary = summarise(claims);
   const hasRun = claims.length > 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Fact verification"
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]"
-      >
-        <div className="p-5 border-b border-slate-200 flex items-start justify-between bg-slate-50 gap-4">
-          <div className="min-w-0">
-            <h3 className="font-semibold text-sm text-slate-900 flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" />
-              Fact verification
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {busy ? "Searching the live web…" : hasRun ? summaryLine(summary) : "Checks every claim in this deck against the live web."}
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {hasRun && (
-          <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2 text-[11px] flex-wrap">
-            <Tally kind="wrong" n={summary.wrong} />
-            <Tally kind="unverifiable" n={summary.unverifiable} />
-            <Tally kind="verified" n={summary.verified} />
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto p-5 space-y-3 min-h-0">
-          {error && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs leading-relaxed">
-              {error}
-            </div>
-          )}
-
-          {busy && (
-            <div className="p-8 flex flex-col items-center justify-center gap-3 text-slate-500 text-xs">
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span>Reading sources. A grounded check costs several times a plain call, so this runs once.</span>
-            </div>
-          )}
-
-          {!busy && !hasRun && !error && (
-            <div className="p-6 text-center text-xs text-slate-500 leading-relaxed">
-              Nothing checked yet.
-              <div className="mt-2 text-slate-400">
-                A grounded search costs several times a normal generation, so it runs only when you ask.
-              </div>
-            </div>
-          )}
-
-          {!busy &&
-            claims.map((c, i) => {
-              const s = STYLE[c.verdict];
-              const Icon = s.icon;
-              return (
-                <div key={`${c.where}-${i}`} className={`p-4 rounded-xl border bg-white ${s.ring}`}>
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border inline-flex items-center gap-1 ${s.chip}`}>
-                      <Icon className="w-3 h-3" />
-                      {s.label}
-                    </span>
-                    <span className="text-[10px] font-mono text-slate-400">{c.where}</span>
-                  </div>
-
-                  <p className="text-xs text-slate-900 font-medium leading-relaxed">{c.claim}</p>
-
-                  {c.note && <p className="text-[11px] text-slate-600 mt-1.5 leading-relaxed">{c.note}</p>}
-
-                  {c.realSource && (
-                    <p className="text-[10px] font-mono text-slate-400 mt-2 truncate" title={c.realSource}>
-                      {c.realSource}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-        </div>
-
-        <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      label="Fact verification"
+      title="Fact verification"
+      subtitle={
+        busy
+          ? "Searching the live web…"
+          : hasRun
+            ? summaryLine(summary)
+            : "Checks every claim in this deck against the live web."
+      }
+      icon={<ShieldCheck className="w-4 h-4" />}
+      size="xl"
+      footer={
+        <div className="flex items-center justify-between gap-3">
           <span className="text-[11px] text-slate-400 leading-snug">
             {summary.unverifiable > 0
               ? "Not confirmed is not the same as false — check those yourself before cutting them."
@@ -165,29 +89,83 @@ export function VerifyFactsModal({
 
           <div className="flex items-center gap-2 shrink-0">
             {onRun && (
-              <button
-                onClick={onRun}
-                disabled={busy}
-                className="px-3 py-2 rounded-lg text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 transition-colors"
-              >
+              <Button variant="secondary" onClick={onRun} disabled={busy}>
                 {hasRun ? "Check again" : "Run check"}
-              </button>
+              </Button>
             )}
             {canApply && onApply && (
-              <button
+              <Button
                 onClick={() => {
                   onApply();
                   onClose();
                 }}
-                className="px-4 py-2 rounded-lg bg-slate-900 hover:bg-[#005184] text-white font-medium text-xs transition-colors"
               >
                 Apply corrections
-              </button>
+              </Button>
             )}
           </div>
         </div>
+      }
+    >
+      {hasRun && (
+        <div className="sticky top-0 z-10 bg-white px-5 py-3 border-b border-slate-100 flex items-center gap-2 text-[11px] flex-wrap">
+          <Tally kind="wrong" n={summary.wrong} />
+          <Tally kind="unverifiable" n={summary.unverifiable} />
+          <Tally kind="verified" n={summary.verified} />
+        </div>
+      )}
+
+      <div className="p-5 space-y-3">
+        {error && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs leading-relaxed">
+            {error}
+          </div>
+        )}
+
+        {busy && (
+          <div className="p-8 flex flex-col items-center justify-center gap-3 text-slate-500 text-xs">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            <span>Reading sources. A grounded check costs several times a plain call, so this runs once.</span>
+          </div>
+        )}
+
+        {!busy && !hasRun && !error && (
+          <div className="p-6 text-center text-xs text-slate-500 leading-relaxed">
+            Nothing checked yet.
+            <div className="mt-2 text-slate-400">
+              A grounded search costs several times a normal generation, so it runs only when you ask.
+            </div>
+          </div>
+        )}
+
+        {!busy &&
+          claims.map((c, i) => {
+            const s = STYLE[c.verdict];
+            const Icon = s.icon;
+            return (
+              <div key={`${c.where}-${i}`} className={`p-4 rounded-xl border bg-white ${s.ring}`}>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border inline-flex items-center gap-1 ${s.chip}`}>
+                    <Icon className="w-3 h-3" />
+                    {s.label}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">{c.where}</span>
+                </div>
+
+                <p className="text-xs text-slate-900 font-medium leading-relaxed">{c.claim}</p>
+
+                {c.note && <p className="text-[11px] text-slate-600 mt-1.5 leading-relaxed">{c.note}</p>}
+
+                {c.realSource && (
+                  <p className="text-[10px] font-mono text-slate-400 mt-2 truncate" title={c.realSource}>
+                    {c.realSource}
+                  </p>
+                )}
+              </div>
+            );
+          })}
       </div>
-    </div>
+    </Modal>
   );
 }
 

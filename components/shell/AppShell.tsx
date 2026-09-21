@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sidebar, SIDEBAR_WIDTH, type SidebarCounts } from "./Sidebar";
+import { Sidebar, SIDEBAR_WIDTH, SIDEBAR_WIDTH_COLLAPSED, type SidebarCounts } from "./Sidebar";
 import { Topbar, TOPBAR_HEIGHT } from "./Topbar";
 import { CommandPalette } from "@/components/overlays/CommandPalette";
 import { HelpModal } from "@/components/overlays/HelpModal";
@@ -18,7 +18,14 @@ import { SettingsModal } from "@/components/overlays/SettingsModal";
 //   take the rail and the topbar with it.
 //
 //   The rail is duplicated for mobile as a drawer rather than being made responsive.
-//   At 232px there is no useful narrow state — it is either present or it is a sheet.
+//   On a phone it is either a sheet or it is absent; there is no room for anything else.
+//
+// On desktop the rail DOES have a useful narrow state, contrary to what this comment used
+// to claim: at 64px the icons stay reachable and the canvas gains 168px, which is the
+// difference between a 1080-wide slide fitting comfortably and not. The choice persists in
+// localStorage and is applied in a layout effect — after hydration, before paint — so the
+// rail never flashes open on the way to being closed. components/BrandProvider.tsx explains
+// that pattern at length; Studio's own collapse uses a plain effect and does flash.
 //
 // Wrapping each PAGE rather than the root layout is deliberate: /login must not get a
 // sidebar, and a root-level shell would have to special-case it by pathname.
@@ -44,9 +51,33 @@ export function AppShell({
 }) {
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // The stored rail width, applied before the browser paints so there is no visible jump.
+  // useLayoutEffect warns during SSR, where it would do nothing anyway.
+  const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+  useIsomorphicLayoutEffect(() => {
+    try {
+      if (window.localStorage.getItem(SHELL_COLLAPSED_KEY) === "true") setCollapsed(true);
+    } catch {
+      /* private mode, or storage disabled. Expanded is a fine answer. */
+    }
+  }, []);
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(SHELL_COLLAPSED_KEY, String(next));
+      } catch {
+        /* the choice just will not survive a reload */
+      }
+      return next;
+    });
+  }, []);
 
   // ⌘K from anywhere. The palette owns Escape and a second ⌘K to close; this listener
   // only opens, so the two cannot fight over the same event.
@@ -78,9 +109,17 @@ export function AppShell({
   const openSettings = onOpenSettings ?? (() => setSettingsOpen(true));
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#F8F9FA] text-[#111827]">
+    <div
+      className="flex h-screen w-screen overflow-hidden"
+      style={{ background: "var(--surface-app)", color: "var(--color-ink)", fontFamily: "var(--font-ui)" }}
+    >
       <div className="hidden md:block shrink-0">
-        <Sidebar counts={counts} onOpenSettings={openSettings} />
+        <Sidebar
+          counts={counts}
+          onOpenSettings={openSettings}
+          collapsed={collapsed}
+          onToggleCollapsed={toggleCollapsed}
+        />
       </div>
 
       {mobileOpen && (
@@ -90,7 +129,7 @@ export function AppShell({
             onClick={() => setMobileOpen(false)}
             aria-hidden
           />
-          <div className="relative z-10 w-[232px] h-full shadow-2xl">
+          <div className="relative z-10 h-full shadow-2xl" style={{ width: SIDEBAR_WIDTH }}>
             <Sidebar
               counts={counts}
               onOpenSettings={() => {
@@ -129,4 +168,7 @@ export function AppShell({
   );
 }
 
-export { SIDEBAR_WIDTH, TOPBAR_HEIGHT };
+/** Where the rail width is remembered. A literal, like every other key in this app. */
+const SHELL_COLLAPSED_KEY = "kognoz-shell-collapsed";
+
+export { SIDEBAR_WIDTH, SIDEBAR_WIDTH_COLLAPSED, TOPBAR_HEIGHT };

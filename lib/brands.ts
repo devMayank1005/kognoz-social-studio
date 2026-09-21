@@ -100,6 +100,15 @@ export interface BrandLogos {
   mark: string;
   /** width / height of the wordmark, so the renderer can size it from a height. */
   aspect: number;
+  /**
+   * width / height of `mark`.
+   *
+   * Separate from `aspect` because a mark is not a small wordmark: Kognoz's is very nearly
+   * square (220x211), which is what lets the collapsed rail show it at 28x28. Konverz has
+   * no mark file yet and `mark` points at its wordmark, so this is 6.24 and the chrome uses
+   * that number to know it must fall back rather than squash it.
+   */
+  markAspect: number;
 }
 
 export interface BrandSplit {
@@ -230,7 +239,7 @@ export const KOGNOZ: Brand = {
   font: KOGNOZ_FONT,
   displayFont: KOGNOZ_DISPLAY_FONT,
   googleFontsUrl: KOGNOZ_GOOGLE_FONTS_URL,
-  logos: { color: LOGO_COLOR_DATA, white: LOGO_WHITE_DATA, mark: LOGO_MARK_DATA, aspect: 3.6 },
+  logos: { color: LOGO_COLOR_DATA, white: LOGO_WHITE_DATA, mark: LOGO_MARK_DATA, aspect: 3.6, markAspect: 1.04 },
   motif: "petal",
   emMode: "word",
   sparkle: false,
@@ -312,7 +321,9 @@ export const KONVERZ: Brand = {
     color: KONVERZ_LOGO_COLOR_DATA,
     white: KONVERZ_LOGO_WHITE_DATA,
     mark: KONVERZ_LOGO_COLOR_DATA,
-    aspect: 6.24
+    aspect: 6.24,
+    // Not a mark: the wordmark again. The chrome checks this and falls back.
+    markAspect: 6.24
   },
   motif: "halo",
   emMode: "tail",

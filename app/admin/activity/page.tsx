@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { C, FONT, MONO_FONT } from "@/lib/tokens";
 import { AppShell } from "@/components/shell/AppShell";
 import { describeActivity, describeDevice } from "@/lib/activityEvents";
+import { PageBody } from "@/components/shell/PageBody";
 
 // The activity timeline.
 //
@@ -160,7 +161,7 @@ export default function ActivityPage() {
 
   return (
     <AppShell>
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <PageBody>
         <div style={{ maxWidth: 1100, fontFamily: FONT }}>
 
       <div style={{ marginBottom: 18 }}>
@@ -370,7 +371,7 @@ export default function ActivityPage() {
         Instagram, so “Posted” is a status somebody set by hand. IP addresses are retained for 180 days.
       </p>
       </div>
-      </div>
+      </PageBody>
     </AppShell>
   );
 }

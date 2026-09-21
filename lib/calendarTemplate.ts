@@ -6,7 +6,7 @@ import { C } from "./tokens";
 import type { FormatId } from "./formats";
 import type { DesignSetId } from "./designSets";
 
-export const CHANNELS: Record<string, string> = { Lokesh: C.blue, Harpreet: C.teal, "Kognoz page": "#75A02F" };
+export const CHANNELS: Record<string, string> = { Lokesh: C.blue, Harpreet: C.teal, "Kognoz page": C.gradTo };
 
 export const TMPL_V = 2; // bump when the template changes; saved plans migrate, statuses survive
 
@@ -102,7 +102,7 @@ export const WEEK_OF = (d: number): string =>
 
 export type ItemStatus = "Planned" | "Drafted" | "Posted";
 export const STATUS_NEXT: Record<ItemStatus, ItemStatus> = { Planned: "Drafted", Drafted: "Posted", Posted: "Planned" };
-export const STATUS_COLOR: Record<ItemStatus, string> = { Planned: "#939598", Drafted: "#43AFCD", Posted: "#75A02F" };
+export const STATUS_COLOR: Record<ItemStatus, string> = { Planned: "#939598", Drafted: C.cyan, Posted: C.gradTo };
 
 // Default example content (a Behavioral Signal carousel) so the tool opens populated.
 export const DEFAULT_CONTENT = {

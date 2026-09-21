@@ -1914,7 +1914,7 @@ export default function Studio() {
         <SlideList slides={stripSlides} current={current} onSelect={setCurrent} />
         <div className="p-3 border-t border-slate-100 bg-slate-50/70">
           <button type="button" onClick={() => topicRef.current?.focus()} className="w-full py-2 px-3 rounded-lg border border-slate-300 hover:bg-white text-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors">
-            <Plus className="w-3.5 h-3.5 text-[#0A6E8F]" />
+            <Plus className="w-3.5 h-3.5 text-[var(--accent-deep)]" />
             <span>Create New Content</span>
           </button>
         </div>

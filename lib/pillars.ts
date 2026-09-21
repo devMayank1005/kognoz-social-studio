@@ -19,7 +19,7 @@ export const KONVERZ_PILLARS: Record<string, string> = {
   "Outcome Proof": "#B52879", // magenta — the proof numbers
   "How It Works": "#005382", // deep blue — mechanism
   "Customer Story": "#6B4FC9", // violet — named-speaker results
-  "Talent Intelligence POV": "#55B09D", // teal — the category argument
+  "Talent Intelligence POV": C.teal, // the category argument
   "Market Intelligence": "#2196F3", // Coach blue — verified external figures
   "Product Update": "#607D8B" // Learn slate — what shipped
 };

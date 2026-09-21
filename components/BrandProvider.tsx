@@ -45,15 +45,48 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
 
   // Stage one: the local copy, before paint.
+  //
+  // Two writers share this key and they disagree about encoding. Line ~92 below writes the
+  // raw id (`konverz`); lib/storeClient.ts:61 writes `JSON.stringify(value)` for every key
+  // it mirrors, which is `"konverz"` WITH quotes — and it writes last, so that is what is
+  // actually in storage. Reading it raw therefore always failed `isBrandId`, stage one
+  // always fell through to the default, and the brand only came back once the SERVER
+  // answered. With the server unreachable it never came back at all, and the whole point
+  // of stage one — no flash of the wrong brand — was quietly lost.
+  //
+  // Accepting both encodings is the small fix. Making the two writers agree is the real
+  // one, and belongs with whoever owns storeClient's local mirror.
   useIsomorphicLayoutEffect(() => {
     try {
-      const saved = window.localStorage.getItem(BRAND_KEY);
+      const raw = window.localStorage.getItem(BRAND_KEY);
+      let saved: unknown = raw;
+      if (typeof raw === "string" && raw.startsWith('"')) {
+        try {
+          saved = JSON.parse(raw);
+        } catch {
+          saved = raw;
+        }
+      }
       if (isBrandId(saved) && saved !== DEFAULT_BRAND_ID) setBrandIdState(saved);
     } catch {
       /* private mode, or storage disabled. The default is a fine answer. */
     }
     setReady(true);
   }, []);
+
+  /**
+   * Publish the brand to CSS.
+   *
+   * Every chrome surface reads `--rail`, `--brand-accent` and friends, which are redefined
+   * under `:root[data-brand="konverz"]`. Setting the attribute here means a brand switch
+   * repaints the whole frame at once: no component subscribes, nothing re-renders, and
+   * there is no frame where the rail has switched and the buttons have not.
+   *
+   * A layout effect for the same reason stage one is: after hydration, before paint.
+   */
+  useIsomorphicLayoutEffect(() => {
+    document.documentElement.dataset.brand = brandId;
+  }, [brandId]);
 
   // Stage two: the shared copy. Authoritative, so it overrides stage one.
   useEffect(() => {

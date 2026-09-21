@@ -2,11 +2,12 @@
 
 import { AppShell } from "@/components/shell/AppShell";
 import { Placeholder } from "@/components/shell/Placeholder";
+import { PageBody } from "@/components/shell/PageBody";
 
 export default function StylePage() {
   return (
     <AppShell>
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <PageBody>
         <Placeholder
         title="Style & Voice"
         summary="Where the model learns how Kognoz and Konverz actually write, and which words never get through."
@@ -18,7 +19,7 @@ export default function StylePage() {
         ]}
         todayInstead="The engine behind all of this already runs: lib/voiceSamples.ts stores and picks the samples, and the slop linter enforces the banned list on every generation. What is missing is this screen to manage them."
         />
-      </div>
+      </PageBody>
     </AppShell>
   );
 }

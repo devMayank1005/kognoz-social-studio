@@ -54,7 +54,7 @@ export interface DynamicCalendarStore {
 }
 
 export const AUTHOR_COLORS: Record<string, { bg: string; color: string }> = {
-  M: { bg: "#EBF3FA", color: "#005184" }, // Mayank
+  M: { bg: "#EBF3FA", color: C.blue }, // Mayank
   L: { bg: "#EEF7F5", color: "#00838F" }, // Lokesh
   Y: { bg: "#FEF6EC", color: "#B86B14" }, // Yashwant
   H: { bg: "#EDF7ED", color: "#2E7D32" }, // Harpreet
@@ -66,7 +66,7 @@ export function getAuthorInfo(name?: string | null, email?: string | null): { in
   // Clean first name (e.g. "Mayank Tripathi" -> "Mayank")
   const firstName = rawName.split(" ")[0].trim();
   const initial = (firstName[0] || "U").toUpperCase();
-  const palette = AUTHOR_COLORS[initial] || { bg: "#EAF1F4", color: "#005184" };
+  const palette = AUTHOR_COLORS[initial] || { bg: C.mist, color: C.blue };
   return {
     initial,
     displayName: firstName,
@@ -77,10 +77,10 @@ export function getAuthorInfo(name?: string | null, email?: string | null): { in
 
 export const PLATFORMS: { id: ContentPlatform; label: string; color: string; bg: string }[] = [
   { id: "LinkedIn", label: "LinkedIn", color: "#0A66C2", bg: "#EBF3FA" },
-  { id: "Kognoz page", label: "Kognoz Page", color: "#005184", bg: "#EAF1F4" },
+  { id: "Kognoz page", label: "Kognoz Page", color: C.blue, bg: C.mist },
   { id: "Konverz page", label: "Konverz Page", color: "#B52879", bg: "#FCE4EC" },
-  { id: "Lokesh", label: "Lokesh", color: "#005184", bg: "#EAF1F4" },
-  { id: "Harpreet", label: "Harpreet", color: "#55B09D", bg: "#EEF7F5" },
+  { id: "Lokesh", label: "Lokesh", color: C.blue, bg: C.mist },
+  { id: "Harpreet", label: "Harpreet", color: C.teal, bg: "#EEF7F5" },
   { id: "Instagram", label: "Instagram", color: "#E1306C", bg: "#FDF0F5" },
   { id: "X (Twitter)", label: "X (Twitter)", color: "#111111", bg: "#F0F0F0" },
   { id: "YouTube", label: "YouTube", color: "#FF0000", bg: "#FEEBEB" },
@@ -89,7 +89,7 @@ export const PLATFORMS: { id: ContentPlatform; label: string; color: string; bg:
 
 export const STATUS_CONFIG: Record<ContentStatus, { label: string; color: string; bg: string; border: string }> = {
   Draft: { label: "Draft", color: "#6B7680", bg: "#F4F7F9", border: "#DCE6EB" },
-  Planned: { label: "Planned", color: "#005184", bg: "#EAF1F4", border: "#B8D5E5" },
+  Planned: { label: "Planned", color: C.blue, bg: C.mist, border: "#B8D5E5" },
   Scheduled: { label: "Scheduled", color: "#B86B14", bg: "#FEF6EC", border: "#F7D8B5" },
   Posted: { label: "Posted", color: "#2E7D32", bg: "#EDF7ED", border: "#B7DFB9" }
 };
@@ -138,7 +138,7 @@ export const PILLAR_COLORS: Record<string, string> = {
   "Outcome Proof": "#B52879",
   "How It Works": "#005382",
   "Customer Story": "#6B4FC9",
-  "Talent Intelligence POV": "#55B09D",
+  "Talent Intelligence POV": C.teal,
   "Product Update": "#607D8B"
 };
 

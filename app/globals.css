@@ -21,6 +21,11 @@
 @import "tailwindcss/theme.css";
 @import "tailwindcss/utilities.css";
 
+/* The palette, mirrored from lib/tokens.ts.
+   It is declared in both places on purpose: slides are rendered with inline styles and
+   cannot read a CSS variable, and the chrome cannot read a TS object from a stylesheet.
+   lib/designTokens.test.ts holds the two in step — the same technique lib/storeKeys.test.ts
+   uses for the store-key list, and for the same reason: a comment cannot fail. */
 :root {
   --color-blue: #005184;
   --color-green: #88b787;
@@ -32,9 +37,110 @@
   --color-off: #f4f7f9;
   --color-mist: #eaf1f4;
   --color-line: #dce6eb;
+  --color-line-dark: #c9d7df;
+  --color-white: #ffffff;
   --gradient-brand: linear-gradient(120deg, #009bdd, #75a02f);
   --font-display: "Fraunces", serif;
   --font-body: "Open Sans", sans-serif;
+}
+
+/* ---------------------------------------------------------------------------
+   CHROME SURFACES AND BRAND ACCENTS
+   ---------------------------------------------------------------------------
+   The application frame — rail, top bar, page body — reads these and nothing
+   else. Two reasons they live here rather than in a TS constant:
+
+   1. A brand switch becomes one attribute on <html>, set by BrandProvider.
+      No component subscribes, nothing re-renders, and there is no frame where
+      half the chrome is Kognoz and half is Konverz.
+   2. The rail is DARK, so it needs its own text and border values. Reusing the
+      slide palette's ink colours on navy would be illegible.
+
+   The rail navy is brand blue (#005184) taken down to a surface value; it is a
+   Kognoz colour, not the framework slate the shell shipped with.
+
+   None of this reaches a slide. The exporter strips <style>, so anything here
+   is chrome by construction — which is exactly why the slide renderer uses
+   inline styles and never a class. See the note at the top of this file.
+   --------------------------------------------------------------------------- */
+:root {
+  --rail: #00263d;
+  --rail-hover: #08415f;
+  --rail-active: rgba(255, 255, 255, 0.09);
+  --rail-text: #a9c2d4;
+  --rail-text-strong: #ffffff;
+  --rail-border: rgba(255, 255, 255, 0.09);
+
+  /* Three planes, so the white canvas reads as a sheet rather than more page. */
+  --surface-app: #edf1f4;
+  --surface-panel: #ffffff;
+  --border-subtle: #dce6eb;
+
+  --brand-accent: #005184;
+  --brand-accent-soft: #43afcd;
+  --brand-gradient: linear-gradient(160deg, #009bdd, #75a02f);
+  /* The bright stop of GRAD_DARK. Used as readable accent TEXT on a pale tint, where the
+     mid-blue is too dark and the cyan too light. It was hard-coded in six chrome files and
+     was the same colour for both brands, which made a Konverz screen show a Kognoz accent. */
+  --accent-deep: #0a6e8f;
+
+  /* Plus Jakarta Sans is the chrome face. Open Sans is the SLIDE's body face and
+     the shell had been inheriting it by accident. */
+  --font-ui: "Plus Jakarta Sans", "Open Sans", system-ui, sans-serif;
+}
+
+:root[data-brand="konverz"] {
+  --rail: #2e1a3d;
+  --rail-hover: #452a5c;
+  --rail-text: #c9b6dc;
+  --brand-accent: #b52879;
+  --brand-accent-soft: #6b4fc9;
+  --brand-gradient: linear-gradient(160deg, #b52879, #005382);
+  --accent-deep: #3e2f7a;
+}
+
+/* ---------------------------------------------------------------------------
+   THE TWO RESETS THE MISSING PREFLIGHT OWES THE CHROME
+   ---------------------------------------------------------------------------
+   Preflight is not imported (see the note at the top of this file), and it is
+   the thing that normally removes two user-agent defaults nobody wants:
+
+     a       arrives underlined, so every nav row read as a hyperlink
+     button  arrives with a grey `buttonface` background AND an outset border,
+             so any button that did not set its own showed as a pale outlined
+             box on the dark rail
+
+   Both are undone here rather than by adding a utility class to each element,
+   because the next button somebody adds would have the same bug.
+
+   `:where()` is load-bearing: it has ZERO specificity, so every Tailwind utility
+   and every inline style still wins. A plain `#app-sidebar button` selector would
+   outrank `hover:bg-white/10` and quietly break every hover state instead.
+
+   Scoped to the shell and to dialogs, so none of it can reach a slide. Dialogs are
+   matched by [role="dialog"] rather than by id because components/ui/Modal.tsx puts
+   that attribute on every panel, and the grey-buttonface bug was visible on all five
+   overlays: their close buttons set no background, so each rendered as a pale outset
+   box over a white panel.
+
+   `a` stays shell-only on purpose. A nav row must not look like a hyperlink; a link
+   inside help text must.
+   --------------------------------------------------------------------------- */
+:where(#app-sidebar, #app-topbar) :where(a) {
+  text-decoration: none;
+  color: inherit;
+}
+
+:where(#app-sidebar, #app-topbar, [role="dialog"]) :where(button) {
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  border: 0;
+}
+
+/* Form controls do not inherit the page font either — the other half of the same debt. */
+:where([role="dialog"]) :where(input, textarea, select) {
+  font: inherit;
 }
 
 * {

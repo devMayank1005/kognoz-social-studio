@@ -19,6 +19,8 @@
 //   ejected         ejected into a free object. That single field is what tells the renderer
 //                   to hide the original, and what a regenerate throws away.
 
+import { C } from "./tokens";
+
 /** The template text slots an element can be ejected from. */
 export type TemplateSlot = "eyebrow" | "headline" | "body" | "cta" | "kicker" | "number";
 
@@ -182,7 +184,7 @@ export function createShape(
     h: kind === "line" ? 4 : 280,
     rot: 0,
     z: nextZ(elements),
-    fill: kind === "line" ? "transparent" : "#005184",
+    fill: kind === "line" ? "transparent" : C.blue,
     stroke: kind === "line" ? "#212121" : "transparent",
     strokeWidth: kind === "line" ? 4 : 0,
     radius: 0,

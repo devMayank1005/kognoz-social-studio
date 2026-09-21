@@ -6,10 +6,15 @@ import { Search, HelpCircle, Sparkles, ShieldCheck, Download, Command, Menu } fr
 import { useBrandSwitch } from "@/components/BrandProvider";
 import { BRANDS, BRAND_IDS } from "@/lib/brands";
 import { activeNavId, navItem } from "@/lib/navigation";
-import { BRAND_DESCRIPTOR, BRAND_PILL, BRAND_PILL_DOT, BRAND_CREATE_BTN } from "./brandChrome";
+import { BRAND_DESCRIPTOR } from "./brandChrome";
 
-// The 64px topbar, ported from the reference UI
-// (demo-frontend/src/components/Topbar.tsx) with our palette.
+// The 64px topbar.
+//
+// Its height is load-bearing: components/studioLayout.test.tsx asserts `h-[calc(100vh-64px)]`,
+// which is Studio's frame measured against this bar. Change one and the other has to move.
+//
+// Colour comes from the CSS variables in app/globals.css, so the pill and the Create button
+// follow the brand without this file knowing either palette.
 //
 // Its `emerald` utilities are left exactly as the reference has them, because Tailwind's
 // emerald-600 is #059669 — our AUDIT_OK token to the digit. Status colour is not brand
@@ -53,7 +58,8 @@ export function Topbar({
   return (
     <header
       id="app-topbar"
-      className="h-16 px-4 md:px-6 bg-white/90 backdrop-blur-md border-b border-slate-200/80 flex items-center justify-between sticky top-0 z-20 transition-colors"
+      className="h-16 px-4 md:px-6 bg-white/90 backdrop-blur-md border-b flex items-center justify-between sticky top-0 z-20"
+      style={{ borderColor: "var(--border-subtle)" }}
     >
       {/* Left: mobile menu, page title, brand pill */}
       <div className="flex items-center gap-3 min-w-0">
@@ -70,18 +76,26 @@ export function Topbar({
         )}
 
         <div className="flex items-center gap-2.5 min-w-0">
-          <h1 className="text-sm md:text-base font-semibold text-slate-900 tracking-tight truncate">{title}</h1>
+          <h1
+            className="text-[15px] font-semibold tracking-[-0.01em] truncate"
+            style={{ color: "var(--color-ink)" }}
+          >
+            {title}
+          </h1>
 
-          <span className="hidden sm:inline-block text-slate-300">/</span>
+          <span className="hidden sm:inline-block" style={{ color: "var(--border-subtle)" }}>
+            /
+          </span>
 
           <button
             type="button"
             onClick={toggleBrand}
             title={`Producing for ${brand.name} — click to switch`}
             aria-label={`Brand: ${brand.name}. Click to switch.`}
-            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-all border ${BRAND_PILL[brandId]}`}
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors border hover:brightness-125"
+            style={{ background: "var(--rail)", color: "#fff", borderColor: "var(--rail-border)" }}
           >
-            <span className={`w-1.5 h-1.5 rounded-full ${BRAND_PILL_DOT[brandId]}`} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--brand-accent-soft)" }} />
             <span>{brand.label}</span>
             <span className="text-[10px] opacity-70">({BRAND_DESCRIPTOR[brandId]})</span>
           </button>
@@ -95,7 +109,8 @@ export function Topbar({
             id="global-search-btn"
             type="button"
             onClick={onOpenCommandPalette}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs text-slate-500 bg-slate-100/90 hover:bg-slate-200/80 rounded-lg border border-slate-200 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 text-xs text-slate-500 bg-slate-100/90 hover:bg-slate-200/80 rounded-lg border transition-colors"
+            style={{ borderColor: "var(--border-subtle)" }}
           >
             <Search className="w-3.5 h-3.5 text-slate-400" />
             <span className="hidden md:inline">Search studio, pillars…</span>
@@ -124,7 +139,8 @@ export function Topbar({
             id="topbar-export-btn"
             type="button"
             onClick={onOpenExport}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 rounded-lg border border-slate-300 shadow-xs transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 rounded-lg border shadow-xs transition-colors"
+            style={{ borderColor: "var(--border-subtle)" }}
           >
             <Download className="w-3.5 h-3.5 text-slate-500" />
             <span className="hidden sm:inline">Export</span>
@@ -149,7 +165,8 @@ export function Topbar({
             id="topbar-create-btn"
             type="button"
             onClick={onCreate}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white rounded-lg shadow-sm transition-all ${BRAND_CREATE_BTN[brandId]}`}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white rounded-lg shadow-sm transition-[filter] hover:brightness-110"
+            style={{ background: "var(--brand-gradient)" }}
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>+ Create</span>

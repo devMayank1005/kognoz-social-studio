@@ -2,11 +2,12 @@
 
 import { AppShell } from "@/components/shell/AppShell";
 import { Placeholder } from "@/components/shell/Placeholder";
+import { PageBody } from "@/components/shell/PageBody";
 
 export default function Page() {
   return (
     <AppShell>
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <PageBody>
         <Placeholder
           title="Asset Library"
           summary="Images, logos and files your posts draw on."
@@ -18,7 +19,7 @@ export default function Page() {
           ]}
           todayInstead="There is no file storage behind this yet — images are attached per slide in Studio and live inside the saved deck."
         />
-      </div>
+      </PageBody>
     </AppShell>
   );
 }

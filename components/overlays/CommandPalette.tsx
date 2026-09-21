@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Search, Sparkles, Calendar, FileText, FolderKanban, FileCode, Mic, Palette, Activity, ShieldCheck, Download, Building, type LucideIcon } from "lucide-react";
 import { useBrandSwitch } from "@/components/BrandProvider";
+import { Modal } from "@/components/ui";
 import { buildCommands, filterCommands, moveSelection, clampSelection, type Command } from "@/lib/commandPalette";
 import type { NavId } from "@/lib/navigation";
 
@@ -97,11 +98,9 @@ export function CommandPalette({
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-        return;
-      }
+      // Escape is not handled here: components/ui/Modal.tsx takes it in the capture
+      // phase, so it never reaches this listener. ⌘K still has to close, because the
+      // shortcut that opens the palette should also dismiss it.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         onClose();
@@ -127,22 +126,15 @@ export function CommandPalette({
     listRef.current?.querySelector<HTMLElement>('[data-selected="true"]')?.scrollIntoView({ block: "nearest" });
   }, [selected]);
 
-  if (!isOpen) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-start justify-center pt-20 p-4"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[70vh]"
-      >
-        <div className="p-3.5 border-b border-slate-200 flex items-center gap-3">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      label="Command palette"
+      anchor="top"
+      size="lg"
+      header={
+        <div className="p-3.5 border-b border-slate-200 flex items-center gap-3 shrink-0">
           <Search className="w-4 h-4 text-slate-400 shrink-0" />
           <input
             type="text"
@@ -157,50 +149,51 @@ export function CommandPalette({
             ESC
           </kbd>
         </div>
-
-        <div ref={listRef} className="flex-1 overflow-y-auto p-2 space-y-1 text-xs">
-          {results.length === 0 ? (
-            <div className="p-6 text-center text-slate-400">No matching commands or destinations.</div>
-          ) : (
-            results.map((c, i) => {
-              const Icon = iconFor(c);
-              const on = i === selected;
-              return (
-                <button
-                  key={c.id}
-                  data-selected={on}
-                  onMouseEnter={() => setSelected(i)}
-                  onClick={() => run(c)}
-                  className={`w-full p-2.5 rounded-xl text-left flex items-center justify-between transition-colors group ${
-                    on ? "bg-slate-100" : "hover:bg-slate-100/90"
-                  }`}
-                >
-                  <span className="flex items-center gap-2.5 min-w-0">
-                    <span
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                        on ? "bg-[#43AFCD]/15 text-[#0A6E8F]" : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5" />
-                    </span>
-                    <span className="font-medium text-slate-800 truncate">{c.title}</span>
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 shrink-0">
-                    {c.category}
-                  </span>
-                </button>
-              );
-            })
-          )}
-        </div>
-
-        <div className="p-2.5 border-t border-slate-100 bg-slate-50 text-[10px] text-slate-400 flex items-center justify-between">
+      }
+      footer={
+        <div className="text-[10px] text-slate-400 flex items-center justify-between">
           <span>↑ ↓ to move · ⏎ to open · esc to close</span>
           <span className="font-mono">
             {results.length} of {commands.length}
           </span>
         </div>
+      }
+    >
+      <div ref={listRef} className="p-2 space-y-1 text-xs">
+        {results.length === 0 ? (
+          <div className="p-6 text-center text-slate-400">No matching commands or destinations.</div>
+        ) : (
+          results.map((c, i) => {
+            const Icon = iconFor(c);
+            const on = i === selected;
+            return (
+              <button
+                key={c.id}
+                data-selected={on}
+                onMouseEnter={() => setSelected(i)}
+                onClick={() => run(c)}
+                className={`w-full p-2.5 rounded-xl text-left flex items-center justify-between transition-colors group ${
+                  on ? "bg-slate-100" : "hover:bg-slate-100/90"
+                }`}
+              >
+                <span className="flex items-center gap-2.5 min-w-0">
+                  <span
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
+                      on ? "bg-[var(--brand-accent-soft)]/15 text-[var(--accent-deep)]" : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="font-medium text-slate-800 truncate">{c.title}</span>
+                </span>
+                <span className="text-[10px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200 shrink-0">
+                  {c.category}
+                </span>
+              </button>
+            );
+          })
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

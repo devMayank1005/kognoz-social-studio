@@ -18,6 +18,7 @@ import {
 } from "@/lib/voiceSamples";
 import { channelTallies, pickedIds, contributors, filterSamples, rejectionReason, corpusState } from "@/lib/voiceGuide";
 import type { ChannelId } from "@/lib/founderProfiles";
+import { PageBody } from "@/components/shell/PageBody";
 
 // The voice guide — the corpus of real human writing every generation imitates.
 //
@@ -147,12 +148,12 @@ export function VoiceView() {
 
   return (
     <AppShell>
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50">
+      <PageBody>
         <div className="max-w-4xl mx-auto space-y-6">
           {/* Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#43AFCD]/10 text-[#0A6E8F] border border-[#43AFCD]/30">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[var(--brand-accent-soft)]/10 text-[var(--accent-deep)] border border-[var(--brand-accent-soft)]/30">
                 <Mic className="w-3.5 h-3.5" />
                 <span>Voice guide</span>
               </div>
@@ -375,7 +376,7 @@ export function VoiceView() {
             {shown.map((s) => (
               <div key={s.id} className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#43AFCD]/10 text-[#0A6E8F] border border-[#43AFCD]/30">
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[var(--brand-accent-soft)]/10 text-[var(--accent-deep)] border border-[var(--brand-accent-soft)]/30">
                     {s.channel}
                   </span>
                   <span className="text-[10px] font-mono text-slate-400">{s.kind}</span>
@@ -413,7 +414,7 @@ export function VoiceView() {
             )}
           </div>
         </div>
-      </div>
+      </PageBody>
     </AppShell>
   );
 }
