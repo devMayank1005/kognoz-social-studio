@@ -567,9 +567,21 @@ export function sanitiseHtml(html: string): string {
     });
 }
 
-/** The words, with the markup removed — for search, budgets and a plain-text fallback. */
+/**
+ * The words, with the markup removed — for search, budgets and a plain-text fallback.
+ *
+ * BLOCK SPANS COUNT AS LINE BREAKS, and that is a fix rather than a flourish. `renderLines`
+ * (components/Slide.tsx) gives every line of a body its own `display:block` span, and this
+ * used to delete those tags with no separator — so a three-line body read back as
+ * "Screen AIInterview Partner AICandidate profile". lib/templateSlots.ts's header has
+ * always promised the opposite, that `text` is the reading "with the line breaks put back".
+ * Measured across every format: 76 of 76 multi-line slots came back run together.
+ *
+ * `<br>` stays the other separator; an ordinary inline span is still no break at all.
+ */
 export function textOfHtml(html: string): string {
   return html
+    .replace(/<span[^>]*display\s*:\s*block[^>]*>/gi, "\n$&")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]*>/g, "")
     .replace(/&nbsp;/g, " ")

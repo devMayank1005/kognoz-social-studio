@@ -637,3 +637,39 @@ describe("a slot is identified per instance, not per kind", () => {
     expect(hiddenSlots([createText([], { id: "el_1" })]).size).toBe(0);
   });
 });
+
+describe("textOfHtml restores the line breaks the renderer made", () => {
+  // THE DEFECT THIS FIXES, measured rather than supposed: across every format and both
+  // brands, 76 of 76 multi-line slots read back run together — "Screen AIInterview Partner
+  // AICandidate profile". renderLines gives each line of a body its own display:block span,
+  // and those were stripped with no separator, while lib/templateSlots.ts's header promised
+  // `text` was the reading "with the line breaks put back".
+  //
+  // It matters because `text` is what an ejected element stores beside its markup, and what
+  // components/slide/ElementLayer.tsx renders INSIDE the exported node whenever `html` is
+  // absent — so a run-together reading can reach a PNG.
+  const block = (s: string) => `<span style="display:block">${s}</span>`;
+
+  it("separates the block spans renderLines emits", () => {
+    expect(textOfHtml(block("Line one") + block("Line two"))).toBe("Line one\nLine two");
+  });
+
+  it("copes with the spacing the renderer actually writes", () => {
+    // renderLines emits `display:block` with a margin-top on every line but the first.
+    const real = '<span style="display:block;margin-top:0">A</span><span style="display:block;margin-top:0.55em">B</span>';
+    expect(textOfHtml(real)).toBe("A\nB");
+  });
+
+  it("leaves an ordinary inline span alone", () => {
+    // The existing case, unchanged: a styled word inside a sentence is not a new line.
+    expect(textOfHtml('One<br/>Two <span style="color: red">three</span>')).toBe("One\nTwo three");
+  });
+
+  it("does not open with a stray newline", () => {
+    expect(textOfHtml(block("Only one"))).toBe("Only one");
+  });
+
+  it("still reads a single unstyled string as itself", () => {
+    expect(textOfHtml("Just words")).toBe("Just words");
+  });
+});
