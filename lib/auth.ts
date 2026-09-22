@@ -1,3 +1,4 @@
+import { SESSION_SECRET } from "@/lib/sessionSecret";
 import type { NextAuthOptions } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import CredentialsProvider from "next-auth/providers/credentials";
@@ -13,7 +14,7 @@ import { randomUUID } from "node:crypto";
 // with fallback to Supabase `users` table via CredentialsProvider.
 
 export const authOptions: NextAuthOptions = {
-  secret: process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "kognoz-social-studio-secure-auth-secret-key-2026",
+  secret: SESSION_SECRET,
   session: { strategy: "jwt" },
   providers: [
     AzureADProvider({

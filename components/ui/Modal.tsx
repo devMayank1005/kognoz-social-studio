@@ -85,6 +85,36 @@ export interface ModalProps {
   children: React.ReactNode;
 }
 
+/**
+ * Which dialogs are open, innermost last.
+ *
+ * WHY A STACK IS NEEDED. Every open Modal listens on `document` in the CAPTURE phase and
+ * calls `stopPropagation()` before closing. Capture listeners on the same node fire in the
+ * order they were REGISTERED, not in z-order — so with two dialogs open, Escape went to
+ * whichever opened FIRST and stopped there. Open the command palette, then Help, press
+ * Escape: Help stayed on screen and the palette closed behind it. The key looked broken.
+ *
+ * components/shell/AppShell.tsx holds `paletteOpen`, `helpOpen` and `settingsOpen` as three
+ * independent booleans and closes none of them when another opens, so this genuinely stacks.
+ *
+ * A module-level array rather than context: Modals do not nest as React children — each is
+ * rendered as a sibling by whoever owns it — so there is no provider a child could read.
+ */
+const openDialogs: symbol[] = [];
+
+function pushDialog(id: symbol) {
+  openDialogs.push(id);
+  return () => {
+    const at = openDialogs.indexOf(id);
+    if (at !== -1) openDialogs.splice(at, 1);
+  };
+}
+
+/** Only the dialog on top acts on Escape. */
+function isTopDialog(id: symbol) {
+  return openDialogs[openDialogs.length - 1] === id;
+}
+
 export function Modal({
   isOpen,
   onClose,
@@ -100,6 +130,8 @@ export function Modal({
   bodyClassName = "flex-1 overflow-y-auto min-h-0",
   children
 }: ModalProps) {
+  // Identity for the stack above. A symbol so two Modals can never collide.
+  const dialogId = useRef<symbol>(Symbol("dialog"));
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreTo = useRef<HTMLElement | null>(null);
   // True only while a press that began on the backdrop is still in progress.
@@ -109,6 +141,9 @@ export function Modal({
   const onKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // Not mine to answer if something opened on top of me. Without this the FIRST
+        // dialog registered swallowed the key and closed itself behind the one in view.
+        if (!isTopDialog(dialogId.current)) return;
         e.stopPropagation();
         onClose();
         return;
@@ -156,6 +191,15 @@ export function Modal({
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
   }, [isOpen, onKeyDown]);
+
+  // Registration is its own effect, depending on `isOpen` ALONE. Sharing the one above —
+  // which re-runs on every parent render because `onClose` is an inline arrow at every call
+  // site — would pop and re-push this dialog constantly, and a dialog that re-pushes itself
+  // on a parent's render would steal the top of the stack from one opened after it.
+  useEffect(() => {
+    if (!isOpen) return;
+    return pushDialog(dialogId.current);
+  }, [isOpen]);
 
   // The lifecycle: what must happen exactly once when the dialog opens, and be undone
   // exactly once when it closes. `isOpen` is the only dependency it may ever have.

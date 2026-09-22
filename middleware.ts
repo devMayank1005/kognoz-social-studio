@@ -1,8 +1,38 @@
+import { SESSION_SECRET } from "@/lib/sessionSecret";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const SECRET = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET || "kognoz-social-studio-secure-auth-secret-key-2026";
+const SECRET = SESSION_SECRET;
+
+/**
+ * Refuse an unauthenticated request in the form its caller can actually read.
+ *
+ * WHAT THIS FIXES. Every exit below used to redirect to /login — including requests to
+ * /api/*. The browser follows the 307, /login answers 200 HTML, so `res.ok` is true and the
+ * client's `res.json()` throws on `<!DOCTYPE`. lib/storeClient.ts lands in its catch and
+ * reports `stale: true`, and the Studio then tells somebody "Could not reach the server"
+ * while they keep editing a deck that can never save. The cause was an ended session; the
+ * message sent them to check their wifi.
+ *
+ * That storeClient carves out `res.status !== 401` is the giveaway that a 401 was always the
+ * intent — that branch has been unreachable because this function never produced one.
+ */
+function deny(req: NextRequest): NextResponse {
+  if (req.nextUrl.pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  }
+  const url = req.nextUrl.clone();
+  url.pathname = "/login";
+  // The clone carries the original query string, which would otherwise ride along on the
+  // login URL itself — /login?set=abc&callbackUrl=... The destination's parameters belong
+  // in callbackUrl and nowhere else.
+  url.search = "";
+  // `search` as well as `pathname`: a deep link used to lose its query string across
+  // sign-in and drop people on a bare screen after signing in.
+  url.searchParams.set("callbackUrl", req.nextUrl.pathname + req.nextUrl.search);
+  return NextResponse.redirect(url);
+}
 
 export async function middleware(req: NextRequest) {
   const host = req.headers.get("host") || "";
@@ -40,12 +70,7 @@ export async function middleware(req: NextRequest) {
   const hasSecureCookie = req.cookies.has("__Secure-next-auth.session-token");
   const hasPlainCookie = req.cookies.has("next-auth.session-token");
 
-  if (!hasSecureCookie && !hasPlainCookie) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("callbackUrl", req.nextUrl.pathname);
-    return NextResponse.redirect(url);
-  }
+  if (!hasSecureCookie && !hasPlainCookie) return deny(req);
 
   try {
     let token = null;
@@ -59,17 +84,10 @@ export async function middleware(req: NextRequest) {
       token = await getToken({ req, secret: SECRET });
     }
 
-    if (!token) {
-      const url = req.nextUrl.clone();
-      url.pathname = "/login";
-      url.searchParams.set("callbackUrl", req.nextUrl.pathname);
-      return NextResponse.redirect(url);
-    }
+    if (!token) return deny(req);
   } catch (e) {
     console.error("Middleware auth check error:", e);
-    const url = req.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
+    return deny(req);
   }
 
   return NextResponse.next();

@@ -134,7 +134,10 @@ export function AppShell({
               counts={counts}
               onOpenSettings={() => {
                 setMobileOpen(false);
-                onOpenSettings?.();
+                // `openSettings`, not the raw prop. No page passes onOpenSettings, so the
+                // optional call was always a no-op: on a phone the drawer closed and nothing
+                // opened, while the same button worked on desktop, which uses the fallback.
+                openSettings();
               }}
             />
           </div>

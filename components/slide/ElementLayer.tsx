@@ -34,6 +34,7 @@ import {
   type TextElement
 } from "@/lib/slideElements";
 import { normaliseSpans } from "@/lib/richText";
+import { insertLineBreak } from "@/components/studio/caretBreak";
 import { pathFor } from "@/lib/shapeLibrary";
 import { isDrawableGradient, svgGradientCoords } from "@/lib/gradient";
 import { parseColor, toHex } from "@/lib/color";
@@ -171,6 +172,22 @@ function TextView({
         suppressContentEditableWarning
         onBlur={commit}
         onKeyDown={(e) => {
+          // ENTER. Without this the browser picks the separator: Chrome and Safari insert a
+          // <div>, which sanitiseHtml strips on commit while rejoining the text with nothing
+          // between it, so three typed lines were stored as one. <br> is the separator the
+          // sanitiser, the exporter and textOfHtml all already agree on. Shift+Enter does the
+          // same thing — there is only one kind of break in this model.
+          if (e.key === "Enter") {
+            const node = ref.current;
+            if (node && insertLineBreak(node)) e.preventDefault();
+            return;
+          }
+          // TAB used to move focus out of the box, which blurred it and silently committed
+          // the edit mid-sentence. There is nothing to tab to inside a text element.
+          if (e.key === "Tab") {
+            e.preventDefault();
+            return;
+          }
           if (e.key !== "Escape") return;
           // Escape leaves text editing but keeps the element selected. CanvasEditor's own
           // key handler bails on contentEditable before it reaches its Escape branch, so

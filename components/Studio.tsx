@@ -133,6 +133,11 @@ const defaultDesign = (b: { url: string; defaultSet: DesignSetId }): Required<Sl
   accent: null
 });
 
+// The deck a fresh brand starts on. Named rather than inlined into useState because the
+// brand switch has to reset to the same values, and two copies would drift.
+const DEFAULT_EYEBROW = "Behavioral Signal";
+const DEFAULT_COVER = "Culture is what your people *do*";
+const DEFAULT_CTA = "See how we read culture";
 const DEFAULT_SLIDES: CoercedSlide[] = [
   { title: "The survey and the behavior disagree", body: "Your engagement score says people own their work. Meanwhile decisions that belong two levels down are landing on your desk for sign-off." },
   { title: "Behavior is the honest data", body: "What people report once a year and what they do every week are different facts. We measure the second one." },
@@ -169,10 +174,10 @@ export default function Studio() {
   const [format, setFormat] = useState<FormatId>("Carousel");
   const [pillar, setPillar] = useState("Behavioral Signal");
   const [topic, setTopic] = useState("");
-  const [eyebrow, setEyebrow] = useState("Behavioral Signal");
-  const [cover, setCover] = useState("Culture is what your people *do*");
+  const [eyebrow, setEyebrow] = useState(DEFAULT_EYEBROW);
+  const [cover, setCover] = useState(DEFAULT_COVER);
   const [slides, setSlides] = useState<CoercedSlide[]>(DEFAULT_SLIDES);
-  const [cta, setCta] = useState("See how we read culture");
+  const [cta, setCta] = useState(DEFAULT_CTA);
   const [current, setCurrent] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -569,13 +574,24 @@ export default function Studio() {
         storeGet<string>(k("house-prefs")).then((r) => r.value),
         storeGet<StyleExample[]>(k("style-memory")).then((r) => r.value),
         storeGet<unknown>(k("voice-samples")).then((r) => r.value),
-        storeGet<unknown>(k("deck")).then((r) => r.value).catch(() => null)
+        storeGet<unknown>(k("deck"))
       ]);
       if (cancelled) return;
 
       // The working deck, if this brand has one. Restored before `deckLoaded` is set so the
       // autosave below cannot fire against half-applied state and overwrite the saved row.
-      const restored = coerceStoredDeck(savedDeck);
+      // `savedDeck` is the whole StoreRead now, not just its value: a deck that came from
+      // this device rather than the server has to say so. Reading `.value` and dropping
+      // `.stale` was what let an outage present the local copy as the saved one — and the
+      // banner then said nothing at all while the two quietly diverged.
+      const restored = coerceStoredDeck(savedDeck.value);
+      if (savedDeck.stale && savedDeck.value) {
+        setDeckSaveNote(
+          savedDeck.unauthenticated
+            ? "Your session has ended. This is the copy kept on this device — sign in again to save it."
+            : "Showing the copy kept on this device — it has not reached the server yet."
+        );
+      }
       if (restored) {
         if (restored.format && restored.format in FORMATS) setFormat(restored.format as FormatId);
         setEyebrow(restored.eyebrow);
@@ -590,6 +606,26 @@ export default function Studio() {
         elementsRef.current = restored.elements;
         elementHistory.current = { past: [], future: [] };
         lastSavedDeck.current = restored;
+      } else {
+        // THE BRAND HAS NO SAVED DECK, so start a fresh one — do NOT leave the previous
+        // brand's on screen. Without this the deck was the one thing the switch did not
+        // reset: the autosave below would then write Kognoz's slides, images and canvas
+        // elements straight into `konverz-deck` the moment anybody edited a word. The
+        // effect already resets design, house prefs, style memory and voice samples for
+        // exactly this reason; the deck was the omission, not the exception.
+        setEyebrow(DEFAULT_EYEBROW);
+        setCover(DEFAULT_COVER);
+        setCta(DEFAULT_CTA);
+        setSlides(DEFAULT_SLIDES);
+        setImages({});
+        setScales({});
+        setImgOn({});
+        setElements({});
+        setPalette([]);
+        // The same three the restore branch sets, so the two paths stay symmetrical.
+        elementsRef.current = {};
+        elementHistory.current = { past: [], future: [] };
+        lastSavedDeck.current = null;
       }
       deckLoaded.current = true;
       if (d && Object.keys(d).length) setDesignLocal((cur) => ({ ...cur, ...d }));
@@ -1099,17 +1135,30 @@ export default function Studio() {
             setDeckSaveNote("");
           } else if (res.reason === "conflict") {
             setDeckSaveNote("Someone else saved this deck while you were working — reload to pick up their version.");
+          } else if (res.reason === "signed-out") {
+            // The commonest cause, and it used to read as a network fault: people were sent
+            // to check their connection when their session had simply ended.
+            setDeckSaveNote("Your session has ended, so this deck is not being saved. Sign in again in another tab, then edit anything here to retry.");
+          } else if (res.reason === "lost") {
+            // The only branch where the work really is gone: the server refused us AND this
+            // device would not hold a copy, which for a deck this size means the storage
+            // quota. Export is the only thing left that keeps it.
+            setDeckSaveNote("Could not reach the server, and this deck is too large to keep on this device — export what you have now, or it will be lost.");
           } else {
-            // "Saved locally, sync pending" is a promise this app cannot keep: there is no
-            // retry queue and the next load takes the server's copy. Say what is true.
-            setDeckSaveNote("Could not reach the server — this deck is not saved and will be lost if you reload.");
+            // reason === "offline": storeSet did keep a copy here, and storeGet returns it
+            // when the server cannot be reached. Saying the work is lost was untrue and sent
+            // people looking for a way to rescue something that was not in danger.
+            setDeckSaveNote("Could not reach the server. This deck is kept on this device and will come back when you reload — but export it if you need it elsewhere.");
           }
         })
-        .catch(() => setDeckSaveNote("Could not reach the server — this deck is not saved."));
+        .catch(() => setDeckSaveNote("Could not reach the server. This deck is kept on this device and will come back when you reload."));
     }, 2500);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [brand.id, format, eyebrow, cover, cta, slides, images, scales, imgOn, elements]);
+  // `palette` belongs here for the same reason as the rest: it is in the payload above, and
+  // an effect that does not watch it only writes a palette change when something else
+  // happens to change too. Add a colour and nothing else, reload, and it was gone.
+  }, [brand.id, format, eyebrow, cover, cta, slides, images, scales, imgOn, elements, palette]);
 
   // The caption follows the cover until the user edits it, so opening the preview on
   // a fresh deck shows something real rather than an empty box.

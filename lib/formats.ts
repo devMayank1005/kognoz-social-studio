@@ -118,22 +118,6 @@ export const FORMAT_BRIEF: Record<FormatId, string> = {
   "Founder Video": "4 timecoded beats plus a caption"
 };
 
-/**
- * Body budget per format, honoured by coerceContent.
- *
- * The default clamp is 230 characters. Formats whose prompt asks for more must say
- * so here or the extra copy is cut silently, with no error and nothing in the UI —
- * which is precisely how a longer prompt can look like it changed nothing.
- */
-export const FORMAT_BODY_BUDGET: Partial<Record<FormatId, number>> = {
-  Story: 460, // hook + development + takeaway, three paragraphs in one tall frame
-  "Article Cover": 340, // the standfirst carries the whole 16:9 width
-  "Founder Video": 260 // the Insight beat asks ~240 and was being clipped at 230
-};
-
-export function bodyBudgetFor(format: FormatId): number {
-  return FORMAT_BODY_BUDGET[format] ?? 230;
-}
 
 /**
  * The full budget for a format, not just the body.

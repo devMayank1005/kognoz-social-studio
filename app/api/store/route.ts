@@ -45,12 +45,17 @@ export async function GET(req: NextRequest) {
     if (error) {
       if (error.code === "PGRST116") {
         // No row found for key
-        return NextResponse.json({ value: null, version: 0 }, { headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=300" } });
+        // no-store, and it has to be. The response carries the optimistic-locking `version`
+        // that the next PUT sends back, so a cached body means a stale version and a 409
+        // naming the user as their own conflicting editor. It also meant a reload within
+        // the cache window served the deck as it was at page load — the Studio autosaves
+        // every 2.5s, so that was up to a minute of work silently gone.
+        return NextResponse.json({ value: null, version: 0 }, { headers: { "Cache-Control": "no-store" } });
       }
       return NextResponse.json({ error: error.message, code: error.code }, { status: 500 });
     }
 
-    return NextResponse.json(data, { headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=300" } });
+    return NextResponse.json(data, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
     // Reporting `{ value: null }` here told the client the key was EMPTY when what
     // we actually mean is that we could not tell. Callers then render a blank or

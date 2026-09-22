@@ -26,12 +26,22 @@ export interface StoreRead<T> {
    * added to the allowlist.
    */
   rejected?: boolean;
+  /**
+   * The server knows us and says we are not signed in — a 401.
+   *
+   * Third state, because it needs a third answer. `stale` means wait and retry; `rejected`
+   * means this app has a bug; this means sign in again. Conflating it with `stale` is what
+   * told people "could not reach the server" when their session had simply ended.
+   */
+  unauthenticated?: boolean;
 }
 
 export type StoreWrite<T> =
   | { ok: true; version: number }
   | { ok: false; reason: "conflict"; serverValue: T | null; version: number; updatedBy?: string }
-  | { ok: false; reason: "offline" };
+  // `offline` still means the value is safe on this device. `lost` means it is not — see
+  // writeLocal. `signed-out` is neither: the server is fine and is refusing us.
+  | { ok: false; reason: "offline" | "lost" | "signed-out" };
 
 /** Last version seen per key, so a write can be conditional on it. */
 const versions = new Map<string, number>();
@@ -55,12 +65,22 @@ function readLocal<T>(key: string): T | null {
   }
 }
 
-function writeLocal(key: string, value: unknown) {
-  if (typeof window === "undefined") return;
+/**
+ * Keep a copy on this device. Returns whether that actually worked.
+ *
+ * It used to swallow the failure, reasoning that "the server copy is the one that matters" —
+ * true everywhere except the one path where this is called BECAUSE there is no server copy.
+ * A deck carrying base64 photos can pass the ~5MB origin quota, and the write would then
+ * throw, be discarded, and the person be told their deck was kept safe.
+ */
+function writeLocal(key: string, value: unknown): boolean {
+  if (typeof window === "undefined") return false;
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch {
-    /* quota or private mode — the server copy is the one that matters */
+    // Quota, or a private window that refuses storage entirely.
+    return false;
   }
 }
 
@@ -73,7 +93,11 @@ function writeLocal(key: string, value: unknown) {
 export async function storeGet<T>(key: string): Promise<StoreRead<T>> {
   try {
     const res = await fetch(`/api/store?key=${encodeURIComponent(key)}`);
-    if (res.status >= 400 && res.status < 500 && res.status !== 401) {
+    if (res.status === 401) {
+      // The session ended. Not a transport problem, and not this app's bug.
+      return { value: readLocal<T>(key), version: cachedVersion(key) ?? 0, stale: true, unauthenticated: true };
+    }
+    if (res.status >= 400 && res.status < 500) {
       // Not a transport failure. Surface it as itself so the UI can say so, and
       // log it once — a 400 here means a key reached production that the route
       // was never taught about.
@@ -117,13 +141,13 @@ export async function storeSet<T = unknown>(key: string, value: unknown): Promis
     // or the pending write is erased by the value we were about to replace.
     const probe = await storeGet<T>(key);
     if (probe.stale) {
-      writeLocal(key, value);
-      return { ok: false, reason: "offline" };
+      const kept = writeLocal(key, value);
+      return { ok: false, reason: probe.unauthenticated ? "signed-out" : kept ? "offline" : "lost" };
     }
   }
-  writeLocal(key, value);
+  const kept = writeLocal(key, value);
   const expected = cachedVersion(key);
-  if (expected === null) return { ok: false, reason: "offline" };
+  if (expected === null) return { ok: false, reason: kept ? "offline" : "lost" };
   try {
     const res = await fetch(`/api/store?key=${encodeURIComponent(key)}`, {
       method: "PUT",
@@ -147,12 +171,14 @@ export async function storeSet<T = unknown>(key: string, value: unknown): Promis
         updatedBy: data?.updated_by
       };
     }
-    if (!res.ok) return { ok: false, reason: "offline" };
+    // A 401 here means the session ended between the probe and the write.
+    if (res.status === 401) return { ok: false, reason: "signed-out" };
+    if (!res.ok) return { ok: false, reason: kept ? "offline" : "lost" };
 
     const next = typeof data?.version === "number" ? data.version : expected + 1;
     versions.set(key, next);
     return { ok: true, version: next };
   } catch {
-    return { ok: false, reason: "offline" };
+    return { ok: false, reason: kept ? "offline" : "lost" };
   }
 }

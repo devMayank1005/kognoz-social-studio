@@ -122,7 +122,9 @@ export function ContentCard({ item, onEdit, onStatusChange, compact = false }: C
           overflow: "hidden",
           textOverflow: "ellipsis",
           display: "-webkit-box",
-          WebkitLineClamp: compact ? 2 : 2,
+          // Was `compact ? 2 : 2` — the same on both sides, so the compact variant in the month
+    // grid was exactly as tall as the full one and only its padding and type size differed.
+    WebkitLineClamp: compact ? 1 : 2,
           WebkitBoxOrient: "vertical",
           marginBottom: 4
         }}

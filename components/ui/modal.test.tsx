@@ -247,3 +247,60 @@ describe("Button", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 });
+
+describe("two dialogs open at once", () => {
+  // THE BUG. Every Modal listens on document in the CAPTURE phase and calls
+  // stopPropagation() before closing. Capture listeners on one node fire in REGISTRATION
+  // order, not z-order — so Escape went to whichever dialog opened first and stopped there.
+  // Open the command palette, then Help, press Escape: Help stayed and the palette closed
+  // behind it. AppShell holds the three overlay booleans independently and closes none of
+  // them when another opens, so this is reachable, not hypothetical.
+
+  function TwoOpen({ onOuter, onInner }: { onOuter: () => void; onInner: () => void }) {
+    return (
+      <>
+        <Modal isOpen onClose={onOuter} title="Opened first">
+          <p>outer</p>
+        </Modal>
+        <Modal isOpen onClose={onInner} title="Opened second">
+          <p>inner</p>
+        </Modal>
+      </>
+    );
+  }
+
+  it("closes the one on top, not the one underneath", () => {
+    const onOuter = vi.fn();
+    const onInner = vi.fn();
+    render(<TwoOpen onOuter={onOuter} onInner={onInner} />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onInner).toHaveBeenCalledTimes(1);
+    expect(onOuter).not.toHaveBeenCalled();
+  });
+
+  it("hands Escape back to the one underneath once the top has gone", () => {
+    const onOuter = vi.fn();
+    const { rerender } = render(
+      <>
+        <Modal isOpen onClose={onOuter} title="Opened first"><p>outer</p></Modal>
+        <Modal isOpen onClose={() => {}} title="Opened second"><p>inner</p></Modal>
+      </>
+    );
+    // The top dialog closes — React unmounts it, which pops it off the stack.
+    rerender(
+      <>
+        <Modal isOpen onClose={onOuter} title="Opened first"><p>outer</p></Modal>
+        <Modal isOpen={false} onClose={() => {}} title="Opened second"><p>inner</p></Modal>
+      </>
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onOuter).toHaveBeenCalledTimes(1);
+  });
+
+  it("still closes a lone dialog", () => {
+    const onClose = vi.fn();
+    render(<Modal isOpen onClose={onClose} title="Alone"><p>x</p></Modal>);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});

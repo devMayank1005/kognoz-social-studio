@@ -198,3 +198,56 @@ describe("a failed read must not license a blind write", () => {
     expect(cachedVersion("kognoz-calendar")).toBeNull();
   });
 });
+
+describe("a failed save says which kind of failure it was", () => {
+  // THE BUG THIS CLOSES. All three of these came back as `offline`, and the Studio printed
+  // "Could not reach the server — this deck is not saved and will be lost if you reload."
+  //
+  // For a signed-out session that blamed the network for an ended session and sent people to
+  // check their wifi. For an ordinary outage it was untrue: storeSet keeps a copy on the
+  // device and storeGet hands it back. And for a deck over the storage quota — the one case
+  // where the work really is gone — it said exactly the same thing as the other two.
+
+  const unauthorised = () => ({ status: 401, body: { error: "Not signed in" } });
+
+  it("reports signed-out when the server answers 401", async () => {
+    mockServer([unauthorised]);
+    expect(await storeSet("kognoz-deck", { a: 1 })).toEqual({ ok: false, reason: "signed-out" });
+  });
+
+  it("reports offline when the server is unreachable but the copy is kept", async () => {
+    global.fetch = vi.fn(async () => { throw new Error("network down"); }) as any;
+    expect(await storeSet("kognoz-deck", { a: 1 })).toEqual({ ok: false, reason: "offline" });
+    // "Offline" promises the work is still here. Prove it rather than assert the label.
+    expect(JSON.parse(localStorage.getItem("kognoz-deck")!)).toEqual({ a: 1 });
+  });
+
+  it("reports LOST when the device will not hold the copy either", async () => {
+    // The quota case: previously swallowed on the grounds that "the server copy is the one
+    // that matters", on the one path that runs because there IS no server copy.
+    global.fetch = vi.fn(async () => { throw new Error("network down"); }) as any;
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => { throw new Error("QuotaExceededError"); },
+      removeItem: () => {}
+    });
+    vi.stubGlobal("window", { localStorage: globalThis.localStorage });
+    expect(await storeSet("kognoz-deck", { a: 1 })).toEqual({ ok: false, reason: "lost" });
+  });
+
+  it("tells a 401 apart from a rejected key", async () => {
+    mockServer([unauthorised]);
+    const read = await storeGet("kognoz-deck");
+    expect(read.unauthenticated).toBe(true);
+    expect(read.stale).toBe(true);
+    // Not `rejected` — that means a key this app got wrong, which retrying never fixes.
+    expect(read.rejected).toBeUndefined();
+  });
+
+  it("still returns the device copy when the session has ended", async () => {
+    // Being signed out must not look like having no deck at all.
+    localStorage.setItem("kognoz-deck", JSON.stringify({ saved: true }));
+    mockServer([unauthorised]);
+    expect((await storeGet("kognoz-deck")).value).toEqual({ saved: true });
+  });
+});

@@ -17,7 +17,7 @@ import { KOGNOZ, KONVERZ } from "./brands";
 import { voiceFor } from "./founderProfiles";
 import { BANNED_PHRASES } from "./slopLint";
 import { DEFAULT_BUDGET } from "./coerce";
-import { STUDIO_FORMATS, FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, bodyBudgetFor } from "./formats";
+import { STUDIO_FORMATS, FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, budgetFor } from "./formats";
 import type { FormatId } from "./formats";
 
 // Prompts were entirely untested. Video Kinetic returned 2-3 lines because its
@@ -51,7 +51,11 @@ describe("the trap: asking for more than coerceContent will keep", () => {
     // characters are cut in coerceContent with no error and no signal. This test
     // caught exactly that: Story asked for 420 against a 230 default.
     for (const f of STUDIO_FORMATS) {
-      const ceiling = Math.max(bodyBudgetFor(f), DEFAULT_BUDGET.cta);
+      // budgetFor, not the old bodyBudgetFor: that second table was a divergent copy
+      // nothing in production read, so this test was checking prompts against budgets the
+      // app does not apply — Customer Quote, Numbers Wall, Journey Map and Feature Card
+      // were all missing from it.
+      const ceiling = Math.max(budgetFor(f).body ?? DEFAULT_BUDGET.body, DEFAULT_BUDGET.cta);
       for (const n of askedBudgets(promptFor(f))) {
         expect({ format: f, asked: n, ceiling }).toMatchObject({ asked: expect.any(Number) });
         expect(n).toBeLessThanOrEqual(ceiling);
