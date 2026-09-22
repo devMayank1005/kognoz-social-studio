@@ -268,6 +268,12 @@ export default function CanvasEditor({
     const onDown = (e: PointerEvent) => {
       const node = document.querySelector<HTMLElement>(`#preview-slide [data-el-id="${editingId}"]`);
       if (node && e.target instanceof Node && node.contains(e.target)) return;
+      // Chrome that acts ON the caret is exempt. The styling bar sits outside the preview,
+      // so without this every press of it would blur the editable and throw the selection
+      // away before the control's own handler ran — and you cannot fix that from the
+      // toolbar's side, because this listener is on the document in the CAPTURE phase and
+      // preventDefault does not stop it.
+      if (e.target instanceof Element && e.target.closest("[data-keep-caret]")) return;
       // Blur first: that is what fires the editable's onBlur and commits the words.
       node?.blur();
       onEditingChange(null);

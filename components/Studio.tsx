@@ -66,6 +66,7 @@ import CanvasEditor from "@/components/studio/CanvasEditor";
 import SlideCanvas from "@/components/studio/SlideCanvas";
 import { NO_ELEMENTS, applyRegenerate, createShape, createText, hiddenSlots, updateElement, type SlideElement, type TextElement } from "@/lib/slideElements";
 import ElementInspector, { type FontChoice } from "@/components/studio/ElementInspector";
+import { useTextRange } from "@/components/studio/useTextRange";
 import { exportFontsUrl, extraFonts, familyOf, fontsUrlFor, slideFonts, weightsFor } from "@/lib/fontRegistry";
 import { coerceStoredDeck, deckChanged, serialiseDeck, type StoredDeck } from "@/lib/deckStore";
 import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG } from "@/lib/exportPipeline";
@@ -184,6 +185,10 @@ export default function Studio() {
   const [draggingElId, setDraggingElId] = useState<string | null>(null);
   /** The element with a live caret in it. Preview only — the export copies never get it. */
   const [editingElId, setEditingElId] = useState<string | null>(null);
+  // The live character selection inside that element, and the one operation that acts on it.
+  // Styling a range mutates the editable's DOM; the existing blur/Escape commit carries the
+  // result into the element, exactly as it already carries typed words.
+  const { selection: textSelection, applyRunStyle } = useTextRange(editingElId);
 
   /**
    * Undo for canvas edits, kept separate from the deck snapshot above.
@@ -2298,6 +2303,8 @@ export default function Studio() {
             element={selectedEl}
             fonts={elementFonts}
             swatches={[C.ink, C.blue, C.teal, C.cyan, C.green, C.white]}
+            selection={textSelection}
+            onRunStyle={applyRunStyle}
             font={font}
             ink={C.ink}
             line={C.line}

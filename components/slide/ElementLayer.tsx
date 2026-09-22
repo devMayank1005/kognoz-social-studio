@@ -33,6 +33,7 @@ import {
   type SlideElement,
   type TextElement
 } from "@/lib/slideElements";
+import { normaliseSpans } from "@/lib/richText";
 
 export interface EditCommit {
   id: string;
@@ -131,7 +132,10 @@ function TextView({
   function commit() {
     const node = ref.current;
     if (!node || !onEditCommit) return;
-    const html = sanitiseHtml(node.innerHTML ?? "");
+    // Sanitise first, then tidy: dropping a disallowed tag can leave two spans adjacent that
+    // were not before. Styling a range wraps it in a span, so without the tidy pass the
+    // stored markup grows a layer every time somebody restyles the same words.
+    const html = normaliseSpans(sanitiseHtml(node.innerHTML ?? ""));
     onEditCommit({
       id: el.id,
       html,
