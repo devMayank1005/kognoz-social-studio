@@ -884,6 +884,82 @@ export const Slide = React.memo(function Slide({
     // correct — Kognoz has no module palette to spend here.
     const cols = slides.slice(0, 3);
     const heads = [accent, C.teal, C.blue];
+    const colLines = cols.map((cx) =>
+      String(cx.body || "")
+        .split(/\n+/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+    );
+
+    // ---- the columns are sized to the page, not the other way round ----------
+    //
+    // This layout has no slack anywhere: the page is a fixed 1080x1350, the footer
+    // sits under the columns, and `wrap` clips at the edge. So when a stage gains a
+    // capability line the only thing that can give is the type — and nothing here
+    // was giving. The title and the chips used `sz()`, which is a constant times the
+    // per-slide text scale, so they never reacted to how much text arrived. Long
+    // stages, or the A+ stepper at 150%, pushed the chips through the bottom of
+    // their own tint, across the logo and off the slide.
+    //
+    // `fit()` cannot do this job. It sizes ONE string by its own length, and the
+    // thing that overflows here is a STACK — five short chips cost far more height
+    // than one long one, and fit() cannot see the difference. So this estimates the
+    // rendered height of the whole column and steps the type down until it fits.
+    //
+    // Estimated, not measured, on purpose: this renders inside the node
+    // lib/exportPipeline.ts clones, so it has to be right on the first pass with no
+    // effects and no layout read. Same bargain fit() already makes, and the constants
+    // below were calibrated against both brands' real fonts in a browser.
+    const COL_W = (baseW - 192 - 32) / 3;
+
+    // 1.05 advance-widths per character, measured in a browser across both brands'
+    // real fonts. It is the WORST case, not the average, and that is deliberate:
+    // chips wrap at word boundaries, so a line rarely fills its last row, and a
+    // model tuned to the average under-predicts exactly on the crowded slides that
+    // overflow. Over-predicting costs a point of type size on a busy column and
+    // nothing at all elsewhere, because a column that already fits never enters the
+    // loop below. Konverz measured 1.05 against Kognoz's 0.55 — one constant has to
+    // cover both, so it covers the wider one.
+    const CH = 1.05;
+    const rows = (text: string, fs: number, w: number) =>
+      Math.max(1, Math.ceil(text.length / Math.max(1, Math.floor(w / (fs * CH)))));
+
+    // The header above the columns, which decides what is left for them.
+    const h1Fs = fit(54, cover, 52);
+    const h1Rows = Math.max(
+      1,
+      Math.ceil(String(cover || "").replace(/\*/g, "").length / Math.max(1, Math.floor((baseW - 192) / (h1Fs * 0.68))))
+    );
+    // 96 top padding + the eyebrow + the h1 and its 22/34 margins; 196 is the
+    // bottom padding the footer lives in.
+    const headerH = 96 + 33 + 22 + Math.round(h1Rows * h1Fs * 1.1) + 34;
+    // 24px of slack absorbs a header estimate that lands a line out — the footer
+    // sits immediately below and has nowhere to go.
+    const usableH = Math.max(160, baseH - 196 - headerH - 24);
+
+    /** Rendered height of the tallest column at a given type size. */
+    const stackH = (chipFs: number, titleFs: number) =>
+      Math.max(
+        ...cols.map((cx, i) => {
+          const title = rows(String(cx.title || ""), titleFs, COL_W - 72) * Math.round(titleFs * 1.2) + 20 + 20;
+          const chips = colLines[i].reduce(
+            (h, ln) => h + rows(ln, chipFs, COL_W - 64) * Math.round(chipFs * 1.2) + 20,
+            0
+          );
+          return 22 + title + chips + Math.max(0, colLines[i].length - 1) * 10 + 26;
+        })
+      );
+
+    // Step down from the size the person asked for. Starting at sz() rather than at
+    // the base keeps the A+ stepper working — it still enlarges when there is room,
+    // and is simply overruled when there is not, which is the half it was missing.
+    let chipFs = sz(19);
+    let titleFs = sz(22);
+    const floorFs = Math.round(19 * 0.62);
+    while (chipFs > floorFs && stackH(chipFs, titleFs) > usableH) {
+      chipFs -= 1;
+      titleFs = Math.max(floorFs, Math.round((chipFs * 22) / 19));
+    }
     return (
       <div id={id} style={{ ...wrap, background: S.page }}>
         {dz.petals && <Petal w={520} o={0.7 * S.petal * 2} style={{ position: "absolute", top: -260, right: -280 }} brand={brand} />}
@@ -902,12 +978,13 @@ export const Slide = React.memo(function Slide({
           >
             {renderEm(cover)}
           </h1>
-          <div style={{ flex: 1, display: "flex", gap: 16 }}>
+          {/* The tints hug the content and the group is centred, rather than every
+              column being stretched to the full height whatever it holds — three
+              short stages used to leave ~650px of empty tint hanging below them. */}
+          <div style={{ flex: 1, display: "flex", alignItems: "center", minHeight: 0 }}>
+          <div style={{ width: "100%", display: "flex", gap: 16, alignItems: "stretch" }}>
             {cols.map((cx, i) => {
-              const lines = String(cx.body || "")
-                .split(/\n+/)
-                .map((x) => x.trim())
-                .filter(Boolean);
+              const lines = colLines[i];
               const head = onDark ? accentOnDark : heads[i % 3];
               return (
                 <div
@@ -926,9 +1003,14 @@ export const Slide = React.memo(function Slide({
                   <div
                     style={{
                       fontFamily: font,
-                      fontSize: sz(22),
+                      fontSize: titleFs,
                       fontWeight: 700,
                       color: head,
+                      maxWidth: "100%",
+                      boxSizing: "border-box",
+                      // A single long capability word cannot be allowed to push the
+                      // pill wider than the tint it sits on.
+                      overflowWrap: "break-word",
                       background: onDark ? "rgba(255,255,255,0.92)" : C.white,
                       borderRadius: 999,
                       padding: "10px 18px",
@@ -945,8 +1027,10 @@ export const Slide = React.memo(function Slide({
                         key={k}
                         style={{
                           fontFamily: font,
-                          fontSize: sz(19),
+                          fontSize: chipFs,
                           fontWeight: 500,
+                          boxSizing: "border-box",
+                          overflowWrap: "break-word",
                           color: onDark ? "#fff" : C.ink,
                           background: onDark ? "rgba(255,255,255,0.12)" : C.white,
                           border: `1px solid ${onDark ? "rgba(255,255,255,0.24)" : C.line}`,
@@ -977,6 +1061,7 @@ export const Slide = React.memo(function Slide({
                 </div>
               );
             })}
+          </div>
           </div>
         </div>
         <Foot dark={onDark} right={SINGLE_R} />

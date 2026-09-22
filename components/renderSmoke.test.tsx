@@ -374,3 +374,76 @@ describe("the panels render in every state they can hold", () => {
     expect(renderToStaticMarkup(<Logo h={64} white brand={KONVERZ} />)).toContain(KONVERZ.logos.white.slice(0, 60));
   });
 });
+
+describe("Journey Map columns are sized to the page", () => {
+  // THE BUG THIS GUARDS, and it shipped.
+  //
+  // The stage title and the capability chips used sz(), which is a constant times
+  // the per-slide text scale, so they never reacted to how much text arrived. The
+  // page is a fixed 1080x1350 with a footer under the columns and overflow:hidden
+  // at the edge, so nothing below them can move. A long stage — or the A+ stepper
+  // at its 150% ceiling — pushed the chips out through the bottom of their own
+  // tint, across the logo, and off the slide.
+  //
+  // Measured in a browser at the time of the fix: the worst realistic case ran
+  // 506px past the space it had. These assertions are the part of that a string
+  // can hold; the geometry itself needs a browser, which is what the file header
+  // says about every layout question here.
+
+  const chipPx = (html: string): number[] =>
+    [...html.matchAll(/font-size:(\d+)px;font-weight:500/g)].map((m) => Number(m[1]));
+
+  const journey = (brand: Brand, slides: CoercedSlide[], scale = 1) =>
+    renderSlide(brand, "Journey Map", "journey", { slides, scale, cover: "Screening to *selection*" });
+
+  const SHORT: CoercedSlide[] = [
+    { title: "Screen", body: "Screen AI\nProfile\nScorecards" },
+    { title: "Interview", body: "Interview AI\nTech AI\nTranscripts" },
+    { title: "Decide", body: "Reports\nBenchmarks\nAudit trail" }
+  ];
+  const CROWDED: CoercedSlide[] = [1, 2, 3].map((n) => ({
+    title: `Stage number ${n} written long`,
+    body: Array.from({ length: 8 }, (_, i) => `Capability line ${i + 1} that runs a good deal longer`).join("\n")
+  }));
+
+  it("leaves a comfortable column at its natural size", () => {
+    for (const brand of Object.values(BRANDS)) {
+      const sizes = chipPx(journey(brand, SHORT));
+      expect(sizes.length, `${brand.id} rendered no chips`).toBeGreaterThan(0);
+      expect(new Set(sizes), `${brand.id} should not shrink a short journey`).toEqual(new Set([19]));
+    }
+  });
+
+  it("steps the type down when a stage carries more than fits", () => {
+    for (const brand of Object.values(BRANDS)) {
+      const crowded = Math.max(...chipPx(journey(brand, CROWDED)));
+      expect(crowded, `${brand.id} did not shrink a crowded journey`).toBeLessThan(19);
+    }
+  });
+
+  it("still honours the A+ stepper when there is room for it", () => {
+    // The fix must not turn the per-slide text control into a no-op: it enlarges
+    // when the column can take it, and is overruled only when it cannot.
+    expect(Math.max(...chipPx(journey(KOGNOZ, SHORT, 1.5)))).toBeGreaterThan(19);
+  });
+
+  it("overrules the A+ stepper rather than letting it push text off the slide", () => {
+    // sz() multiplied AFTER every other guard, so 150% on a full column was the
+    // shortest path to the overflow this whole block exists to stop.
+    expect(Math.max(...chipPx(journey(KOGNOZ, CROWDED, 1.5)))).toBeLessThan(Math.round(19 * 1.5));
+  });
+
+  it("sizes both brands from the same estimate, so neither is tuned away", () => {
+    // Konverz's UI font is materially wider than Kognoz's — measured 1.05 advance
+    // widths per character against 0.55 — and one constant covers both by taking
+    // the wider. A journey that fits for one brand must fit for the other.
+    const k = Math.max(...chipPx(journey(KOGNOZ, CROWDED)));
+    const z = Math.max(...chipPx(journey(KONVERZ, CROWDED)));
+    expect(Math.abs(k - z), "the two brands diverged").toBeLessThanOrEqual(1);
+  });
+
+  it("lets a long capability break rather than spill out of its chip", () => {
+    const html = journey(KOGNOZ, [{ title: "Stage", body: "supercalifragilisticexpialidocious-capability" }]);
+    expect(html).toContain("overflow-wrap:break-word");
+  });
+});

@@ -1296,7 +1296,12 @@ export default function Studio() {
   }
   function applyVerified() {
     if (!verifyFixed) return;
-    const parsed = coerceContent(verifyFixed);
+    // WITH THE FORMAT'S OWN BUDGET. Without it this fell back to DEFAULT_BUDGET,
+    // so applying fact-check fixes silently re-admitted text the format cannot
+    // hold — Journey Map went from {title: 24, body: 120} to {title: 64, body: 230}
+    // and its columns burst out of their tint. Every other coerceContent call in
+    // this file already passes budgetFor(...); this one was simply missed.
+    const parsed = coerceContent(verifyFixed, undefined, budgetFor(format));
     snapshotDeck("fact-check fixes");
     setEyebrow(parsed.eyebrow || eyebrow);
     setCover(parsed.cover || cover);
