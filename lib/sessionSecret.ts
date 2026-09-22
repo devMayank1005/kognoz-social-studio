@@ -48,5 +48,17 @@ export function resolveSessionSecret(
   return DEV_SECRET;
 }
 
-/** Resolved once, at module load, so a misconfigured deployment fails at boot. */
-export const SESSION_SECRET = resolveSessionSecret();
+/**
+ * The secret, resolved WHEN A REQUEST NEEDS IT — never at import.
+ *
+ * This was a module-level constant, and that broke the build: Next imports every route
+ * module during "Collecting page data", so the check fired while compiling, where nothing is
+ * being signed and no secret is required. `next build` died on /api/auth before it could
+ * finish, which is a worse failure than the one it was guarding against.
+ *
+ * Signing a session is a per-request act, so this is a per-request question. The build no
+ * longer asks it; a real request still does, and still refuses a public secret.
+ */
+export function sessionSecret(): string {
+  return resolveSessionSecret();
+}

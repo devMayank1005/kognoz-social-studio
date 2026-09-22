@@ -21,6 +21,16 @@ import {
   type Task
 } from "@/lib/costControls";
 
+/**
+ * Never prerendered.
+ *
+ * Next EXECUTES a route handler during "Generating static pages" to discover whether it is
+ * dynamic. This one reads the session on every call, so a prerendered copy would be a
+ * response computed at build time with no user attached — and executing it at build made the
+ * deploy depend on runtime secrets being present while compiling, which is what broke it.
+ */
+export const dynamic = "force-dynamic";
+
 // PRD §3.1 + §13. This route is a dumb, hardened proxy: prompt TEXT itself
 // (BRAND_CORE, lane context, format specs, LINE_RULE, grounding/voice blocks,
 // contracts) is composed client-side in lib/promptBuilders.ts. This route only

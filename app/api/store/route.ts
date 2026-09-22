@@ -3,6 +3,16 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getSupabaseServerClient, STORE_KEYS, type StoreKey } from "@/lib/supabase";
 
+/**
+ * Never prerendered.
+ *
+ * Next EXECUTES a route handler during "Generating static pages" to discover whether it is
+ * dynamic. This one reads the session on every call, so a prerendered copy would be a
+ * response computed at build time with no user attached — and executing it at build made the
+ * deploy depend on runtime secrets being present while compiling, which is what broke it.
+ */
+export const dynamic = "force-dynamic";
+
 // PRD §3.2 + §14: same key semantics as v3 window.storage. Server storage
 // rejects unknown keys. Auth required on all routes.
 

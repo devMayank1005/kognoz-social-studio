@@ -1,4 +1,4 @@
-import { SESSION_SECRET } from "@/lib/sessionSecret";
+import { sessionSecret } from "@/lib/sessionSecret";
 import type { NextAuthOptions } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import CredentialsProvider from "next-auth/providers/credentials";
@@ -14,7 +14,13 @@ import { randomUUID } from "node:crypto";
 // with fallback to Supabase `users` table via CredentialsProvider.
 
 export const authOptions: NextAuthOptions = {
-  secret: SESSION_SECRET,
+  // A getter, so the secret is resolved per request rather than when this module is
+  // imported. next-auth reads `options.secret` inside its handler
+  // (node_modules/next-auth/next/index.js:17), not at construction — checked rather than
+  // assumed, because a plain value here is what failed the Vercel build.
+  get secret() {
+    return sessionSecret();
+  },
   session: { strategy: "jwt" },
   providers: [
     AzureADProvider({

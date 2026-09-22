@@ -5,6 +5,16 @@ import { getSupabaseServerClient } from "@/lib/supabase";
 import { recordActivity } from "@/lib/activity";
 import { isClientAction, clientIp, toScreen } from "@/lib/activityEvents";
 
+/**
+ * Never prerendered.
+ *
+ * Next EXECUTES a route handler during "Generating static pages" to discover whether it is
+ * dynamic. This one reads the session on every call, so a prerendered copy would be a
+ * response computed at build time with no user attached — and executing it at build made the
+ * deploy depend on runtime secrets being present while compiling, which is what broke it.
+ */
+export const dynamic = "force-dynamic";
+
 // Where the browser reports what the user just did.
 //
 // The security model is one sentence: THE CLIENT SAYS WHAT HAPPENED, THE SERVER SAYS

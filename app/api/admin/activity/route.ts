@@ -5,6 +5,16 @@ import { getSupabaseServerClient } from "@/lib/supabase";
 import { isAdmin } from "@/lib/adminAccess";
 import { isMissingRelation } from "@/lib/activity";
 
+/**
+ * Never prerendered.
+ *
+ * Next EXECUTES a route handler during "Generating static pages" to discover whether it is
+ * dynamic. This one reads the session on every call, so a prerendered copy would be a
+ * response computed at build time with no user attached — and executing it at build made the
+ * deploy depend on runtime secrets being present while compiling, which is what broke it.
+ */
+export const dynamic = "force-dynamic";
+
 // Reading the activity trail. Admin only — see lib/adminAccess.ts for why the gate is
 // an env allowlist rather than users.role.
 //

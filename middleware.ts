@@ -1,9 +1,8 @@
-import { SESSION_SECRET } from "@/lib/sessionSecret";
+import { sessionSecret } from "@/lib/sessionSecret";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const SECRET = SESSION_SECRET;
 
 /**
  * Refuse an unauthenticated request in the form its caller can actually read.
@@ -73,6 +72,10 @@ export async function middleware(req: NextRequest) {
   if (!hasSecureCookie && !hasPlainCookie) return deny(req);
 
   try {
+    // Inside the try on purpose: a deployment with no secret throws here, where the catch
+    // below already turns any failure into deny() — a 401 for /api/*, the login screen for
+    // a page. Fail closed, loudly logged, and without taking the build or the process down.
+    const SECRET = sessionSecret();
     let token = null;
     if (hasSecureCookie) {
       token = await getToken({ req, secret: SECRET, secureCookie: true });

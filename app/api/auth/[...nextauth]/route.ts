@@ -4,6 +4,16 @@ import { authOptions } from "@/lib/auth";
 import { withRequestOrigin } from "@/lib/requestContext";
 import { clientIp } from "@/lib/activityEvents";
 
+/**
+ * Never prerendered.
+ *
+ * Next EXECUTES a route handler during "Generating static pages" to discover whether it is
+ * dynamic. This one reads the session on every call, so a prerendered copy would be a
+ * response computed at build time with no user attached — and executing it at build made the
+ * deploy depend on runtime secrets being present while compiling, which is what broke it.
+ */
+export const dynamic = "force-dynamic";
+
 if (!process.env.NEXTAUTH_URL) {
   if (process.env.NODE_ENV === "production") {
     process.env.NEXTAUTH_URL = "https://kognoz-social-studio.vercel.app";

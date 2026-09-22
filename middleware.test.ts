@@ -41,7 +41,17 @@ describe("the unauthenticated response fits its caller", () => {
 
   it("signs with the shared secret rather than a literal", () => {
     // The fallback secret that used to live here was readable by anyone with the repo.
-    expect(src).toContain("SESSION_SECRET");
+    expect(src).toContain("sessionSecret()");
     expect(src).not.toMatch(/secret-key-20\d\d/);
+  });
+
+  it("resolves the secret per request, not at module load", () => {
+    // A module-level `const SECRET = ...` is what broke the Vercel build: Next imports and
+    // executes route modules while compiling, where no session is being signed. The call
+    // belongs inside the handler, where the existing catch turns a missing secret into
+    // deny() rather than a crash.
+    expect(src).not.toMatch(/^const SECRET =/m);
+    const body = src.slice(src.indexOf("export async function middleware"));
+    expect(body).toContain("sessionSecret()");
   });
 });
