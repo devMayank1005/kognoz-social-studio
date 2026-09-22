@@ -16,11 +16,21 @@ import React from "react";
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md" | "icon";
 
+// Each variant states its own disabled hover.
+//
+// The tempting shorthand — one `disabled:hover:bg-inherit` for all four — is wrong:
+// `:disabled:hover` has specificity (0,3,0) and beats the variant's own `hover:` at
+// (0,2,0) whatever the source order, so a hovered disabled primary button painted
+// `inherit`, which inside a white dialog panel is white, under white text. ExportDrawer
+// disables all three of its Export buttons while one is rendering.
+//
+// `disabled:pointer-events-none` would also fix it, and would silently kill
+// `cursor-not-allowed` along with any title tooltip. This is the cheaper trade.
 const VARIANT: Record<ButtonVariant, string> = {
-  primary: "bg-slate-900 hover:bg-[var(--brand-accent)] text-white shadow-xs",
-  secondary: "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50",
-  ghost: "text-slate-500 hover:text-slate-800 hover:bg-slate-100",
-  danger: "bg-rose-600 hover:bg-rose-700 text-white shadow-xs"
+  primary: "bg-slate-900 hover:bg-[var(--brand-accent)] disabled:hover:bg-slate-900 text-white shadow-xs",
+  secondary: "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:hover:bg-white",
+  ghost: "text-slate-500 hover:text-slate-800 hover:bg-slate-100 disabled:hover:bg-transparent",
+  danger: "bg-rose-600 hover:bg-rose-700 disabled:hover:bg-rose-600 text-white shadow-xs"
 };
 
 const SIZE: Record<ButtonSize, string> = {
@@ -47,7 +57,7 @@ export function Button({
       className={[
         "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-accent)] focus-visible:ring-offset-1",
-        "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-inherit",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
         VARIANT[variant],
         SIZE[size],
         className

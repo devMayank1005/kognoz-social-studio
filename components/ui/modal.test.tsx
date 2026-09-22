@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
+import React, { useState } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import { Modal, Drawer } from "./Modal";
 import { Button } from "./Button";
 
@@ -127,6 +128,55 @@ describe("Modal", () => {
     expect(screen.getByRole("dialog").getAttribute("aria-label")).toBe("Export deck");
   });
 
+  it("survives a parent re-render without dropping focus", () => {
+    // The lifecycle used to share one effect with the keydown listener, whose deps include
+    // onClose. Every call site passes an inline arrow, so ANY parent render gave onClose a
+    // new identity, tore the whole effect down and built it back up: cleanup restored focus
+    // to the opener, and the re-run then pulled it to the panel. Whatever the person was
+    // typing in lost the caret. (The same teardown churns body overflow hidden → "" →
+    // hidden, flashing the scrollbar behind — same root cause, but transient, so focus is
+    // what this test watches.)
+    //
+    // Reachable in production because ExportDrawer and VerifyFactsModal live inside
+    // Studio.tsx, which re-renders on its autosave debounce.
+    //
+    // The opener must be a real focusable element: restoreTo has to have something it can
+    // actually focus, or the bug hides.
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      const [, force] = useState(0);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            open
+          </button>
+          <button type="button" onClick={() => force((n) => n + 1)}>
+            re-render
+          </button>
+          {open && (
+            // A fresh arrow every render, exactly like every real call site.
+            <Modal isOpen onClose={() => setOpen(false)} title="Test dialog">
+              <input aria-label="inside" />
+            </Modal>
+          )}
+        </>
+      );
+    }
+
+    render(<Harness />);
+    const opener = screen.getByText("open");
+    opener.focus();
+    fireEvent.click(opener);
+
+    const inside = screen.getByLabelText("inside");
+    inside.focus();
+    expect(document.activeElement).toBe(inside);
+
+    fireEvent.click(screen.getByText("re-render"));
+
+    expect(document.activeElement).toBe(inside);
+  });
+
   it("hides the × when the dialog must be dismissed deliberately", () => {
     open({ hideClose: true });
     expect(screen.queryByLabelText("Close")).toBeNull();
@@ -134,6 +184,24 @@ describe("Modal", () => {
 });
 
 describe("Drawer", () => {
+  it("honours `size` rather than silently pinning one width", () => {
+    const { unmount } = render(
+      <Drawer isOpen onClose={() => {}} title="Export">
+        body
+      </Drawer>
+    );
+    // The default keeps ExportDrawer's existing width.
+    expect(screen.getByRole("dialog").className).toContain("max-w-md");
+    unmount();
+
+    render(
+      <Drawer isOpen size="lg" onClose={() => {}} title="Export">
+        body
+      </Drawer>
+    );
+    expect(screen.getByRole("dialog").className).toContain("max-w-xl");
+  });
+
   it("is a Modal anchored right, with the same behaviours", () => {
     const onClose = vi.fn();
     render(
@@ -156,6 +224,16 @@ describe("Button", () => {
   it("still allows an explicit submit", () => {
     render(<Button type="submit">Save</Button>);
     expect(screen.getByRole("button").getAttribute("type")).toBe("submit");
+  });
+
+  it("keeps its own background when a disabled button is hovered", () => {
+    // `disabled:hover:bg-inherit` outranked the variant's own hover by specificity, so a
+    // hovered disabled primary button painted `inherit` — white inside a white dialog
+    // panel, under white text. ExportDrawer disables all three Export buttons mid-render.
+    render(<Button disabled>Export</Button>);
+    const cls = screen.getByRole("button").className;
+    expect(cls).not.toContain("bg-inherit");
+    expect(cls).toContain("disabled:hover:bg-slate-900");
   });
 
   it("does not fire when disabled", () => {

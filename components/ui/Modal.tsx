@@ -49,7 +49,7 @@ const LAYOUT: Record<ModalAnchor, { backdrop: string; panel: (w: string) => stri
   },
   right: {
     backdrop: "justify-end",
-    panel: () => `w-full max-w-md h-full border-l`
+    panel: (w) => `w-full ${w} h-full border-l`
   }
 };
 
@@ -141,13 +141,30 @@ export function Modal({
     [onClose]
   );
 
+  // The listener, and ONLY the listener.
+  //
+  // This is deliberately a separate effect from the one below, and the separation is
+  // load-bearing. `onKeyDown` follows `onClose`, and every call site passes an inline
+  // arrow (AppShell.tsx:159, Studio.tsx:2918, …) — so this effect re-runs on every parent
+  // render. Re-attaching a listener that often is free. Re-running the lifecycle below
+  // was not: it restored focus to the opener and then pulled it to the panel, losing the
+  // caret of anyone typing in the dialog, and churned body overflow hidden → "" → hidden,
+  // flashing the scrollbar on the page behind. ExportDrawer and VerifyFactsModal sit
+  // inside Studio, which re-renders on its autosave debounce, so it was not theoretical.
+  useEffect(() => {
+    if (!isOpen) return;
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [isOpen, onKeyDown]);
+
+  // The lifecycle: what must happen exactly once when the dialog opens, and be undone
+  // exactly once when it closes. `isOpen` is the only dependency it may ever have.
   useEffect(() => {
     if (!isOpen) return;
     restoreTo.current = document.activeElement as HTMLElement | null;
     const body = document.body;
     const previousOverflow = body.style.overflow;
     body.style.overflow = "hidden";
-    document.addEventListener("keydown", onKeyDown, true);
 
     // Focus the panel rather than its first control: landing on a destructive button
     // because it happened to be first is worse than landing nowhere.
@@ -160,13 +177,12 @@ export function Modal({
     if (panel && !panel.contains(document.activeElement)) panel.focus();
 
     return () => {
-      document.removeEventListener("keydown", onKeyDown, true);
       body.style.overflow = previousOverflow;
       // Only steal focus back if it is still inside the dialog we are closing.
       const active = document.activeElement;
       if (!active || active === document.body || panelRef.current?.contains(active)) restoreTo.current?.focus?.();
     };
-  }, [isOpen, onKeyDown]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -239,7 +255,12 @@ export function Modal({
   );
 }
 
-/** The right-anchored variant, so callers say what they mean. */
-export function Drawer(props: Omit<ModalProps, "anchor">) {
-  return <Modal {...props} anchor="right" />;
+/**
+ * The right-anchored variant, so callers say what they mean.
+ *
+ * Its own `size` default rather than Modal's: a drawer is a column, and `sm` (max-w-md) is
+ * the width ExportDrawer has always had.
+ */
+export function Drawer({ size = "sm", ...props }: Omit<ModalProps, "anchor">) {
+  return <Modal {...props} size={size} anchor="right" />;
 }
