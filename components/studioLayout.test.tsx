@@ -13,20 +13,21 @@ const slides = [
 ];
 
 describe("StudioLayout", () => {
-  it("renders all three columns", () => {
-    const out = html(<StudioLayout left={<p>LEFT</p>} center={<p>CENTER</p>} right={<p>RIGHT</p>} />);
-    expect(out).toContain("LEFT");
+  it("renders the canvas and the inspector", () => {
+    // Two columns, not three: the 240px generation rail was folded into the inspector's
+    // Content and Design tabs, and `left` is gone from the props entirely.
+    const out = html(<StudioLayout center={<p>CENTER</p>} right={<p>RIGHT</p>} />);
     expect(out).toContain("CENTER");
     expect(out).toContain("RIGHT");
   });
 
   it("omits the sub-header bar when the page supplies none", () => {
-    expect(html(<StudioLayout left={null} center={null} right={null} />)).not.toContain("h-12");
+    expect(html(<StudioLayout center={null} right={null} />)).not.toContain("h-12");
   });
 
   it("pins itself under the 64px topbar so each column scrolls on its own", () => {
     // Letting the page scroll takes the canvas out of view while you edit a long body.
-    expect(html(<StudioLayout left={null} center={null} right={null} />)).toContain("h-[calc(100vh-64px)]");
+    expect(html(<StudioLayout center={null} right={null} />)).toContain("h-[calc(100vh-64px)]");
   });
 });
 

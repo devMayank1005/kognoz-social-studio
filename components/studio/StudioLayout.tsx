@@ -2,11 +2,14 @@
 
 import React from "react";
 
-// The three-column Studio frame, ported from the reference's StudioView layout.
+// The Studio frame: canvas on the left, inspector on the right.
 //
-// Pure layout — it holds no state and knows nothing about decks. Studio.tsx keeps every
-// piece of state and every handler it already had and simply fills these four slots,
-// which is what makes the move a re-layout rather than a rewrite.
+// It was three columns until the 240px generation rail on the far left was folded into the
+// inspector's Content and Design tabs. Nothing was lost in that move — the rail's other
+// contents (logo, account badge, brand switch, Calendar link, slide list) each already
+// existed in the app rail, the topbar or the centre column's slide pager.
+//
+// Pure layout — it holds no state and knows nothing about decks.
 //
 // The height is pinned to the viewport minus the 64px topbar, and each column scrolls
 // independently. The alternative — letting the page scroll — takes the slide canvas out
@@ -14,12 +17,10 @@ import React from "react";
 
 export function StudioLayout({
   subHeader,
-  left,
   center,
   right
 }: {
   subHeader?: React.ReactNode;
-  left: React.ReactNode;
   center: React.ReactNode;
   right: React.ReactNode;
 }) {
@@ -32,10 +33,6 @@ export function StudioLayout({
       )}
 
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
-        <div className="w-full md:w-60 bg-white border-r border-slate-200/90 flex flex-col shrink-0 overflow-y-auto">
-          {left}
-        </div>
-
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">{center}</div>
 
         <div className="w-full md:w-80 bg-white border-l border-slate-200/90 flex flex-col shrink-0 overflow-hidden">
@@ -55,7 +52,7 @@ export function MonoChip({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Small uppercase heading, used down the left column and in the inspector. */
+/** Small uppercase heading, used throughout the inspector. */
 export function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">

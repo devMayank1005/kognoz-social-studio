@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useSession, signOut } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { C, GRAD, FONT, DISPLAY_FONT } from "@/lib/tokens";
 import { shiftSlideImages, shiftDeckMap, deckIndexOfSlide, currentAfterRemoval, exportFileCount } from "@/lib/slideIndex";
 import { FORMATS, FORMAT_BRIEF, SLIDE_SLOTS, DECK_SLIDE_LIMITS, budgetFor, type FormatId } from "@/lib/formats";
@@ -25,11 +25,10 @@ import { useBrandSwitch } from "./BrandProvider";
 import { ArticleWriter } from "./ArticleWriter";
 import { ShieldCheck, Download, Plus } from "lucide-react";
 import { StudioLayout, MonoChip } from "./studio/StudioLayout";
-import { SlideList, SlidePager } from "./studio/SlideStrip";
+import { SlidePager } from "./studio/SlideStrip";
 import { Inspector, type InspectorTab } from "./studio/Inspector";
 import { ExportDrawer, type ExportAction } from "./overlays/ExportDrawer";
 import { VerifyFactsModal } from "./overlays/VerifyFactsModal";
-import { BrandSwitch } from "./BrandSwitch";
 import {
   coerceContent,
   applyFormatHygiene,
@@ -72,7 +71,6 @@ import { coerceStoredDeck, deckChanged, serialiseDeck, type StoredDeck } from "@
 import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG } from "@/lib/exportPipeline";
 import { SocialPreview, type PreviewPage } from "@/components/SocialPreview";
 import { Slide, type SlideDesign, type SlideKind } from "./Slide";
-import { Logo } from "./Logo";
 
 const font = FONT;
 const displayFont = DISPLAY_FONT;
@@ -473,30 +471,20 @@ export default function Studio() {
 
   const [pdfBusy, setPdfBusy] = useState(0);
 
-  // Collapsible sidebar state (persisted across sessions)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Window width, which the preview sizes itself against.
+  //
+  // This used to also carry `sidebarCollapsed` and a `toggleSidebar` that persisted to
+  // localStorage. Both existed only for the 240px generation rail, which has been folded
+  // into the inspector tabs — with no rail there is nothing to collapse, and the floating
+  // toolbar that stood in for it while collapsed (a second Regenerate button and a second
+  // Calendar link) went with it.
   const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("studio-sidebar-collapsed");
-      if (saved === "true") setSidebarCollapsed(true);
-    } catch {}
-
     const handleResize = () => setWinW(window.innerWidth);
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
-
-  const toggleSidebar = () => {
-    setSidebarCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem("studio-sidebar-collapsed", String(next));
-      } catch {}
-      return next;
-    });
-  };
 
   // Load the shared design/house-prefs/style-memory/voice-samples for the active
   // brand (PRD §3.2). Re-runs on a brand switch, because every one of these is
@@ -821,14 +809,16 @@ export default function Studio() {
   const baseW = fmt.w;
   const baseH = fmt.h;
   const isMobile = winW < 768;
-  const maxAvailW = Math.max(260, isMobile ? winW - 32 : sidebarCollapsed ? winW - 48 : winW - 440);
-  const idealW = baseW > 2000
-    ? (sidebarCollapsed ? 1080 : 780)
-    : baseW > baseH
-    ? (sidebarCollapsed ? 860 : 620)
-    : baseH > 1500
-    ? (sidebarCollapsed ? 440 : 330)
-    : (sidebarCollapsed ? 540 : 400);
+  // The only chrome beside the canvas is now the 320px inspector plus this column's own
+  // 24px padding either side. The app rail is NOT subtracted: winW is the whole window and
+  // Studio does not know the rail's width, so this stays a generous ceiling that `idealW`
+  // governs in practice rather than an exact fit.
+  //
+  // The idealW numbers are the ones the old layout used when the rail was collapsed, which
+  // is the same geometry as having no rail at all — so nothing here changes what you saw
+  // with the rail hidden.
+  const maxAvailW = Math.max(260, isMobile ? winW - 32 : winW - 368);
+  const idealW = baseW > 2000 ? 1080 : baseW > baseH ? 860 : baseH > 1500 ? 440 : 540;
 
   const previewW = Math.min(idealW, maxAvailW);
   const previewScale = previewW / baseW;
@@ -1618,308 +1608,6 @@ export default function Studio() {
           </div>
         </>
       }
-      left={
-        <>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        <div className="p-4 space-y-3 flex-1">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <Logo h={32} brand={brand} />
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {session?.user && (
-                <span
-                  title={session.user.email || ""}
-                  style={{
-                    fontSize: 11.5,
-                    fontWeight: 700,
-                    color: C.blue,
-                    background: C.mist,
-                    padding: "4px 9px",
-                    borderRadius: 12,
-                    maxWidth: 120,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap"
-                  }}
-                >
-                  {session.user.name || session.user.email?.split("@")[0]}
-                </span>
-              )}
-              {/* Complete Minimize / Close Button */}
-              <button
-                type="button"
-                onClick={toggleSidebar}
-                title="Minimize sidebar"
-                style={{
-                  height: 28,
-                  padding: "0 10px",
-                  borderRadius: 6,
-                  border: `1px solid ${C.line}`,
-                  background: C.mist,
-                  color: C.blue,
-                  fontSize: 11.5,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 5,
-                  transition: "all 0.15s ease"
-                }}
-              >
-                <span>◀</span>
-                <span>{isMobile ? "Close" : "Minimize"}</span>
-              </button>
-              {session?.user && (
-                <button
-                  type="button"
-                  onClick={() => signOut({ callbackUrl: "/login" })}
-                  style={{
-                    border: `1px solid ${C.line}`,
-                    background: "transparent",
-                    color: C.inkMute,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    borderRadius: 6,
-                    padding: "3px 7px",
-                    cursor: "pointer"
-                  }}
-                >
-                  Exit
-                </button>
-              )}
-            </div>
-          </div>
-
-        <BrandSwitch disabled={busy} style={{ marginBottom: 12 }} />
-
-        <div style={{ fontFamily: font, fontSize: 13, color: C.inkMute, lineHeight: 1.5, marginBottom: 14 }}>
-          Type a topic. {brand.name}-voiced content and on-brand design, generated together.
-        </div>
-        <a href="/calendar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", borderRadius: 10, background: C.mist, cursor: "pointer", marginBottom: 22, border: `1px solid ${C.line}`, textDecoration: "none" }}>
-          <div style={{ fontFamily: font, fontSize: 13, fontWeight: 700, color: C.blue }}>Content Calendar</div>
-          <div style={{ fontFamily: font, fontSize: 12, color: C.inkMute }}>→</div>
-        </a>
-
-        {/* Step one, and deliberately the heaviest control on the panel. Generation is
-            format-specific — the prompt, the slide count and what a "slide" even means
-            all differ — so choosing afterwards means paying for a second run. */}
-        <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, padding: "14px 16px 16px", marginBottom: 20, background: C.off }}>
-          <span style={{ ...label, marginBottom: 10 }}>Step 1 · Choose the format first</span>
-          <div role="radiogroup" aria-label="Content format" style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-            {(Object.keys(FORMATS) as FormatId[]).map((f) => (
-              <button
-                key={f}
-                type="button"
-                role="radio"
-                aria-checked={format === f}
-                onClick={() => selectFormat(f)}
-                disabled={busy}
-                // `font` is the shorthand for the fontFamily/fontSize/fontWeight that
-                // chip() sets, so it reset them and React warned about the conflict on
-                // every re-render. The second spread was a verbatim duplicate.
-                style={{ ...chip(format === f, C.blue), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
-              >
-                {FORMATS[f].hint}
-              </button>
-            ))}
-          </div>
-          <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkSoft, marginTop: 11, lineHeight: 1.5 }}>
-            <b style={{ color: C.ink }}>{format}</b> · {FORMAT_BRIEF[format]}.{" "}
-            <span style={{ color: C.inkMute }}>
-              Claude writes for this format specifically, so switching afterwards means generating again.
-            </span>
-          </div>
-        </div>
-
-        {format === "Idea Deck" && (
-          <div style={{ marginBottom: 20 }}>
-            <span style={label}>Deck style</span>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-              {([["signals", "Signals"], ["book", "Book review"], ["story", "Story"]] as [IdeaStyle, string][]).map(([k, lb]) => (
-                <div
-                  key={k}
-                  onClick={() => { if (!busy) setIdeaStyle(k); }}
-                  style={{ ...chip(ideaStyle === k, C.teal), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
-                >
-                  {lb}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <span style={label}>Content pillar</span>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 22 }}>
-          {Object.keys(PILLARS).map((p) => (
-            <div
-              key={p}
-              onClick={() => {
-                if (busy) return; // setEyebrow(gPillar) at the end of generate() would revert it anyway
-                setPillar(p);
-                setEyebrow(p);
-              }}
-              style={{ ...chip(pillar === p, PILLARS[p]), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
-            >
-              <span style={{ width: 9, height: 9, borderRadius: "50%", background: pillar === p ? "#fff" : PILLARS[p] }} />
-              {p}
-            </div>
-          ))}
-        </div>
-
-        {/*
-          Whose voice this deck is in. Decks had no such notion, so unlike a
-          caption they could not pick the right person's writing samples, and the
-          copy came out belonging to nobody.
-        */}
-        <span style={label}>Publishing as</span>
-        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-          {CHANNEL_IDS.map((c) => (
-            <div
-              key={c}
-              onClick={() => { if (!busy) setChannel(c); }}
-              style={{ ...chip(channel === c, C.blue), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
-            >
-              {c}
-            </div>
-          ))}
-        </div>
-
-        <span style={label}>Topic</span>
-        <textarea
-          value={topic}
-          onChange={(e) => setTopic(e.target.value)}
-          rows={2}
-          placeholder={
-            format === "Idea Deck" && ideaStyle === "book"
-              ? "Book title, Author (e.g. The Culture Code, Daniel Coyle)"
-              : format === "Idea Deck" && ideaStyle === "story"
-              ? "The situation (e.g. inside a founder-family succession conversation)"
-              : "e.g. Why internal mobility beats external hiring for scarce AI skills"
-          }
-          style={{ ...inputStyle, marginBottom: 10 }}
-        />
-
-        {/*
-          Raw material. This is the difference between writing ABOUT a subject
-          and writing FROM something, and it is the deepest fix available for
-          copy that reads generic: a topic line gives the model nothing specific
-          to say, so it says the general thing.
-        */}
-        <button
-          type="button"
-          onClick={() => setShowSource((v) => !v)}
-          style={{
-            display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left",
-            fontFamily: font, fontSize: 11.5, fontWeight: 700, color: sourceMaterial.trim() ? C.teal : C.inkSoft,
-            background: "none", border: "none", padding: "0 0 8px", cursor: "pointer"
-          }}
-        >
-          <span>{showSource ? "▾" : "▸"}</span>
-          <span>
-            Notes, transcript or rough thoughts
-            {sourceMaterial.trim() ? ` · ${sourceMaterial.trim().length.toLocaleString()} characters` : " · optional"}
-          </span>
-        </button>
-        {showSource && (
-          <>
-            <textarea
-              value={sourceMaterial}
-              onChange={(e) => saveSourceMaterial(e.target.value.slice(0, MAX_SOURCE_CHARS))}
-              rows={5}
-              placeholder="Paste what you actually have. A call transcript, notes from a client conversation, a paragraph you dictated on the way home. Specifics beat polish here: names of behaviours, numbers somebody quoted, what was actually said in the room."
-              style={{ ...inputStyle, marginBottom: 6, fontSize: 12.5 }}
-            />
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: font, fontSize: 10.5, color: C.inkMute, marginBottom: 10, lineHeight: 1.5 }}>
-              <span>
-                {sourceMaterial.length >= MAX_SOURCE_CHARS
-                  ? `At the ${MAX_SOURCE_CHARS.toLocaleString()} character limit. Trim to the part that matters.`
-                  : `${(MAX_SOURCE_CHARS - sourceMaterial.length).toLocaleString()} characters left. Used for the draft only, never the edit pass.`}
-              </span>
-              {sourceMaterial.trim() && (
-                <button type="button" onClick={() => saveSourceMaterial("")} style={{ fontFamily: font, fontSize: 10.5, color: C.inkMute, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-                  clear
-                </button>
-              )}
-            </div>
-          </>
-        )}
-        <label
-          style={{
-            display: "flex", alignItems: "flex-start", gap: 9, marginBottom: 10, cursor: "pointer",
-            border: `1px solid ${grounded ? C.line : "transparent"}`, borderRadius: 8,
-            padding: grounded ? "9px 10px" : "0 0 2px", background: grounded ? C.off : "transparent"
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={grounded}
-            onChange={(e) => { groundedTouched.current = true; setGrounded(e.target.checked); }}
-            style={{ marginTop: 2, accentColor: C.ink, cursor: "pointer" }}
-          />
-          <span style={{ fontFamily: font, fontSize: 12, color: C.inkSoft, lineHeight: 1.45 }}>
-            Ground with web search
-            <span style={{ color: C.inkMute }}>
-              {" "}· verifies statistics live, up to 2 searches. Costs several times a plain
-              generation, so leave it off unless the piece leans on external numbers.
-            </span>
-          </span>
-        </label>
-        <button
-          onClick={() => generate(undefined, undefined, undefined, primedItem)}
-          // generate() also bails without a topic and while a revision runs, so the
-          // app's primary button used to look live and do nothing on a fresh load.
-          disabled={busy || !topic.trim()}
-          style={{ ...btn(true), opacity: busy || !topic.trim() ? 0.55 : 1, cursor: busy || !topic.trim() ? "default" : "pointer" }}
-          title={!topic.trim() ? "Type a topic first" : undefined}
-        >
-          {loading
-            ? "Writing & designing…"
-            : `Generate ${format}${grounded ? " · grounded" : ""}`}
-        </button>
-        {staleFormat && !loading && (
-          <div style={{ fontFamily: font, fontSize: 11.5, color: "#B4442E", marginTop: 8, lineHeight: 1.5 }}>
-            This text was written for a different format. Generate again so Claude writes it for {format} · {FORMAT_BRIEF[format]}.
-          </div>
-        )}
-        {primedFromCalendar && !loading && (
-          <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginTop: 8, lineHeight: 1.5 }}>
-            Loaded from the calendar and ready. Nothing has been generated yet — press Generate when the brief looks right.
-          </div>
-        )}
-        {error && <div style={{ fontFamily: font, fontSize: 12, color: "#B4442E", marginTop: 10, lineHeight: 1.5 }}>{error}</div>}
-        </div>
-        <SlideList slides={stripSlides} current={current} onSelect={setCurrent} />
-        <div className="p-3 border-t border-slate-100 bg-slate-50/70">
-          <button type="button" onClick={() => topicRef.current?.focus()} className="w-full py-2 px-3 rounded-lg border border-slate-300 hover:bg-white text-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors">
-            <Plus className="w-3.5 h-3.5 text-[var(--accent-deep)]" />
-            <span>Create New Content</span>
-          </button>
-        </div>
-        </>
-      }
       right={
         <Inspector tab={inspectorTab} onTab={setInspectorTab}>
           <div className="p-4">
@@ -2158,6 +1846,58 @@ export default function Studio() {
           )}
           {inspectorTab === "design" && (
             <>
+        {/* Step one, and deliberately the heaviest control on the panel. Generation is
+            format-specific — the prompt, the slide count and what a "slide" even means
+            all differ — so choosing afterwards means paying for a second run. */}
+        <div style={{ border: `1px solid ${C.line}`, borderRadius: 12, padding: "14px 16px 16px", marginBottom: 20, background: C.off }}>
+          <span style={{ ...label, marginBottom: 10 }}>Step 1 · Choose the format first</span>
+          {/* Two per row rather than free wrapping. At 320px the fifteen chips wrapped into
+              ragged rows ending in an orphan; a grid keeps every chip the same tap target. */}
+          <div role="radiogroup" aria-label="Content format" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+            {(Object.keys(FORMATS) as FormatId[]).map((f) => (
+              <button
+                key={f}
+                type="button"
+                role="radio"
+                aria-checked={format === f}
+                onClick={() => selectFormat(f)}
+                disabled={busy}
+                // `font` is the shorthand for the fontFamily/fontSize/fontWeight that
+                // chip() sets, so it reset them and React warned about the conflict on
+                // every re-render. The second spread was a verbatim duplicate.
+                // Tighter than a free-standing chip: "Montage · 3 frames" has to fit a
+                // half-width cell, so it centres and wraps instead of overflowing.
+                style={{ ...chip(format === f, C.blue), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1, justifyContent: "center", textAlign: "center", whiteSpace: "normal", padding: "7px 9px", fontSize: 11.5, lineHeight: 1.3 }}
+              >
+                {FORMATS[f].hint}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkSoft, marginTop: 11, lineHeight: 1.5 }}>
+            <b style={{ color: C.ink }}>{format}</b> · {FORMAT_BRIEF[format]}.{" "}
+            <span style={{ color: C.inkMute }}>
+              Claude writes for this format specifically, so switching afterwards means generating again.
+            </span>
+          </div>
+        </div>
+
+        {format === "Idea Deck" && (
+          <div style={{ marginBottom: 20 }}>
+            <span style={label}>Deck style</span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {([["signals", "Signals"], ["book", "Book review"], ["story", "Story"]] as [IdeaStyle, string][]).map(([k, lb]) => (
+                <div
+                  key={k}
+                  onClick={() => { if (!busy) setIdeaStyle(k); }}
+                  style={{ ...chip(ideaStyle === k, C.teal), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
+                >
+                  {lb}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ marginTop: 18, padding: "14px 14px 12px", background: C.off, borderRadius: 10, border: `1px solid ${C.line}` }}>
           <span style={label}>Design set · one family per deck</span>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
@@ -2320,6 +2060,155 @@ export default function Studio() {
           )}
           {inspectorTab === "content" && (
             <>
+        <span style={label}>Content pillar</span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 22 }}>
+          {Object.keys(PILLARS).map((p) => (
+            <div
+              key={p}
+              onClick={() => {
+                if (busy) return; // setEyebrow(gPillar) at the end of generate() would revert it anyway
+                setPillar(p);
+                setEyebrow(p);
+              }}
+              style={{ ...chip(pillar === p, PILLARS[p]), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
+            >
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: pillar === p ? "#fff" : PILLARS[p] }} />
+              {p}
+            </div>
+          ))}
+        </div>
+
+        {/*
+          Whose voice this deck is in. Decks had no such notion, so unlike a
+          caption they could not pick the right person's writing samples, and the
+          copy came out belonging to nobody.
+        */}
+        <span style={label}>Publishing as</span>
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          {CHANNEL_IDS.map((c) => (
+            <div
+              key={c}
+              onClick={() => { if (!busy) setChannel(c); }}
+              style={{ ...chip(channel === c, C.blue), cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}
+            >
+              {c}
+            </div>
+          ))}
+        </div>
+
+        <span style={label}>Topic</span>
+        <textarea
+          // topicRef existed and was never attached, so "+ Create New Content" below
+          // focused nothing. Attaching it is the whole fix.
+          ref={topicRef}
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          rows={2}
+          placeholder={
+            format === "Idea Deck" && ideaStyle === "book"
+              ? "Book title, Author (e.g. The Culture Code, Daniel Coyle)"
+              : format === "Idea Deck" && ideaStyle === "story"
+              ? "The situation (e.g. inside a founder-family succession conversation)"
+              : "e.g. Why internal mobility beats external hiring for scarce AI skills"
+          }
+          style={{ ...inputStyle, marginBottom: 10 }}
+        />
+
+        {/*
+          Raw material. This is the difference between writing ABOUT a subject
+          and writing FROM something, and it is the deepest fix available for
+          copy that reads generic: a topic line gives the model nothing specific
+          to say, so it says the general thing.
+        */}
+        <button
+          type="button"
+          onClick={() => setShowSource((v) => !v)}
+          style={{
+            display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left",
+            fontFamily: font, fontSize: 11.5, fontWeight: 700, color: sourceMaterial.trim() ? C.teal : C.inkSoft,
+            background: "none", border: "none", padding: "0 0 8px", cursor: "pointer"
+          }}
+        >
+          <span>{showSource ? "▾" : "▸"}</span>
+          <span>
+            Notes, transcript or rough thoughts
+            {sourceMaterial.trim() ? ` · ${sourceMaterial.trim().length.toLocaleString()} characters` : " · optional"}
+          </span>
+        </button>
+        {showSource && (
+          <>
+            <textarea
+              value={sourceMaterial}
+              onChange={(e) => saveSourceMaterial(e.target.value.slice(0, MAX_SOURCE_CHARS))}
+              rows={5}
+              placeholder="Paste what you actually have. A call transcript, notes from a client conversation, a paragraph you dictated on the way home. Specifics beat polish here: names of behaviours, numbers somebody quoted, what was actually said in the room."
+              style={{ ...inputStyle, marginBottom: 6, fontSize: 12.5 }}
+            />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: font, fontSize: 10.5, color: C.inkMute, marginBottom: 10, lineHeight: 1.5 }}>
+              <span>
+                {sourceMaterial.length >= MAX_SOURCE_CHARS
+                  ? `At the ${MAX_SOURCE_CHARS.toLocaleString()} character limit. Trim to the part that matters.`
+                  : `${(MAX_SOURCE_CHARS - sourceMaterial.length).toLocaleString()} characters left. Used for the draft only, never the edit pass.`}
+              </span>
+              {sourceMaterial.trim() && (
+                <button type="button" onClick={() => saveSourceMaterial("")} style={{ fontFamily: font, fontSize: 10.5, color: C.inkMute, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                  clear
+                </button>
+              )}
+            </div>
+          </>
+        )}
+        <label
+          style={{
+            display: "flex", alignItems: "flex-start", gap: 9, marginBottom: 10, cursor: "pointer",
+            border: `1px solid ${grounded ? C.line : "transparent"}`, borderRadius: 8,
+            padding: grounded ? "9px 10px" : "0 0 2px", background: grounded ? C.off : "transparent"
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={grounded}
+            onChange={(e) => { groundedTouched.current = true; setGrounded(e.target.checked); }}
+            style={{ marginTop: 2, accentColor: C.ink, cursor: "pointer" }}
+          />
+          <span style={{ fontFamily: font, fontSize: 12, color: C.inkSoft, lineHeight: 1.45 }}>
+            Ground with web search
+            <span style={{ color: C.inkMute }}>
+              {" "}· verifies statistics live, up to 2 searches. Costs several times a plain
+              generation, so leave it off unless the piece leans on external numbers.
+            </span>
+          </span>
+        </label>
+        <button
+          onClick={() => generate(undefined, undefined, undefined, primedItem)}
+          // generate() also bails without a topic and while a revision runs, so the
+          // app's primary button used to look live and do nothing on a fresh load.
+          disabled={busy || !topic.trim()}
+          style={{ ...btn(true), opacity: busy || !topic.trim() ? 0.55 : 1, cursor: busy || !topic.trim() ? "default" : "pointer" }}
+          title={!topic.trim() ? "Type a topic first" : undefined}
+        >
+          {loading
+            ? "Writing & designing…"
+            : `Generate ${format}${grounded ? " · grounded" : ""}`}
+        </button>
+        {staleFormat && !loading && (
+          <div style={{ fontFamily: font, fontSize: 11.5, color: "#B4442E", marginTop: 8, lineHeight: 1.5 }}>
+            This text was written for a different format. Generate again so Claude writes it for {format} · {FORMAT_BRIEF[format]}.
+          </div>
+        )}
+        {primedFromCalendar && !loading && (
+          <div style={{ fontFamily: font, fontSize: 11.5, color: C.inkMute, marginTop: 8, lineHeight: 1.5 }}>
+            Loaded from the calendar and ready. Nothing has been generated yet — press Generate when the brief looks right.
+          </div>
+        )}
+        {error && <div style={{ fontFamily: font, fontSize: 12, color: "#B4442E", marginTop: 10, lineHeight: 1.5 }}>{error}</div>}
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <button type="button" onClick={() => topicRef.current?.focus()} className="w-full py-2 px-3 rounded-lg border border-slate-300 hover:bg-white text-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors">
+            <Plus className="w-3.5 h-3.5 text-[var(--accent-deep)]" />
+            <span>Create New Content</span>
+          </button>
+        </div>
+
             <div style={{ height: 1, background: C.line, margin: "4px 0 16px" }} />
 
         <span style={label}>Cover headline · mark one word *like this* for the gradient</span>
@@ -2338,127 +2227,6 @@ export default function Studio() {
       center={
         <>
         <div className="flex-1 overflow-y-auto flex flex-col items-center px-6 pt-6 pb-2 min-h-0 w-full">
-        {/* Floating Top Navbar when Sidebar is Minimized */}
-        {sidebarCollapsed && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: isMobile ? 8 : 14,
-              width: "100%",
-              maxWidth: previewW,
-              background: "rgba(255, 255, 255, 0.95)",
-              backdropFilter: "blur(14px)",
-              border: `1px solid ${C.line}`,
-              borderRadius: 14,
-              padding: isMobile ? "8px 10px" : "10px 18px",
-              marginBottom: isMobile ? 16 : 24,
-              boxShadow: "0 6px 20px rgba(0, 30, 60, 0.08)",
-              flexShrink: 0,
-              transition: "all 0.28s ease",
-              boxSizing: "border-box",
-              overflow: "hidden"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 12, minWidth: 0, flexShrink: 1 }}>
-              <button
-                type="button"
-                onClick={toggleSidebar}
-                style={{
-                  fontFamily: font,
-                  fontSize: isMobile ? 11.5 : 12.5,
-                  fontWeight: 700,
-                  color: "#ffffff",
-                  background: C.blue,
-                  border: "none",
-                  borderRadius: 8,
-                  padding: isMobile ? "6px 10px" : "7px 14px",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 5,
-                  boxShadow: "0 2px 8px rgba(0, 81, 132, 0.25)",
-                  flexShrink: 0
-                }}
-              >
-                <span>☰</span>
-                <span>{isMobile ? "Controls" : "Open Studio Controls"}</span>
-              </button>
-
-              <span style={{ fontSize: isMobile ? 11 : 13, fontWeight: 700, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {format} · <span style={{ color: PILLARS[pillar] || C.blue }}>{pillar}</span>
-              </span>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 10, flexShrink: 0 }}>
-              {!isMobile && topic && (
-                <span
-                  title={topic}
-                  style={{
-                    fontSize: 12,
-                    color: C.inkMute,
-                    maxWidth: 220,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap"
-                  }}
-                >
-                  &quot;{topic}&quot;
-                </span>
-              )}
-              <button
-                type="button"
-                // Passing primedItem here too: without it a regenerate from this toolbar
-                // never marked the calendar item as drafted, unlike the sidebar twin.
-                onClick={() => generate(undefined, undefined, undefined, primedItem)}
-                disabled={busy || !topic.trim()}
-                title={`Regenerate with Claude · writes for ${format}`}
-                style={{
-                  fontFamily: font,
-                  fontSize: isMobile ? 11 : 12,
-                  fontWeight: 700,
-                  color: "#fff",
-                  background: GRAD,
-                  border: "none",
-                  borderRadius: 8,
-                  padding: isMobile ? "6px 10px" : "7px 16px",
-                  cursor: loading || !topic.trim() ? "default" : "pointer",
-                  opacity: loading || !topic.trim() ? 0.6 : 1,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4
-                }}
-              >
-                <span>⚡</span>
-                <span>{isMobile ? (loading ? "…" : "Regen") : loading ? "Generating…" : "Regenerate"}</span>
-              </button>
-              <a
-                href="/calendar"
-                title="Content Calendar"
-                style={{
-                  fontFamily: font,
-                  fontSize: isMobile ? 11 : 12,
-                  fontWeight: 700,
-                  color: C.blue,
-                  background: C.mist,
-                  border: `1px solid ${C.line}`,
-                  borderRadius: 8,
-                  padding: isMobile ? "6px 9px" : "7px 12px",
-                  textDecoration: "none",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4
-                }}
-              >
-                <span>📅</span>
-                {!isMobile && <span>Calendar</span>}
-              </a>
-            </div>
-          </div>
-        )}
-
         <div style={{ alignSelf: "flex-start", marginBottom: 14, flexShrink: 0, fontFamily: font, fontSize: 12, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: C.inkMute }}>
           {cur.kind === "cover" ? "Cover" : cur.kind === "end" ? "Closing" : cur.kind === "content" ? `Slide ${current} of ${total}` : format} · {baseW}×{baseH}
         </div>
