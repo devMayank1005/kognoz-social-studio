@@ -54,6 +54,12 @@ export interface ElementInspectorProps {
    * appearing to do nothing.
    */
   onRunStyle?: (patch: RunStyle) => boolean;
+  /**
+   * Whether a caret is live in this element. Used only to announce that selecting characters
+   * is possible — before this, the capability was mentioned nowhere until you had already
+   * found it.
+   */
+  caretLive?: boolean;
   font: string;
   ink: string;
   line: string;
@@ -68,6 +74,7 @@ export default function ElementInspector({
   onChange,
   selection,
   onRunStyle,
+  caretLive,
   font,
   ink,
   line,
@@ -238,11 +245,21 @@ export default function ElementInspector({
             </div>
           </div>
 
-          {selection && (
+          {(selection || caretLive) && (
             <div style={{ ...group, marginLeft: "auto" }}>
               <span style={label}>Editing</span>
-              <span style={{ fontFamily: font, fontSize: 12.5, color: ink, padding: "6px 0", whiteSpace: "nowrap" }}>
-                {selection.length} character{selection.length === 1 ? "" : "s"}
+              <span
+                style={{
+                  fontFamily: font,
+                  fontSize: 12.5,
+                  color: selection ? ink : inkMute,
+                  padding: "6px 0",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                {selection
+                  ? `${selection.length} character${selection.length === 1 ? "" : "s"}`
+                  : "Select words to style just those"}
               </span>
             </div>
           )}

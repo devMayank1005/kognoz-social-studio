@@ -114,6 +114,16 @@ export interface CanvasEditorProps {
   /** The element with a caret in it, if any. */
   editingId: string | null;
   onEditingChange: (id: string | null) => void;
+  /**
+   * A template slot to detach and open the moment this editor becomes active.
+   *
+   * It exists because the editor does not render at all while `active` is false, so a
+   * double-click on the slide cannot reach it. Studio resolves the slot itself and arms the
+   * mode; this is the handoff. Without it, on-slide editing is only reachable by somebody
+   * who already knows the "Edit canvas" pill exists.
+   */
+  pendingEditSlot?: SlotHit | null;
+  onPendingEditHandled?: () => void;
 }
 
 export default function CanvasEditor({
@@ -128,7 +138,9 @@ export default function CanvasEditor({
   onCommit,
   onDraggingChange,
   editingId,
-  onEditingChange
+  onEditingChange,
+  pendingEditSlot,
+  onPendingEditHandled
 }: CanvasEditorProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -332,6 +344,15 @@ export default function CanvasEditor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [active, baseH, baseW, editingId, elements, onCommit, onSelect, selectedId]);
+
+  // The handoff from Studio's double-click: detach the slot and open a caret in it, exactly
+  // as onBackgroundDoubleClick does for a double-click that landed on the overlay.
+  useEffect(() => {
+    if (!active || !pendingEditSlot) return;
+    const made = ejectSlot(pendingEditSlot);
+    onEditingChange(made.id);
+    onPendingEditHandled?.();
+  }, [active, pendingEditSlot, ejectSlot, onEditingChange, onPendingEditHandled]);
 
   if (!active) return null;
 

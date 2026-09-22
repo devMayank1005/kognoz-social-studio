@@ -117,6 +117,25 @@ describe("normaliseSpans", () => {
     expect(normaliseSpans(html)).toBe(html);
   });
 
+  it("collapses a span whose only child says exactly the same thing", () => {
+    // Observed in the running app: pressing the same swatch twice on a range the browser
+    // had already wrapped produced this. It renders correctly and grows a layer each time.
+    const html = '<span style="color: #B52879"><span style="color: #B52879">Culture</span></span>';
+    expect(normaliseSpans(html)).toBe('<span style="color: #B52879">Culture</span>');
+  });
+
+  it("collapses a whole stack of identical wrappers, not just one layer", () => {
+    const html =
+      '<span style="color: #fff"><span style="color: #fff"><span style="color: #fff">a</span></span></span>';
+    expect(normaliseSpans(html)).toBe('<span style="color: #fff">a</span>');
+  });
+
+  it("does not collapse an identical-looking wrapper that has other content beside it", () => {
+    // Here the inner span really is a narrower range; merging would restyle the "b".
+    const html = '<span style="color: #fff"><span style="color: #fff">a</span>b</span>';
+    expect(normaliseSpans(html)).toBe(html);
+  });
+
   it("leaves the template's gradient word untouched", () => {
     const html =
       'Culture is what your people <span style="background-image: linear-gradient(90deg,#43AFCD,#7BC67B); background-clip: text; color: transparent">do</span>';

@@ -64,9 +64,10 @@ import { storeGet, storeSet, storePeek } from "@/lib/storeClient";
 import ElementLayer, { type EditCommit } from "@/components/slide/ElementLayer";
 import CanvasEditor from "@/components/studio/CanvasEditor";
 import SlideCanvas from "@/components/studio/SlideCanvas";
-import { NO_ELEMENTS, applyRegenerate, createShape, createText, hiddenSlots, updateElement, type SlideElement, type TextElement } from "@/lib/slideElements";
+import { NO_ELEMENTS, applyRegenerate, createShape, createText, hiddenSlots, hitTest, updateElement, type SlideElement, type TextElement } from "@/lib/slideElements";
 import ElementInspector, { type FontChoice } from "@/components/studio/ElementInspector";
 import { useTextRange } from "@/components/studio/useTextRange";
+import { slotAt, type SlotHit } from "@/lib/templateSlots";
 import { exportFontsUrl, extraFonts, familyOf, fontsUrlFor, slideFonts, weightsFor } from "@/lib/fontRegistry";
 import { coerceStoredDeck, deckChanged, serialiseDeck, type StoredDeck } from "@/lib/deckStore";
 import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG } from "@/lib/exportPipeline";
@@ -189,6 +190,15 @@ export default function Studio() {
   // Styling a range mutates the editable's DOM; the existing blur/Escape commit carries the
   // result into the element, exactly as it already carries typed words.
   const { selection: textSelection, applyRunStyle } = useTextRange(editingElId);
+  /**
+   * A slot a double-click asked to edit while canvas editing was still off.
+   *
+   * Turning the mode on is a state change, so CanvasEditor does not exist yet at the moment
+   * of the double-click. This carries the slot across that render.
+   */
+  const [pendingEditSlot, setPendingEditSlot] = useState<SlotHit | null>(null);
+  const previewWrapRef = useRef<HTMLDivElement>(null);
+
 
   /**
    * Undo for canvas edits, kept separate from the deck snapshot above.
@@ -827,6 +837,56 @@ export default function Studio() {
 
   const previewW = Math.min(idealW, maxAvailW);
   const previewScale = previewW / baseW;
+
+  /**
+   * Double-clicking text on the slide edits it, whether or not canvas editing is armed.
+   *
+   * Before this, the only way in was a pill labelled "Edit canvas" sitting among the shape
+   * tools; people reasonably concluded the generated text could not be edited at all. This
+   * is the gesture everyone already tries.
+   *
+   * WHY A NATIVE LISTENER RATHER THAN onDoubleClick. React's synthetic handler on this exact
+   * node does not fire for a double-click that originates inside the slide subtree — a
+   * native listener on the same node receives it, and calling the React prop directly works,
+   * so the handler and the event are both fine and the delegation is not. I could not find
+   * the cause; this is the version that is verified to work in the browser.
+   *
+   * The mode is still not defaulted on: an armed editor takes pointer events across the whole
+   * slide, which would swallow clicks on the photo slots' file inputs.
+   */
+  useEffect(() => {
+    const node = previewWrapRef.current;
+    if (!node || canvasEdit) return;
+    const onDbl = (e: MouseEvent) => {
+      const r = node.getBoundingClientRect();
+      const bx = (e.clientX - r.left) / previewScale;
+      const by = (e.clientY - r.top) / previewScale;
+
+      // Text detached on an earlier visit. This is the COMMON case, not the edge one:
+      // ejection is saved with the deck, so the second time you open a deck you have edited,
+      // the headline is already an element and the template slot behind it is
+      // `visibility: hidden` — which `slotAt` skips by design.
+      const hit = hitTest(elements[current] ?? NO_ELEMENTS, bx, by);
+      if (hit) {
+        if (hit.kind !== "text") return;
+        setCanvasEdit(true);
+        setSelectedElId(hit.id);
+        setEditingElId(hit.id);
+        return;
+      }
+
+      // Still part of the template: it has to be detached first, and that lives in
+      // CanvasEditor, which does not exist yet at this moment. Hence the handoff.
+      const root = document.getElementById(`exp-${current}`);
+      if (!root) return;
+      const slot = slotAt(root, bx, by);
+      if (!slot) return;
+      setCanvasEdit(true);
+      setPendingEditSlot(slot);
+    };
+    node.addEventListener("dblclick", onDbl);
+    return () => node.removeEventListener("dblclick", onDbl);
+  }, [canvasEdit, current, elements, previewScale]);
 
   type DeckItem = { kind: SlideKind } & Partial<CoercedSlide>;
   const deck: DeckItem[] = fmt.deck
@@ -2305,6 +2365,7 @@ export default function Studio() {
             swatches={[C.ink, C.blue, C.teal, C.cyan, C.green, C.white]}
             selection={textSelection}
             onRunStyle={applyRunStyle}
+            caretLive={!!editingElId}
             font={font}
             ink={C.ink}
             line={C.line}
@@ -2318,7 +2379,7 @@ export default function Studio() {
               />
             ) : (
               <div style={{ display: "flex", alignItems: "center", height: 84, padding: "0 12px", marginBottom: 12, borderRadius: 12, border: `1px dashed ${C.line}`, fontFamily: font, fontSize: 12.5, color: C.inkMute }}>
-                Select something on the slide — or click the headline or body text to unlock it from the template.
+                Double-click the headline or body text to edit it right on the slide.
               </div>
             )}
           </div>
@@ -2329,7 +2390,18 @@ export default function Studio() {
             [...Array(fmt.frames - 1)].map((_, k) => (
               <div key={k} style={{ position: "absolute", top: 0, bottom: 0, left: `${((k + 1) / (fmt.frames as number)) * 100}%`, width: 0, borderLeft: "2px dashed rgba(0,81,132,0.35)", zIndex: 5, pointerEvents: "none" }} />
             ))}
-          <div style={{ transform: `scale(${previewScale})`, transformOrigin: "top left", width: baseW, height: baseH }}>
+          <div
+            // Double-clicking text on the slide edits it, whether or not canvas editing is
+            // already armed. Before this, the only way in was a pill labelled "Edit canvas"
+            // sitting among the shape tools, and people reasonably concluded the text simply
+            // could not be edited.
+            //
+            // The mode is still not defaulted on: an armed editor takes pointer events over
+            // the whole slide, which would swallow clicks on the photo slots' file inputs.
+            // `slotAt` only ever matches [data-slot] text, so this path cannot catch one.
+            ref={previewWrapRef}
+            style={{ transform: `scale(${previewScale})`, transformOrigin: "top left", width: baseW, height: baseH }}
+          >
             <SlideCanvas id="preview-slide" hidden={slotsHiddenFor(current)} width={baseW} height={baseH}>
             <Slide
               brand={brand}
@@ -2378,6 +2450,8 @@ export default function Studio() {
             onDraggingChange={setDraggingElId}
             editingId={editingElId}
             onEditingChange={setEditingElId}
+            pendingEditSlot={pendingEditSlot}
+            onPendingEditHandled={() => setPendingEditSlot(null)}
           />
         </div>
 

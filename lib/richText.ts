@@ -117,10 +117,15 @@ export function sameRunStyle(a: RunStyle, b: RunStyle): boolean {
  * with nothing in them. Both render correctly and both accumulate, so the stored `html` grows
  * every time somebody fiddles.
  *
- * NESTING IS LEFT ALONE on purpose. `<span style="color:red"><span style="font-weight:700">`
- * is not redundant — the inner span is a narrower range than the outer one, and the cascade
- * already resolves it correctly. Flattening it would need a real parse and would risk
- * changing what renders; this pass only removes things that are provably no-ops.
+ * NESTING WITH DIFFERENT STYLES IS LEFT ALONE on purpose.
+ * `<span style="color:red"><span style="font-weight:700">` is not redundant — the inner span
+ * is a narrower range than the outer one, and the cascade already resolves it correctly.
+ * Flattening that would need a real parse and would risk changing what renders.
+ *
+ * A span wrapping nothing but an IDENTICAL span is different: it is provably a no-op, and it
+ * is what the browser produces when you restyle a range you already styled the same way —
+ * `<span style="color:#B52879"><span style="color:#B52879">Culture</span></span>` after
+ * pressing the same swatch twice. Observed in the running app, which is why it is here.
  */
 export function normaliseSpans(html: string): string {
   if (!html) return "";
@@ -131,6 +136,11 @@ export function normaliseSpans(html: string): string {
     out = out
       // An empty span renders nothing at all.
       .replace(/<span\b[^>]*>\s*<\/span>/gi, "")
+      // A span whose only child is a byte-identical span is one span.
+      .replace(
+        /<span([^>]*)>\s*<span\1>([\s\S]*?)<\/span>\s*<\/span>/gi,
+        (_full, attrs: string, inner: string) => `<span${attrs}>${inner}</span>`
+      )
       // Two adjacent spans with byte-identical attributes are one span.
       .replace(
         /<span([^>]*)>([\s\S]*?)<\/span><span\1>([\s\S]*?)<\/span>/gi,

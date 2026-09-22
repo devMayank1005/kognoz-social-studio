@@ -4,7 +4,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
 import CanvasEditor from "./CanvasEditor";
 import ElementInspector from "./ElementInspector";
-import { createText } from "@/lib/slideElements";
+import { createText, type SlideElement } from "@/lib/slideElements";
+import type { SlotHit } from "@/lib/templateSlots";
 
 // The first tests CanvasEditor has ever had, and they cover the one thing per-range styling
 // depends on.
@@ -207,5 +208,82 @@ describe("the styling bar holds up its end of that contract", () => {
 
     expect(onChange).toHaveBeenCalledWith({ color: "#0B1F33" });
     expect(onRunStyle).not.toHaveBeenCalled();
+  });
+});
+
+describe("double-clicking the slide reaches the editor even with the mode off", () => {
+  // The editor renders nothing while `active` is false, so a double-click on the slide
+  // cannot reach it. Studio resolves the slot itself, arms the mode, and hands the slot
+  // across the render that mounts this component. Without that handoff, on-slide editing
+  // was only reachable by somebody who already knew the "Edit canvas" pill existed — which
+  // is exactly how it was reported broken.
+  const SLOT: SlotHit = {
+    slot: "headline",
+    x: 96,
+    y: 400,
+    w: 880,
+    h: 210,
+    html: "Culture is what your people do",
+    text: "Culture is what your people do",
+    fontFamily: "'Fraunces', serif",
+    fontSize: 100,
+    fontWeight: 600,
+    color: "#0B1F33",
+    align: "left",
+    lineHeight: 1.06
+  };
+
+  function props(over: Partial<React.ComponentProps<typeof CanvasEditor>> = {}) {
+    return {
+      active: true,
+      elements: [] as SlideElement[],
+      baseW: 1080,
+      baseH: 1350,
+      previewScale: 0.5,
+      exportRootId: "exp-0",
+      selectedId: null,
+      onSelect: vi.fn(),
+      onCommit: vi.fn(),
+      onDraggingChange: vi.fn(),
+      editingId: null,
+      onEditingChange: vi.fn(),
+      ...over
+    };
+  }
+
+  it("detaches the handed-over slot and opens a caret in it", () => {
+    const onCommit = vi.fn();
+    const onEditingChange = vi.fn();
+    const onPendingEditHandled = vi.fn();
+
+    render(
+      <CanvasEditor
+        {...props({ onCommit, onEditingChange })}
+        pendingEditSlot={SLOT}
+        onPendingEditHandled={onPendingEditHandled}
+      />
+    );
+
+    // Committed as a real element carrying the template's geometry and markup…
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    const made = onCommit.mock.calls[0][0][0];
+    expect(made).toMatchObject({ kind: "text", x: 96, y: 400, from: "headline", fontSize: 100 });
+
+    // …and opened for typing, which is the half that makes it a double-click and not a click.
+    expect(onEditingChange).toHaveBeenCalledWith(made.id);
+    // Cleared, so the slot cannot be ejected a second time on the next render.
+    expect(onPendingEditHandled).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing until the mode is actually armed", () => {
+    const onCommit = vi.fn();
+    render(<CanvasEditor {...props({ active: false, onCommit })} pendingEditSlot={SLOT} />);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when there is no slot to open", () => {
+    const onCommit = vi.fn();
+    render(<CanvasEditor {...props({ onCommit })} pendingEditSlot={null} />);
+    expect(onCommit).not.toHaveBeenCalled();
   });
 });
