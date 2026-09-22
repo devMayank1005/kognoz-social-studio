@@ -67,6 +67,8 @@ import SlideCanvas from "@/components/studio/SlideCanvas";
 import { NO_ELEMENTS, applyRegenerate, createShape, createText, hiddenSlots, hitTest, updateElement, type SlideElement, type TextElement } from "@/lib/slideElements";
 import ElementInspector, { type FontChoice } from "@/components/studio/ElementInspector";
 import { useTextRange } from "@/components/studio/useTextRange";
+import ShapePicker from "@/components/studio/ShapePicker";
+import { STROKE_ONLY } from "@/lib/shapeLibrary";
 import { slotAt, type SlotHit } from "@/lib/templateSlots";
 import { exportFontsUrl, extraFonts, familyOf, fontsUrlFor, slideFonts, weightsFor } from "@/lib/fontRegistry";
 import { coerceStoredDeck, deckChanged, serialiseDeck, type StoredDeck } from "@/lib/deckStore";
@@ -2318,24 +2320,42 @@ export default function Studio() {
           >
             {canvasEdit ? "✓ Editing canvas" : "Edit canvas"}
           </div>
-          {canvasEdit &&
-            (
-              [
-                { key: "text", label: "+ Text", make: (els: readonly SlideElement[]) => createText(els, { ...centred(560, 130), fontFamily: displayFont, fontSize: 64, color: C.ink }) },
-                { key: "rect", label: "Rectangle", make: (els: readonly SlideElement[]) => createShape(els, "rect", { ...centred(300, 300), fill: accent }) },
-                { key: "round", label: "Rounded", make: (els: readonly SlideElement[]) => createShape(els, "rect", { ...centred(300, 300), fill: accent, radius: 36 }) },
-                { key: "ellipse", label: "Ellipse", make: (els: readonly SlideElement[]) => createShape(els, "ellipse", { ...centred(300, 300), fill: accent }) },
-                { key: "line", label: "Line", make: (els: readonly SlideElement[]) => createShape(els, "line", { ...centred(420, 6), stroke: C.ink, strokeWidth: 6 }) }
-              ] as const
-            ).map((b) => (
-              <div
-                key={b.key}
-                onClick={() => addElement(b.make)}
-                style={{ cursor: "pointer", userSelect: "none", fontFamily: font, fontSize: 12.5, fontWeight: 700, padding: "7px 12px", borderRadius: 999, border: `1px solid ${C.line}`, background: C.white, color: C.ink }}
-              >
-                {b.label}
-              </div>
-            ))}
+          {canvasEdit && (
+            <div
+              onClick={() =>
+                addElement((els: readonly SlideElement[]) =>
+                  createText(els, { ...centred(560, 130), fontFamily: displayFont, fontSize: 64, color: C.ink })
+                )
+              }
+              style={{ cursor: "pointer", userSelect: "none", fontFamily: font, fontSize: 12.5, fontWeight: 700, padding: "7px 12px", borderRadius: 999, border: `1px solid ${C.line}`, background: C.white, color: C.ink }}
+            >
+              + Text
+            </div>
+          )}
+          {/* One button for all 34 shapes, where there used to be four buttons for three.
+              Text keeps its own: it is not a shape, and it is the thing people reach for. */}
+          {canvasEdit && (
+            <ShapePicker
+              font={font}
+              ink={C.ink}
+              line={C.line}
+              inkMute={C.inkMute}
+              accent={accent}
+              onPick={(spec) =>
+                addElement((els: readonly SlideElement[]) =>
+                  createShape(els, spec.kind, {
+                    ...centred(spec.size.w, spec.size.h),
+                    // An inked shape carries the accent on its stroke; a filled one on its
+                    // fill. Passing `fill` to a line would paint a rectangle behind it.
+                    ...(STROKE_ONLY.has(spec.kind)
+                      ? { stroke: accent, strokeWidth: 6 }
+                      : { fill: accent }),
+                    ...(spec.defaults ?? {})
+                  })
+                )
+              }
+            />
+          )}
           {canvasEdit && (
             <span style={{ fontFamily: font, fontSize: 12, color: C.inkMute }}>
               Drag to move · Shift locks aspect and snaps rotation · Delete removes

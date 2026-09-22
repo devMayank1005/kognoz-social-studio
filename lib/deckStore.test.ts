@@ -8,6 +8,7 @@ import {
   DECK_PAYLOAD_LIMIT,
   type StoredDeck
 } from "./deckStore";
+import { SHAPE_KINDS, SHAPE_LIBRARY } from "./shapeLibrary";
 
 const deck = (patch: Partial<StoredDeck> = {}): StoredDeck => ({
   version: 1,
@@ -38,6 +39,27 @@ describe("coerceElement", () => {
   it("clamps opacity into range rather than trusting the file", () => {
     expect(coerceElement({ id: "a", kind: "rect", w: 5, h: 5, opacity: 9 })).toMatchObject({ opacity: 1 });
     expect(coerceElement({ id: "a", kind: "rect", w: 5, h: 5, opacity: -3 })).toMatchObject({ opacity: 0 });
+  });
+
+  it("keeps EVERY shape kind the library can draw", () => {
+    // The guard for the nastiest failure this feature can have. This validator used to hold
+    // its own hardcoded list of kinds, and a kind missing from it is not an error — the
+    // element is dropped. So a shape would draw correctly, save correctly, and then be gone
+    // on the next load, with nothing anywhere saying why. Nobody notices until they reload.
+    for (const kind of SHAPE_KINDS) {
+      const el = coerceElement({ id: "el_1", kind, x: 10, y: 20, w: 100, h: 80 });
+      expect(el, `a stored ${kind} was dropped on load`).not.toBeNull();
+      expect(el).toMatchObject({ kind });
+    }
+  });
+
+  it("keeps every kind the picker can insert", () => {
+    // The picker inserts by entry, and two entries can share a kind (Rectangle and Rounded).
+    // This is the same guard from the other end: what the toolbar offers must be storable.
+    for (const spec of SHAPE_LIBRARY) {
+      const el = coerceElement({ id: "el_1", kind: spec.kind, w: spec.size.w, h: spec.size.h });
+      expect(el, `${spec.label} inserts a ${spec.kind} that does not survive a reload`).not.toBeNull();
+    }
   });
 
   it("drops what cannot be recovered by guessing", () => {

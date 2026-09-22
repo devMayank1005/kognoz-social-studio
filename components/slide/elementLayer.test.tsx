@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import ElementLayer from "./ElementLayer";
 import { createShape, createText, type SlideElement } from "@/lib/slideElements";
+import { SHAPE_KINDS, pathFor } from "@/lib/shapeLibrary";
 
 // What this file is for.
 //
@@ -135,5 +136,41 @@ describe("text layout", () => {
 
   it("never clips, so text typed past the edge is not swallowed", () => {
     expect(render([aText])).not.toContain("overflow:hidden");
+  });
+});
+
+describe("every shape in the library survives the export rules", () => {
+  // The library is one generic <path> branch, so these hold for all of them at once — but
+  // the export failures they guard are silent. A missing xmlns does not throw: the SVG
+  // parses and draws nothing, so the shape is simply absent from the downloaded file.
+  for (const kind of SHAPE_KINDS) {
+    it(`${kind} renders exportable markup`, () => {
+      const out = html([createShape([], kind, { id: "el_1", w: 240, h: 180, stroke: "#000", strokeWidth: 4 })]);
+      expect(out).not.toContain("className");
+      expect(out).not.toContain("class=");
+      expect(out).toContain('xmlns="http://www.w3.org/2000/svg"');
+      expect(out.length).toBeGreaterThan(0);
+    });
+  }
+
+  it("draws the three original kinds with their own elements, not the generic path", () => {
+    // Saved decks are full of these. Routing them through the path branch would change
+    // their stroke geometry, which is a visual change nobody asked for.
+    const out = html([
+      createShape([], "rect", { id: "a", radius: 12 }),
+      createShape([], "ellipse", { id: "b" }),
+      createShape([], "line", { id: "c" })
+    ]);
+    expect(out).toContain("<rect");
+    expect(out).toContain("<ellipse");
+    expect(out).toContain("<line");
+    expect(out).not.toContain("<path");
+  });
+
+  it("insets the path by the stroke, so a border is not half-eaten by the box edge", () => {
+    const out = html([createShape([], "triangle", { id: "a", w: 200, h: 100, stroke: "#000", strokeWidth: 10 })]);
+    // The path is built for the box minus the stroke, then shifted back by half of it.
+    expect(out).toContain(pathFor("triangle", 190, 90));
+    expect(out).toContain("translate(5,5)");
   });
 });

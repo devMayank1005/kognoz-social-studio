@@ -11,6 +11,7 @@
 
 import type { CoercedSlide } from "./coerce";
 import { sanitiseHtml, sortByZ, type ShapeKind, type SlideElement, type TemplateSlot } from "./slideElements";
+import { isShapeKind } from "./shapeLibrary";
 
 export interface StoredDeck {
   version: 1;
@@ -38,7 +39,10 @@ export const DECK_PAYLOAD_LIMIT = 4_000_000;
 const str = (v: unknown, max = 100_000): string => (typeof v === "string" ? v.slice(0, max) : "");
 const num = (v: unknown, fallback = 0): number => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
 
-const SHAPES: ShapeKind[] = ["rect", "ellipse", "line"];
+// The list of drawable kinds lives in lib/shapeLibrary.ts and is asked for, never copied.
+// A kind missing from here is NOT an error — the element below is dropped — so a shape
+// would draw, save, and then quietly disappear on the next load. That bug is only visible
+// after a reload, which is exactly the kind that ships.
 const SLOTS: TemplateSlot[] = ["eyebrow", "headline", "body", "cta", "kicker", "number"];
 
 /**
@@ -84,7 +88,7 @@ export function coerceElement(raw: unknown): SlideElement | null {
     };
   }
 
-  if (!SHAPES.includes(o.kind as ShapeKind)) return null;
+  if (!isShapeKind(o.kind)) return null;
   return {
     ...base,
     kind: o.kind as ShapeKind,

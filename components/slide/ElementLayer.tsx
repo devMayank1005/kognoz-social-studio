@@ -34,6 +34,7 @@ import {
   type TextElement
 } from "@/lib/slideElements";
 import { normaliseSpans } from "@/lib/richText";
+import { pathFor } from "@/lib/shapeLibrary";
 
 export interface EditCommit {
   id: string;
@@ -250,6 +251,24 @@ function ShapeView({ el }: { el: ShapeElement }) {
             stroke={el.stroke}
             strokeWidth={sw}
             strokeLinecap="round"
+            opacity={el.opacity}
+          />
+        )}
+        {/* Everything the shape library adds — one branch, not thirty-four.
+            The geometry lives in lib/shapeLibrary.ts as a function of the box, which is
+            what keeps this file small; it is inside the export boundary, where it must stay
+            className-free and every <svg> must carry xmlns or the export draws nothing.
+            The path is built for a box inset by the stroke and then shifted back, exactly
+            as the rect and ellipse branches above do, so a stroke straddles the outline
+            instead of losing its outer half to the edge of the box. */}
+        {el.kind !== "rect" && el.kind !== "ellipse" && el.kind !== "line" && (
+          <path
+            d={pathFor(el.kind, Math.max(0, el.w - sw), Math.max(0, boxH - sw))}
+            transform={inset ? `translate(${inset},${inset})` : undefined}
+            fill={el.fill}
+            stroke={el.stroke}
+            strokeWidth={sw}
+            strokeLinejoin="round"
             opacity={el.opacity}
           />
         )}

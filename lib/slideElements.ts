@@ -20,6 +20,7 @@
 //                   to hide the original, and what a regenerate throws away.
 
 import { C } from "./tokens";
+import { STROKE_ONLY, type ShapeKind } from "./shapeLibrary";
 
 /** The template text slots an element can be ejected from. */
 export type TemplateSlot = "eyebrow" | "headline" | "body" | "cta" | "kicker" | "number";
@@ -68,7 +69,10 @@ export interface TextElement extends BaseElement {
   html?: string;
 }
 
-export type ShapeKind = "rect" | "ellipse" | "line";
+// Declared by lib/shapeLibrary.ts, which owns both the list and the geometry. Re-exported
+// here because this module is what the rest of the app imports element types from, and two
+// declarations of the same union is how a shape ends up drawable but not storable.
+export type { ShapeKind };
 
 export interface ShapeElement extends BaseElement {
   kind: ShapeKind;
@@ -173,20 +177,23 @@ export function createShape(
   kind: ShapeKind,
   patch: Partial<ShapeElement> = {}
 ): ShapeElement {
+  // Stroke-only shapes are inked rather than filled, and they are the reason this is not a
+  // single set of defaults. A line still needs a box with height: it is what the grips
+  // attach to and what the renderer sizes its <svg> from — a zero-height box renders
+  // nothing and cannot be grabbed.
+  const inked = STROKE_ONLY.has(kind);
   return {
     id: nextElementId(elements),
     kind,
     x: 120,
     y: 120,
-    w: kind === "line" ? 360 : 280,
-    // A line still needs a box with height: it is what the grips attach to and what the
-    // renderer sizes its <svg> from. A zero-height box renders nothing and cannot be grabbed.
-    h: kind === "line" ? 4 : 280,
+    w: inked ? 360 : 280,
+    h: inked ? 4 : 280,
     rot: 0,
     z: nextZ(elements),
-    fill: kind === "line" ? "transparent" : C.blue,
-    stroke: kind === "line" ? "#212121" : "transparent",
-    strokeWidth: kind === "line" ? 4 : 0,
+    fill: inked ? "transparent" : C.blue,
+    stroke: inked ? "#212121" : "transparent",
+    strokeWidth: inked ? 4 : 0,
     radius: 0,
     opacity: 1,
     ...patch
