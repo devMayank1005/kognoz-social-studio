@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, cleanup } from "@testing-library/react";
+import { render, cleanup, fireEvent } from "@testing-library/react";
 import CanvasEditor from "./CanvasEditor";
 import ElementInspector from "./ElementInspector";
 import { createText, type SlideElement } from "@/lib/slideElements";
@@ -104,6 +104,21 @@ describe("the caret survives the styling bar", () => {
   });
 });
 
+/**
+ * Choose the brand colour through the real control.
+ *
+ * The bar used to render a bare swatch row, so these tests could click `[title="#0B1F33"]`
+ * directly. Colour now goes through ColorPicker, where the brand row lives inside the
+ * popover — so the trigger has to be opened first. What is being pinned is unchanged: which
+ * of onRunStyle / onChange the bar calls.
+ */
+function pickBrandColour(container: HTMLElement) {
+  // fireEvent rather than .click(): opening the popover is a state update, and it has to
+  // flush before the swatch inside it can be found.
+  fireEvent.click(container.querySelector('[aria-label="Text colour"]') as HTMLElement);
+  fireEvent.click(document.querySelector('[aria-label="#0B1F33"]') as HTMLElement);
+}
+
 describe("the styling bar holds up its end of that contract", () => {
   it("marks itself data-keep-caret", () => {
     // If this attribute is ever dropped, the exemption above silently stops applying and
@@ -111,8 +126,9 @@ describe("the styling bar holds up its end of that contract", () => {
     const { container } = render(
       <ElementInspector
         element={EL}
-        fonts={[{ label: "Fraunces", value: "'Fraunces', serif", weights: [400, 600] }]}
+        fonts={[{ family: "Fraunces", axis: "wght@400;600", uses: ["kognoz-slide"] }]}
         swatches={["#0B1F33"]}
+        gradient="linear-gradient(90deg, #43AFCD, #7BC67B)"
         onChange={vi.fn()}
         font="sans-serif"
         ink="#0B1F33"
@@ -127,8 +143,9 @@ describe("the styling bar holds up its end of that contract", () => {
     const { getByText } = render(
       <ElementInspector
         element={EL}
-        fonts={[{ label: "Fraunces", value: "'Fraunces', serif", weights: [400, 600] }]}
+        fonts={[{ family: "Fraunces", axis: "wght@400;600", uses: ["kognoz-slide"] }]}
         swatches={["#0B1F33"]}
+        gradient="linear-gradient(90deg, #43AFCD, #7BC67B)"
         onChange={vi.fn()}
         selection={{ length: 7, style: { color: "#43AFCD" } }}
         onRunStyle={vi.fn(() => true)}
@@ -147,8 +164,9 @@ describe("the styling bar holds up its end of that contract", () => {
     const { container } = render(
       <ElementInspector
         element={EL}
-        fonts={[{ label: "Fraunces", value: "'Fraunces', serif", weights: [400, 600] }]}
+        fonts={[{ family: "Fraunces", axis: "wght@400;600", uses: ["kognoz-slide"] }]}
         swatches={["#0B1F33"]}
+        gradient="linear-gradient(90deg, #43AFCD, #7BC67B)"
         onChange={onChange}
         selection={{ length: 4, style: { color: "#43AFCD" } }}
         onRunStyle={onRunStyle}
@@ -158,8 +176,7 @@ describe("the styling bar holds up its end of that contract", () => {
         inkMute="#7B8C99"
       />
     );
-    const swatch = container.querySelector('[title="#0B1F33"]') as HTMLElement;
-    swatch.click();
+    pickBrandColour(container);
 
     expect(onRunStyle).toHaveBeenCalledWith({ color: "#0B1F33" });
     expect(onChange).not.toHaveBeenCalled();
@@ -172,8 +189,9 @@ describe("the styling bar holds up its end of that contract", () => {
     const { container } = render(
       <ElementInspector
         element={EL}
-        fonts={[{ label: "Fraunces", value: "'Fraunces', serif", weights: [400, 600] }]}
+        fonts={[{ family: "Fraunces", axis: "wght@400;600", uses: ["kognoz-slide"] }]}
         swatches={["#0B1F33"]}
+        gradient="linear-gradient(90deg, #43AFCD, #7BC67B)"
         onChange={onChange}
         selection={{ length: 4, style: { color: "#43AFCD" } }}
         onRunStyle={vi.fn(() => false)}
@@ -183,7 +201,7 @@ describe("the styling bar holds up its end of that contract", () => {
         inkMute="#7B8C99"
       />
     );
-    (container.querySelector('[title="#0B1F33"]') as HTMLElement).click();
+    pickBrandColour(container);
     expect(onChange).toHaveBeenCalledWith({ color: "#0B1F33" });
   });
 
@@ -193,8 +211,9 @@ describe("the styling bar holds up its end of that contract", () => {
     const { container } = render(
       <ElementInspector
         element={EL}
-        fonts={[{ label: "Fraunces", value: "'Fraunces', serif", weights: [400, 600] }]}
+        fonts={[{ family: "Fraunces", axis: "wght@400;600", uses: ["kognoz-slide"] }]}
         swatches={["#0B1F33"]}
+        gradient="linear-gradient(90deg, #43AFCD, #7BC67B)"
         onChange={onChange}
         selection={null}
         onRunStyle={onRunStyle}
@@ -204,7 +223,7 @@ describe("the styling bar holds up its end of that contract", () => {
         inkMute="#7B8C99"
       />
     );
-    (container.querySelector('[title="#0B1F33"]') as HTMLElement).click();
+    pickBrandColour(container);
 
     expect(onChange).toHaveBeenCalledWith({ color: "#0B1F33" });
     expect(onRunStyle).not.toHaveBeenCalled();

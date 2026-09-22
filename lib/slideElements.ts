@@ -21,6 +21,8 @@
 
 import { C } from "./tokens";
 import { STROKE_ONLY, type ShapeKind } from "./shapeLibrary";
+import type { Gradient } from "./gradient";
+import { familiesInHtml, hasItalicInHtml, weightsInHtml } from "./richText";
 
 /** The template text slots an element can be ejected from. */
 export type TemplateSlot = "eyebrow" | "headline" | "body" | "cta" | "kicker" | "number";
@@ -54,6 +56,31 @@ export interface TextElement extends BaseElement {
   color: string;
   align: "left" | "center" | "right";
   lineHeight: number;
+  /**
+   * The rest of the typography, applied to the WHOLE box.
+   *
+   * All optional, so every deck written before them loads unchanged. They exist because the
+   * toolbar's rule is "selection if there is one, element otherwise" — without a field here,
+   * applying letter-spacing with nothing selected would patch a property the renderer never
+   * reads and lib/deckStore.ts drops on the next load: a silent no-op that also pollutes
+   * stored decks.
+   *
+   * `verticalAlign` and the gradient properties are deliberately NOT here. A superscript or
+   * a clipped gradient applied to an entire text box is not a meaningful operation; those
+   * stay per-range.
+   */
+  fontStyle?: "normal" | "italic";
+  backgroundColor?: string;
+  /** Space-separated: "underline", "line-through", "overline", or "none". */
+  textDecorationLine?: string;
+  textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
+  /** Base pixels. Negative is legitimate for tight display type. */
+  letterSpacing?: number;
+  opacity?: number;
+  textShadow?: string;
+  /** `-webkit-text-stroke`, e.g. "2px #000". */
+  webkitTextStroke?: string;
+  direction?: "ltr" | "rtl";
   from?: TemplateSlot;
   /**
    * The element's rendered markup, when it came from the template.
@@ -82,6 +109,22 @@ export interface ShapeElement extends BaseElement {
   /** Corner radius, `rect` only. Ignored by the other kinds. */
   radius: number;
   opacity: number;
+  /**
+   * A gradient fill, which takes precedence over `fill` when it is drawable.
+   *
+   * STRUCTURED, NOT A CSS STRING, and not for tidiness. SVG `fill` is a presentation
+   * attribute: it takes a paint, and `linear-gradient(…)` is not one — the shape would
+   * simply not draw. It needs `<defs><linearGradient>` plus `fill="url(#id)"`, which is a
+   * structure at the point of rendering anyway.
+   *
+   * The storage layer is the other half of the reason. lib/deckStore.ts truncates colour
+   * strings at 64 characters silently, and a four-stop gradient is 75 — it would be cut into
+   * CSS that is invalid but still looks plausible, and only on the NEXT load. An object with
+   * clamped numbers and a capped stop count cannot fail that way.
+   *
+   * `fill` is left in place as the fallback, so no saved deck changes meaning.
+   */
+  fillGradient?: Gradient;
 }
 
 export type SlideElement = TextElement | ShapeElement;
@@ -557,9 +600,110 @@ export function removeElement(elements: readonly SlideElement[], id: string): Sl
   return renumber(sortByZ(elements.filter((el) => el.id !== id)));
 }
 
-/** Families in use, so the exporter embeds those faces and only those. */
+/**
+ * Families in use, so the exporter embeds those faces and only those.
+ *
+ * Reads BOTH the element's own family and every family named inside its markup. A font
+ * applied to a selection lives in a `<span style="font-family: …">` and nowhere else; an
+ * exporter that only asked the element would embed nothing for it, and that word would come
+ * back from the rasteriser in a system fallback while looking perfect on screen.
+ */
 export function fontFamiliesUsed(elements: readonly SlideElement[]): string[] {
   const out = new Set<string>();
-  for (const el of elements) if (el.kind === "text" && el.fontFamily) out.add(el.fontFamily);
+  for (const el of elements) {
+    if (el.kind !== "text") continue;
+    if (el.fontFamily) out.add(el.fontFamily);
+    for (const family of familiesInHtml(el.html ?? "")) out.add(family);
+  }
   return [...out].sort();
+}
+
+/**
+ * Every colour this deck already uses, newest-looking first is not the point — order is
+ * stable so the swatch row does not reshuffle under the cursor.
+ *
+ * Offered in the picker as "Document", the same idea as the brand palette but taken from the
+ * work rather than the brand: matching a colour you used three slides ago should not mean
+ * hunting for its hex.
+ *
+ * READS THE MARKUP AS WELL AS THE FIELDS, and that is the whole lesson from the font bug
+ * this file already carries: a colour applied to a RANGE lives only inside `el.html`, so a
+ * scan of the element fields alone reports a colour nobody used and misses the ones they did.
+ * `fontFamiliesUsed` above learnt this the hard way.
+ */
+export function colorsUsed(elements: readonly SlideElement[]): string[] {
+  const out = new Set<string>();
+  const add = (value: string | undefined) => {
+    const c = (value ?? "").trim();
+    // `transparent` is the absence of a colour, not one somebody chose.
+    if (c && c !== "transparent" && c !== "none") out.add(c);
+  };
+
+  for (const el of elements) {
+    if (el.kind === "text") {
+      add(el.color);
+      add(el.backgroundColor);
+      for (const m of (el.html ?? "").matchAll(/(?:^|[;"\s])(?:background-)?color\s*:\s*([^;"]+)/gi)) {
+        add(m[1]);
+      }
+    } else {
+      add(el.fill);
+      add(el.stroke);
+      for (const stop of el.fillGradient?.stops ?? []) add(stop.color);
+    }
+  }
+  return [...out].sort();
+}
+
+/** The faces a deck actually uses, per family, so an export embeds those and no others. */
+export interface UsedFaces {
+  weights: number[];
+  italics: number[];
+}
+
+/**
+ * Which faces of which families a deck really needs.
+ *
+ * A family's full axis can be eighteen faces; a deck using one of them should not base64
+ * the other seventeen into every slide's SVG.
+ *
+ * DELIBERATELY OVER-INCLUSIVE WITHIN AN ELEMENT. A span can set `font-weight: 700` without
+ * naming a family, inheriting whichever family is around it, so the weight cannot be tied to
+ * one family with certainty. Every weight seen in an element is therefore attributed to every
+ * family in that element. That embeds the occasional face nobody uses; the opposite error —
+ * missing a face — means the word silently falls back to a system font in the downloaded
+ * file, which is the failure this whole area exists to prevent.
+ */
+export function fontFacesUsed(elements: readonly SlideElement[]): Map<string, UsedFaces> {
+  const out = new Map<string, UsedFaces>();
+  for (const el of elements) {
+    if (el.kind !== "text") continue;
+    const html = el.html ?? "";
+    const families = new Set<string>();
+    if (el.fontFamily) families.add(el.fontFamily);
+    for (const f of familiesInHtml(html)) families.add(f);
+    if (!families.size) continue;
+
+    const weights = new Set<number>();
+    if (Number.isFinite(el.fontWeight)) weights.add(el.fontWeight);
+    for (const w of weightsInHtml(html)) weights.add(w);
+    if (!weights.size) weights.add(400);
+
+    const italic = el.fontStyle === "italic" || hasItalicInHtml(html);
+
+    for (const family of families) {
+      const entry = out.get(family) ?? { weights: [], italics: [] };
+      const w = new Set(entry.weights);
+      const i = new Set(entry.italics);
+      for (const value of weights) {
+        w.add(value);
+        if (italic) i.add(value);
+      }
+      out.set(family, {
+        weights: [...w].sort((a, b) => a - b),
+        italics: [...i].sort((a, b) => a - b)
+      });
+    }
+  }
+  return out;
 }

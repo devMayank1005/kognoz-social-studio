@@ -21,9 +21,36 @@
  * stray quote: the styling survives on screen and disappears from the export.
  */
 
-/** The properties the styling bar can set on a run. Deliberately the same four it already
- *  sets on a whole element, so there is one mental model rather than two. */
-export const RUN_KEYS = ["fontFamily", "fontSize", "fontWeight", "color"] as const;
+/**
+ * Everything the typography toolbar can set on a run.
+ *
+ * ORDER IS LOAD-BEARING. `runStyleToCss` walks this array, so it is what makes the same
+ * patch serialise to a byte-identical string every time — and `normaliseSpans` merges
+ * adjacent spans by comparing those strings. Reorder this and the merge quietly stops
+ * working, leaving a span per edit.
+ *
+ * Block properties are deliberately absent: `text-align`, `line-height` and paragraph
+ * spacing cannot mean anything on a range of characters, so they stay on the element.
+ */
+export const RUN_KEYS = [
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "fontStyle",
+  "color",
+  "backgroundColor",
+  "textDecorationLine",
+  "textTransform",
+  "letterSpacing",
+  "opacity",
+  "verticalAlign",
+  "textShadow",
+  "webkitTextStroke",
+  "backgroundImage",
+  "webkitBackgroundClip",
+  "backgroundClip",
+  "direction"
+] as const;
 
 export type RunKey = (typeof RUN_KEYS)[number];
 
@@ -32,15 +59,67 @@ export interface RunStyle {
   /** Base pixels, like every other size in this app. */
   fontSize?: number;
   fontWeight?: number;
+  /** `italic` only when the family actually serves one — see lib/fontCatalogue.ts hasFace. */
+  fontStyle?: "normal" | "italic";
   color?: string;
+  /** The highlight behind the characters. */
+  backgroundColor?: string;
+  /** Space-separated: "underline", "line-through", "overline", or "none". */
+  textDecorationLine?: string;
+  textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
+  /** Base pixels. Negative is legitimate for tight display type. */
+  letterSpacing?: number;
+  opacity?: number;
+  /** Superscript and subscript. The caller shrinks fontSize to match. */
+  verticalAlign?: "baseline" | "super" | "sub";
+  textShadow?: string;
+  /** `-webkit-text-stroke`, e.g. "2px #000". Outline type. */
+  webkitTextStroke?: string;
+  /**
+   * Gradient text is these two plus `color: transparent`, and the ORDER MATTERS: `background`
+   * is a shorthand that resets `background-clip`, which is why this uses the longhand
+   * `background-image`. components/Slide.tsx documents the same trap for the template's
+   * gradient word, and two tests pin the declaration order there.
+   */
+  backgroundImage?: string;
+  /**
+   * BOTH spellings of the clip are written, and that is not belt-and-braces.
+   *
+   * components/Slide.tsx:28 sets `WebkitBackgroundClip` and `backgroundClip` together for
+   * the template's own gradient word. A range gradient that emitted only the unprefixed one
+   * was a spelling short of the template it sits next to — fine in Chrome, a solid
+   * transparent block anywhere the prefix is still required, including whatever renders the
+   * exported SVG.
+   */
+  webkitBackgroundClip?: string;
+  backgroundClip?: string;
+  direction?: "ltr" | "rtl";
 }
 
 const CSS_NAME: Record<RunKey, string> = {
   fontFamily: "font-family",
   fontSize: "font-size",
   fontWeight: "font-weight",
-  color: "color"
+  fontStyle: "font-style",
+  color: "color",
+  backgroundColor: "background-color",
+  textDecorationLine: "text-decoration-line",
+  textTransform: "text-transform",
+  letterSpacing: "letter-spacing",
+  opacity: "opacity",
+  verticalAlign: "vertical-align",
+  textShadow: "text-shadow",
+  // Both spellings: the unprefixed one is not supported everywhere the prefixed one is, and
+  // the export rasterises through the browser's own engine, so whatever it honours wins.
+  webkitTextStroke: "-webkit-text-stroke",
+  backgroundImage: "background-image",
+  webkitBackgroundClip: "-webkit-background-clip",
+  backgroundClip: "background-clip",
+  direction: "direction"
 };
+
+/** Keys whose numeric value is in pixels. Everything else is written verbatim. */
+const PX_KEYS = new Set<RunKey>(["fontSize", "letterSpacing"]);
 
 /** `"` → `'`, so the value can never close the attribute that holds it. See the header. */
 function quoteSafe(value: string): string {
@@ -57,7 +136,7 @@ export function runStyleToCss(style: RunStyle): string {
   for (const key of RUN_KEYS) {
     const value = style[key];
     if (value === undefined || value === null || value === "") continue;
-    const css = key === "fontSize" ? `${value}px` : String(value);
+    const css = PX_KEYS.has(key) ? `${value}px` : String(value);
     parts.push(`${CSS_NAME[key]}: ${quoteSafe(css)}`);
   }
   return parts.join("; ");
@@ -66,9 +145,9 @@ export function runStyleToCss(style: RunStyle): string {
 /**
  * The inverse, for showing the bar what the selection already carries.
  *
- * Only the four keys are read; anything else the template put on the span — a gradient's
- * `background-image` and `background-clip`, say — is ignored here rather than dropped,
- * because this function never writes the markup back.
+ * Only the keys in RUN_KEYS are read. Anything else a span carries is ignored rather than
+ * dropped — this function never writes the markup back, so what it cannot name is simply
+ * not its business.
  */
 export function parseRunStyle(css: string): RunStyle {
   const out: RunStyle = {};
@@ -79,14 +158,29 @@ export function parseRunStyle(css: string): RunStyle {
     const prop = decl.slice(0, idx).trim().toLowerCase();
     const raw = decl.slice(idx + 1).trim();
     if (!raw) continue;
-    if (prop === "font-family") out.fontFamily = raw;
-    else if (prop === "color") out.color = raw;
-    else if (prop === "font-size") {
+    const num = () => {
       const n = Number.parseFloat(raw);
-      if (Number.isFinite(n)) out.fontSize = n;
-    } else if (prop === "font-weight") {
-      const n = Number.parseFloat(raw);
-      if (Number.isFinite(n)) out.fontWeight = n;
+      return Number.isFinite(n) ? n : undefined;
+    };
+    switch (prop) {
+      case "font-family": out.fontFamily = raw; break;
+      case "color": out.color = raw; break;
+      case "background-color": out.backgroundColor = raw; break;
+      case "text-decoration-line": out.textDecorationLine = raw; break;
+      case "text-transform": out.textTransform = raw as RunStyle["textTransform"]; break;
+      case "font-style": out.fontStyle = raw as RunStyle["fontStyle"]; break;
+      case "vertical-align": out.verticalAlign = raw as RunStyle["verticalAlign"]; break;
+      case "text-shadow": out.textShadow = raw; break;
+      case "-webkit-text-stroke": out.webkitTextStroke = raw; break;
+      case "background-image": out.backgroundImage = raw; break;
+      case "-webkit-background-clip": out.webkitBackgroundClip = raw; break;
+      case "background-clip": out.backgroundClip = raw; break;
+      case "direction": out.direction = raw as RunStyle["direction"]; break;
+      case "font-size": { const n = num(); if (n !== undefined) out.fontSize = n; break; }
+      case "font-weight": { const n = num(); if (n !== undefined) out.fontWeight = n; break; }
+      case "letter-spacing": { const n = num(); if (n !== undefined) out.letterSpacing = n; break; }
+      case "opacity": { const n = num(); if (n !== undefined) out.opacity = n; break; }
+      default: break;
     }
   }
   return out;
@@ -187,4 +281,103 @@ export function firstFamily(stack: string): string {
 export function sameFamily(a: string | undefined, b: string | undefined): boolean {
   if (!a || !b) return false;
   return firstFamily(a) === firstFamily(b);
+}
+
+/* ------------------------------------------------------------------------------------ *
+ * Toggles
+ *
+ * A toolbar button has to know what the selection already carries so it can turn a thing
+ * OFF as well as on. These are the small amount of reasoning that takes.
+ * ------------------------------------------------------------------------------------ */
+
+export type Decoration = "underline" | "line-through" | "overline";
+
+export function hasDecoration(style: RunStyle, which: Decoration): boolean {
+  return (style.textDecorationLine ?? "").split(/\s+/).includes(which);
+}
+
+/** Add or remove one decoration, leaving the others alone. */
+export function toggleDecoration(style: RunStyle, which: Decoration): string {
+  const parts = new Set((style.textDecorationLine ?? "").split(/\s+/).filter((p) => p && p !== "none"));
+  if (parts.has(which)) parts.delete(which);
+  else parts.add(which);
+  // "none", not "": an empty value would be dropped by runStyleToCss, which means the span
+  // keeps whatever it inherits and the button appears not to work.
+  return parts.size ? [...parts].join(" ") : "none";
+}
+
+/** Gradient text is four declarations that only work together. */
+export function gradientRun(css: string): RunStyle {
+  return {
+    backgroundImage: css,
+    webkitBackgroundClip: "text",
+    backgroundClip: "text",
+    color: "transparent"
+  };
+}
+
+export function isGradient(style: RunStyle): boolean {
+  return Boolean(style.backgroundImage && style.backgroundImage !== "none");
+}
+
+/** Undo a gradient without also clearing whatever colour was under it. */
+export function clearGradient(color: string): RunStyle {
+  return {
+    backgroundImage: "none",
+    webkitBackgroundClip: "border-box",
+    backgroundClip: "border-box",
+    color
+  };
+}
+
+/**
+ * Super and subscript, which are a baseline shift AND a size change.
+ *
+ * Without shrinking the text a "superscript" just sits high and looks like a mistake;
+ * 0.65 is the ratio browsers use for <sup> themselves.
+ */
+export function scriptRun(kind: "super" | "sub" | "baseline", baseSize: number): RunStyle {
+  if (kind === "baseline") return { verticalAlign: "baseline", fontSize: baseSize };
+  return { verticalAlign: kind, fontSize: Math.max(1, Math.round(baseSize * 0.65)) };
+}
+
+/**
+ * Every font family named inside a run's markup.
+ *
+ * WHY THIS EXISTS. An element carries one `fontFamily`, but per-range styling puts others
+ * inside its `html` as `<span style="font-family: …">`. The exporter embeds fonts by asking
+ * which families a deck uses, and if it only asks the ELEMENT it will miss every family
+ * applied to a selection — the word renders correctly on screen and falls back to a system
+ * face in the downloaded file. That is precisely the class of bug lib/fontRegistry.ts was
+ * written to make impossible, and per-range styling reintroduced it through the back door.
+ *
+ * Regex rather than a parse because this runs in the export path and in node tests alike,
+ * and the markup it reads is our own output, already narrowed by sanitiseHtml.
+ */
+export function familiesInHtml(html: string): string[] {
+  if (!html) return [];
+  const out = new Set<string>();
+  // Stops at `;` or the attribute's own `"` — NOT at `'`, because a font stack legitimately
+  // contains single quotes (`'Playfair Display', serif`) and excluding them matches nothing.
+  for (const m of html.matchAll(/font-family\s*:\s*([^;"]+)/gi)) {
+    const value = m[1].trim();
+    if (value) out.add(value);
+  }
+  return [...out];
+}
+
+/** Every font weight named inside a run's markup. Companion to familiesInHtml. */
+export function weightsInHtml(html: string): number[] {
+  if (!html) return [];
+  const out = new Set<number>();
+  for (const m of html.matchAll(/font-weight\s*:\s*([^;"]+)/gi)) {
+    const n = Number.parseFloat(m[1]);
+    if (Number.isFinite(n) && n >= 1 && n <= 1000) out.add(n);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/** Whether any run inside this markup is italic. */
+export function hasItalicInHtml(html: string): boolean {
+  return /font-style\s*:\s*italic/i.test(html ?? "");
 }

@@ -1,3 +1,4 @@
+import { FONT_CATALOGUE } from "./fontCatalogue";
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,7 +7,11 @@ import { FONTS, fontsUrlFor, slideFonts, slideFontsUrl, browserFontsUrl, chromeF
   exportFontsUrl,
   familyOf,
   weightsFor,
-  slideFontsUrl as slideFontsUrlAgain
+  slideFontsUrl as slideFontsUrlAgain,
+  facesFor,
+  categoryFor,
+  pickerFonts,
+  EXTRA_FONTS
 } from "./fontRegistry";
 import { BRAND_IDS } from "./brands";
 
@@ -190,5 +195,156 @@ describe("familyOf and weightsFor", () => {
 
   it("falls back rather than throwing on a family it has never heard of", () => {
     expect(weightsFor("Comic Papyrus")).toEqual([400, 700]);
+  });
+});
+
+describe("the catalogue joins as opt-in extras", () => {
+  it("never duplicates a family the registry already declares", () => {
+    // Two entries for one family would emit it twice in a single css2 URL, which the API
+    // rejects — and the brand's own axis must win, because that is what the export embeds.
+    const declared = new Set(EXTRA_FONTS.map((f) => f.family));
+    for (const f of FONTS) {
+      if (f.uses.includes("extra")) continue;
+      expect(declared.has(f.family), `${f.family} is both a brand font and an extra`).toBe(false);
+    }
+    const all = FONTS.map((f) => f.family);
+    expect(new Set(all).size, "a family appears twice in FONTS").toBe(all.length);
+  });
+
+  it("brings the catalogue with it", () => {
+    expect(EXTRA_FONTS.length).toBeGreaterThan(90);
+    expect(EXTRA_FONTS.every((f) => f.uses.includes("extra"))).toBe(true);
+  });
+
+  it("leaves Open Sans, Poppins and Fraunces on the registry's own axis", () => {
+    // All three are in the catalogue at MORE weights than the brands embed. Taking the
+    // catalogue's axis would put weights in the picker the export never fetches.
+    for (const family of ["Open Sans", "Poppins", "Fraunces"]) {
+      const entry = FONTS.find((f) => f.family === family)!;
+      expect(entry.uses.includes("extra"), family).toBe(false);
+    }
+    expect(facesFor("Open Sans").weights).toEqual([400, 600, 700, 800]);
+  });
+});
+
+describe("facesFor", () => {
+  it("reads a plain weight axis", () => {
+    expect(facesFor("Poppins")).toEqual({ weights: [400, 500, 600, 700, 800], italics: [] });
+  });
+
+  it("does not mistake Fraunces's optical-size axis for an italic flag", () => {
+    // `opsz,wght@9..144,400;...` — the first component is a size RANGE, not a 0/1 flag.
+    // Reading it as one would report every weight as italic and none as upright.
+    const f = facesFor("Fraunces");
+    expect(f.weights).toEqual([400, 500, 600, 700]);
+    expect(f.italics).toEqual([]);
+  });
+
+  it("splits uprights from italics on an ital axis", () => {
+    const inter = facesFor("Inter");
+    expect(inter.weights).toContain(400);
+    expect(inter.weights).toContain(900);
+    expect(inter.italics).toContain(400);
+  });
+
+  it("reports no italic for a family that has none", () => {
+    expect(facesFor("Bebas Neue").italics).toEqual([]);
+  });
+
+  it("falls back rather than returning nothing for an unknown family", () => {
+    expect(facesFor("Nonesuch").weights.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the no-synthesised-weight guarantee, for every family the picker offers", () => {
+  // This is the invariant the whole file exists for, now checked across ~110 families
+  // rather than asserted in a comment: a weight the toolbar offers must be a weight the
+  // stylesheet actually requests.
+  for (const brand of ["kognoz", "konverz"] as const) {
+    it(`${brand}`, () => {
+      for (const entry of pickerFonts(brand)) {
+        const { weights, italics } = facesFor(entry.family);
+        const url = fontsUrlFor([entry]);
+        for (const w of weights) {
+          expect(url, `${entry.family} offers upright ${w} but does not request it`).toContain(String(w));
+        }
+        if (italics.length) {
+          expect(url, `${entry.family} offers italics but has no ital axis`).toContain("ital,wght@");
+        }
+      }
+    });
+  }
+});
+
+describe("categoryFor", () => {
+  it("groups catalogue families by their real category", () => {
+    expect(categoryFor("Playfair Display")).toBe("serif");
+    expect(categoryFor("Roboto Mono")).toBe("mono");
+    expect(categoryFor("Caveat")).toBe("handwriting");
+  });
+
+  it("does not throw on a family it has never heard of", () => {
+    expect(categoryFor("Nonesuch")).toBe("sans");
+  });
+});
+
+describe("pickerFonts", () => {
+  it("offers the brand's own faces plus the catalogue, and no other brand's", () => {
+    const kognoz = pickerFonts("kognoz").map((f) => f.family);
+    expect(kognoz).toContain("Fraunces");
+    expect(kognoz).not.toContain("Poppins");
+    expect(kognoz.length).toBeGreaterThan(FONT_CATALOGUE.length - 5);
+  });
+
+  it("never offers a chrome-only face", () => {
+    for (const brand of ["kognoz", "konverz"] as const) {
+      const names = pickerFonts(brand).map((f) => f.family);
+      expect(names).not.toContain("Plus Jakarta Sans");
+    }
+  });
+});
+
+describe("the export embeds only the faces a deck uses", () => {
+  const stack = "'Montserrat', sans-serif";
+
+  it("narrows an extra family to the weights it is used at", () => {
+    // Montserrat serves 18 faces. A deck using one should not base64 the other seventeen
+    // into every slide's SVG.
+    const wide = exportFontsUrl("kognoz", [stack]);
+    const narrow = exportFontsUrl("kognoz", [stack], new Map([[stack, { weights: [700], italics: [] }]]));
+    expect(wide).toContain("Montserrat:");
+    expect(narrow).toContain("family=Montserrat:wght@700");
+    expect(narrow.length).toBeLessThan(wide.length);
+  });
+
+  it("keeps an italic when one is used", () => {
+    const url = exportFontsUrl("kognoz", [stack], new Map([[stack, { weights: [400], italics: [400] }]]));
+    expect(url).toContain("family=Montserrat:ital,wght@0,400;1,400");
+  });
+
+  it("refuses to ask for a face the family does not serve", () => {
+    // css2 answers 400 for an unknown weight, and a 400 means the export embeds NOTHING —
+    // every face falls back. Asking only for real faces is what keeps that impossible.
+    const url = exportFontsUrl("kognoz", ["'Bebas Neue', sans-serif"], new Map([
+      ["'Bebas Neue', sans-serif", { weights: [700, 900], italics: [400] }]
+    ]));
+    // Scoped to this family's own segment: the brand's Fraunces and Open Sans legitimately
+    // carry 700, so asserting against the whole URL would pass for the wrong reason.
+    const segment = url.split("&").find((part) => part.includes("Bebas+Neue")) ?? "";
+    expect(segment).toBe("family=Bebas+Neue:wght@400");
+  });
+
+  it("leaves the brand's own faces at their full axis", () => {
+    // Slide.tsx hardcodes weights in ~200 places that cannot be scanned, so narrowing a
+    // brand font would drop a face the templates actually render.
+    const url = exportFontsUrl("kognoz", [stack], new Map([[stack, { weights: [400], italics: [] }]]));
+    expect(url).toContain("family=Open+Sans:wght@400;600;700;800");
+    expect(url).toContain("family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700");
+  });
+
+  it("is still byte-identical for a deck that uses no extras", () => {
+    for (const brand of ["kognoz", "konverz"] as const) {
+      expect(exportFontsUrl(brand, [], new Map())).toBe(slideFontsUrl(brand));
+    }
   });
 });

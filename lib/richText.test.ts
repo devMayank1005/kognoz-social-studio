@@ -1,5 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { runStyleToCss, parseRunStyle, mergeRunStyle, sameRunStyle, normaliseSpans, rgbToHex, firstFamily, sameFamily } from "./richText";
+import {
+  runStyleToCss,
+  parseRunStyle,
+  mergeRunStyle,
+  sameRunStyle,
+  normaliseSpans,
+  rgbToHex,
+  firstFamily,
+  sameFamily,
+  hasDecoration,
+  toggleDecoration,
+  gradientRun,
+  isGradient,
+  clearGradient,
+  scriptRun,
+  RUN_KEYS,
+  familiesInHtml
+} from "./richText";
 import { sanitiseHtml } from "./slideElements";
 
 describe("runStyleToCss", () => {
@@ -57,10 +74,19 @@ describe("parseRunStyle", () => {
     expect(parseRunStyle(runStyleToCss(style))).toEqual(style);
   });
 
-  it("ignores declarations it does not own rather than choking on them", () => {
-    // A gradient word from the template carries background-image and background-clip.
+  it("now reads the template's gradient word, because the toolbar owns gradients too", () => {
+    // This used to assert the opposite. It changed on purpose: once "apply a gradient to
+    // this selection" is a control, the three declarations that make one are ours to read.
     const css = "background-image: linear-gradient(90deg, #43AFCD, #7BC67B); background-clip: text; color: transparent";
-    expect(parseRunStyle(css)).toEqual({ color: "transparent" });
+    expect(parseRunStyle(css)).toEqual({
+      backgroundImage: "linear-gradient(90deg, #43AFCD, #7BC67B)",
+      backgroundClip: "text",
+      color: "transparent"
+    });
+  });
+
+  it("still ignores declarations outside RUN_KEYS rather than choking", () => {
+    expect(parseRunStyle("position: absolute; float: left; color: #fff")).toEqual({ color: "#fff" });
   });
 
   it("returns nothing for junk", () => {
@@ -184,5 +210,175 @@ describe("firstFamily / sameFamily", () => {
   it("says no rather than yes when either side is missing", () => {
     expect(sameFamily(undefined, "'Fraunces', serif")).toBe(false);
     expect(sameFamily("", "")).toBe(false);
+  });
+});
+
+describe("the extended vocabulary", () => {
+  it("writes px only where px is meant", () => {
+    expect(runStyleToCss({ fontSize: 40, letterSpacing: -2, opacity: 0.5, fontWeight: 700 })).toBe(
+      "font-size: 40px; font-weight: 700; letter-spacing: -2px; opacity: 0.5"
+    );
+  });
+
+  it("round-trips every key it can write", () => {
+    const full = {
+      fontFamily: "'Inter', sans-serif",
+      fontSize: 32,
+      fontWeight: 600,
+      fontStyle: "italic" as const,
+      color: "#0B1F33",
+      backgroundColor: "#FFE9A8",
+      textDecorationLine: "underline line-through",
+      textTransform: "uppercase" as const,
+      letterSpacing: 1.5,
+      opacity: 0.8,
+      verticalAlign: "super" as const,
+      textShadow: "0 2px 6px rgba(0,0,0,0.35)",
+      webkitTextStroke: "2px #000",
+      backgroundImage: "linear-gradient(90deg, #A, #B)",
+      backgroundClip: "text",
+      direction: "rtl" as const
+    };
+    expect(parseRunStyle(runStyleToCss(full))).toEqual(full);
+  });
+
+  it("survives the real sanitiser with every property intact", () => {
+    // The whole vocabulary has to fit inside a double-quoted style attribute, and
+    // sanitiseHtml rejects any style containing url(, <, > or a double quote.
+    const css = runStyleToCss({
+      fontFamily: "'Playfair Display', serif",
+      textShadow: "0 2px 6px rgba(0,0,0,0.35)",
+      webkitTextStroke: "2px #000",
+      backgroundImage: "linear-gradient(90deg, #43AFCD 0%, #7BC67B 100%)",
+      backgroundClip: "text"
+    });
+    const clean = sanitiseHtml(`<span style="${css}">x</span>`);
+    expect(clean).toContain("Playfair Display");
+    expect(clean).toContain("-webkit-text-stroke");
+    expect(clean).toContain("linear-gradient");
+    expect(clean).toContain("background-clip: text");
+  });
+
+  it("keeps RUN_KEYS and CSS names in step", () => {
+    // Every key must serialise to something; a key with no CSS name would vanish silently.
+    for (const key of RUN_KEYS) {
+      const css = runStyleToCss({ [key]: key === "fontSize" || key === "letterSpacing" || key === "opacity" || key === "fontWeight" ? 1 : "x" });
+      expect(css.length, key).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("decoration toggles", () => {
+  it("adds one without disturbing the others", () => {
+    expect(toggleDecoration({ textDecorationLine: "underline" }, "line-through")).toBe("underline line-through");
+  });
+
+  it("removes one without disturbing the others", () => {
+    expect(toggleDecoration({ textDecorationLine: "underline line-through" }, "underline")).toBe("line-through");
+  });
+
+  it("says 'none' rather than empty when the last one goes", () => {
+    // An empty value is skipped by runStyleToCss, so the span would keep inheriting the
+    // decoration and the button would look broken.
+    expect(toggleDecoration({ textDecorationLine: "underline" }, "underline")).toBe("none");
+  });
+
+  it("starts from nothing", () => {
+    expect(toggleDecoration({}, "overline")).toBe("overline");
+    expect(toggleDecoration({ textDecorationLine: "none" }, "overline")).toBe("overline");
+  });
+
+  it("reads back what it wrote", () => {
+    const style = { textDecorationLine: toggleDecoration({}, "underline") };
+    expect(hasDecoration(style, "underline")).toBe(true);
+    expect(hasDecoration(style, "overline")).toBe(false);
+    expect(hasDecoration({}, "underline")).toBe(false);
+  });
+});
+
+describe("gradient text", () => {
+  it("is the four declarations that only work together", () => {
+    const g = gradientRun("linear-gradient(90deg, #A, #B)");
+    expect(g).toEqual({
+      backgroundImage: "linear-gradient(90deg, #A, #B)",
+      webkitBackgroundClip: "text",
+      backgroundClip: "text",
+      color: "transparent"
+    });
+    expect(isGradient(g)).toBe(true);
+  });
+
+  it("writes BOTH spellings of the clip, as the template does", () => {
+    // components/Slide.tsx:28 sets WebkitBackgroundClip and backgroundClip together for the
+    // template's own gradient word. A range gradient that emitted only the unprefixed one
+    // rendered as a solid transparent block anywhere the prefix is still needed — including
+    // whatever rasterises the exported SVG. This was shipped, and this test is why it is not
+    // shipped again.
+    const css = runStyleToCss(gradientRun("linear-gradient(90deg, #A, #B)"));
+    expect(css).toContain("-webkit-background-clip: text");
+    expect(css).toContain("; background-clip: text");
+  });
+
+  it("puts background-image before either clip, which is what makes it work", () => {
+    // `background` shorthand resets background-clip; this uses the longhand, and the order
+    // in RUN_KEYS is what guarantees it. Matching on the leading space distinguishes
+    // `background-clip` from the tail of `-webkit-background-clip`, which contains it.
+    const css = runStyleToCss(gradientRun("linear-gradient(90deg, #A, #B)"));
+    expect(css.indexOf("background-image")).toBeLessThan(css.indexOf("-webkit-background-clip"));
+    expect(css.indexOf("-webkit-background-clip")).toBeLessThan(css.indexOf("; background-clip"));
+  });
+
+  it("clears back to a real colour rather than leaving transparent text", () => {
+    const off = clearGradient("#0B1F33");
+    expect(isGradient(off)).toBe(false);
+    expect(off.color).toBe("#0B1F33");
+    // Both spellings have to be reset too, or the clip survives the colour that replaced it.
+    expect(off.webkitBackgroundClip).toBe("border-box");
+    expect(off.backgroundClip).toBe("border-box");
+  });
+});
+
+describe("super and subscript", () => {
+  it("shifts the baseline AND shrinks, which is what makes it read as a script", () => {
+    expect(scriptRun("super", 40)).toEqual({ verticalAlign: "super", fontSize: 26 });
+    expect(scriptRun("sub", 40)).toEqual({ verticalAlign: "sub", fontSize: 26 });
+  });
+
+  it("restores the base size on the way back", () => {
+    expect(scriptRun("baseline", 40)).toEqual({ verticalAlign: "baseline", fontSize: 40 });
+  });
+
+  it("never shrinks to zero", () => {
+    expect(scriptRun("super", 1).fontSize).toBeGreaterThan(0);
+  });
+});
+
+describe("familiesInHtml", () => {
+  // The guard for a silent export failure: a font applied to a SELECTION lives only inside
+  // the element's markup, so an exporter that asks the element alone embeds nothing for it
+  // and that word comes back from the rasteriser in a system fallback.
+  it("finds a family applied to a range", () => {
+    expect(familiesInHtml(`<span style="font-family: 'Playfair Display', serif">Culture</span> is`)).toEqual([
+      "'Playfair Display', serif"
+    ]);
+  });
+
+  it("finds several, de-duplicated", () => {
+    const html =
+      `<span style="font-family: 'Lora', serif">a</span>` +
+      `<span style="font-family: 'Inter', sans-serif">b</span>` +
+      `<span style="font-family: 'Lora', serif">c</span>`;
+    expect(familiesInHtml(html).sort()).toEqual(["'Inter', sans-serif", "'Lora', serif"]);
+  });
+
+  it("is not confused by other declarations around it", () => {
+    const html = `<span style="font-weight: 700; font-family: 'Inter', sans-serif; color: #fff">x</span>`;
+    expect(familiesInHtml(html)).toEqual(["'Inter', sans-serif"]);
+  });
+
+  it("returns nothing for markup that names no family", () => {
+    expect(familiesInHtml(`<span style="color: #fff">x</span>`)).toEqual([]);
+    expect(familiesInHtml("plain text")).toEqual([]);
+    expect(familiesInHtml("")).toEqual([]);
   });
 });

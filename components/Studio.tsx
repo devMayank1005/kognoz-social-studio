@@ -64,13 +64,26 @@ import { storeGet, storeSet, storePeek } from "@/lib/storeClient";
 import ElementLayer, { type EditCommit } from "@/components/slide/ElementLayer";
 import CanvasEditor from "@/components/studio/CanvasEditor";
 import SlideCanvas from "@/components/studio/SlideCanvas";
-import { NO_ELEMENTS, applyRegenerate, createShape, createText, hiddenSlots, hitTest, updateElement, type SlideElement, type TextElement } from "@/lib/slideElements";
+import {
+  NO_ELEMENTS,
+  applyRegenerate,
+  createShape,
+  createText,
+  fontFacesUsed,
+  fontFamiliesUsed,
+  hiddenSlots,
+  hitTest,
+  updateElement,
+  type SlideElement,
+  type TextElement,
+  colorsUsed
+} from "@/lib/slideElements";
 import ElementInspector, { type FontChoice } from "@/components/studio/ElementInspector";
 import { useTextRange } from "@/components/studio/useTextRange";
 import ShapePicker from "@/components/studio/ShapePicker";
 import { STROKE_ONLY } from "@/lib/shapeLibrary";
 import { slotAt, type SlotHit } from "@/lib/templateSlots";
-import { exportFontsUrl, extraFonts, familyOf, fontsUrlFor, slideFonts, weightsFor } from "@/lib/fontRegistry";
+import { exportFontsUrl, extraFonts, familyOf, fontsUrlFor, slideFonts, weightsFor, pickerFonts } from "@/lib/fontRegistry";
 import { coerceStoredDeck, deckChanged, serialiseDeck, type StoredDeck } from "@/lib/deckStore";
 import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG } from "@/lib/exportPipeline";
 import { SocialPreview, type PreviewPage } from "@/components/SocialPreview";
@@ -319,24 +332,26 @@ export default function Studio() {
    * rasteriser cannot fetch anything, so a family outside this list renders on screen and
    * falls back to a system face in the downloaded PNG.
    */
-  const elementFonts: FontChoice[] = useMemo(
-    () =>
-      [...slideFonts(brand.id), ...extraFonts()].map((f) => ({
-        label: f.family,
-        value: `'${f.family}', sans-serif`,
-        weights: weightsFor(f.family)
-      })),
-    [brand.id]
-  );
+  /**
+   * Every family the picker may offer: this brand's slide faces, then the catalogue.
+   *
+   * The catalogue families are `extra`, so none of them enters an export until a deck
+   * actually uses one — see lib/fontRegistry.ts exportFontsUrl.
+   */
+  const elementFonts = useMemo(() => pickerFonts(brand.id), [brand.id]);
 
-  /** Every family the canvas uses, across the whole deck. */
-  const canvasFamilies = useMemo(() => {
-    const out = new Set<string>();
-    for (const list of Object.values(elements)) {
-      for (const el of list) if (el.kind === "text" && el.fontFamily) out.add(el.fontFamily);
-    }
-    return [...out].sort();
-  }, [elements]);
+  /**
+   * Every family the canvas uses, across the whole deck.
+   *
+   * Delegated to fontFamiliesUsed rather than reimplemented here: this used to scan only
+   * `el.fontFamily`, which misses every family applied to a SELECTION — those live in the
+   * element's markup as `<span style="font-family: …">`. The export embeds what this
+   * returns, so anything it misses comes back from the rasteriser as a system fallback.
+   */
+  const canvasFamilies = useMemo(
+    () => fontFamiliesUsed(Object.values(elements).flat()),
+    [elements]
+  );
 
   /**
    * The stylesheet the exporters embed.
@@ -345,9 +360,37 @@ export default function Studio() {
    * point that face is added — otherwise it renders on screen and silently falls back to a
    * system font in the downloaded file, because the rasteriser cannot fetch anything.
    */
+  /** Which faces of those families are actually used, so an extra embeds one weight not eighteen. */
+  const canvasFaces = useMemo(() => fontFacesUsed(Object.values(elements).flat()), [elements]);
+
+  /**
+   * Colours already on this deck, offered in the picker as "In this deck".
+   *
+   * Derived, never stored — the deck already knows its own colours, and a second copy would
+   * be one more thing to keep in step. Reads the span markup as well as the element fields,
+   * because a colour applied to a range lives only in `el.html`.
+   */
+  const canvasColors = useMemo(() => colorsUsed(Object.values(elements).flat()), [elements]);
+
+  /**
+   * The brand swatch row.
+   *
+   * Named off `brand.C` rather than written as hexes here: lib/designTokens.test.ts fails the
+   * build on a brand hex outside lib/tokens.ts, and naming the slots means both brands get
+   * the same row without this file knowing either one's values.
+   */
+  /** The deck's saved palette. Travels with the work, unlike the recent-colours list. */
+  const [palette, setPalette] = useState<string[]>([]);
+
+  const brandSwatches = useMemo(
+    () => [C.ink, C.blue, C.teal, C.cyan, C.green, C.inkSoft, C.off, C.white],
+    [C]
+  );
+
   const exportFontsHref = useMemo(
-    () => (canvasFamilies.length ? exportFontsUrl(brand.id, canvasFamilies) : brand.googleFontsUrl),
-    [brand.id, brand.googleFontsUrl, canvasFamilies]
+    () =>
+      canvasFamilies.length ? exportFontsUrl(brand.id, canvasFamilies, canvasFaces) : brand.googleFontsUrl,
+    [brand.id, brand.googleFontsUrl, canvasFamilies, canvasFaces]
   );
 
   // Opt-in families are not in the page's stylesheet, so fetch one the first time it is
@@ -542,6 +585,7 @@ export default function Studio() {
         setScales(restored.scales);
         setImgOn(restored.imgOn);
         setElements(restored.elements);
+        setPalette(restored.palette ?? []);
         elementsRef.current = restored.elements;
         elementHistory.current = { past: [], future: [] };
         lastSavedDeck.current = restored;
@@ -1005,6 +1049,7 @@ export default function Studio() {
         scales,
         imgOn,
         elements,
+        ...(palette.length ? { palette } : {}),
         updatedAt: new Date().toISOString()
       };
       if (!deckChanged(lastSavedDeck.current, payload)) return;
@@ -2382,10 +2427,14 @@ export default function Studio() {
               <ElementInspector
             element={selectedEl}
             fonts={elementFonts}
-            swatches={[C.ink, C.blue, C.teal, C.cyan, C.green, C.white]}
+            swatches={brandSwatches}
+            documentColors={canvasColors}
+            palette={palette}
+            onPaletteChange={setPalette}
             selection={textSelection}
             onRunStyle={applyRunStyle}
             caretLive={!!editingElId}
+            gradient={GRAD}
             font={font}
             ink={C.ink}
             line={C.line}

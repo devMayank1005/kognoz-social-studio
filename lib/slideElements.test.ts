@@ -33,7 +33,10 @@ import {
   boundsOf,
   type SlideElement,
   type TextElement,
-  type Handle
+  type Handle,
+  fontFacesUsed,
+  colorsUsed,
+  type ShapeElement
 } from "./slideElements";
 
 const text = (patch: Partial<TextElement> = {}): TextElement => ({
@@ -281,6 +284,19 @@ describe("collection helpers", () => {
     expect(out.map((e) => [e.id, e.z])).toEqual([["el_1", 1], ["el_3", 2]]);
   });
 
+  it("also lists a family applied to a RANGE, which lives only in the markup", () => {
+    // Without this the export embeds nothing for that font and the word silently falls back
+    // to a system face in the downloaded file while looking correct on screen.
+    const els = [
+      text({
+        id: "el_1",
+        fontFamily: "Poppins",
+        html: `<span style="font-family: 'Playfair Display', serif">Culture</span> is what`
+      })
+    ];
+    expect(fontFamiliesUsed(els)).toEqual(["'Playfair Display', serif", "Poppins"]);
+  });
+
   it("lists the font families in use, so the exporter embeds those and only those", () => {
     const els = [text({ id: "el_1", fontFamily: "Poppins" }), text({ id: "el_2", fontFamily: "Poppins" }), createShape([], "rect", { id: "el_3" })];
     expect(fontFamiliesUsed(els)).toEqual(["Poppins"]);
@@ -442,5 +458,130 @@ describe("resizeElement", () => {
     expect(out.w).toBeCloseTo(300, 5);
     expect(out.h).toBe(100);
     expect(out).not.toHaveProperty("fontSize");
+  });
+});
+
+describe("fontFacesUsed", () => {
+  it("reports the weight an element is set at", () => {
+    const faces = fontFacesUsed([text({ id: "a", fontFamily: "Montserrat", fontWeight: 700 })]);
+    expect(faces.get("Montserrat")).toEqual({ weights: [700], italics: [] });
+  });
+
+  it("reads weights out of the markup as well as the element", () => {
+    const faces = fontFacesUsed([
+      text({
+        id: "a",
+        fontFamily: "Montserrat",
+        fontWeight: 400,
+        html: `plain <span style="font-weight: 800">bold</span>`
+      })
+    ]);
+    expect(faces.get("Montserrat")).toEqual({ weights: [400, 800], italics: [] });
+  });
+
+  it("notices an italic, wherever it was set", () => {
+    const fromElement = fontFacesUsed([
+      text({ id: "a", fontFamily: "Lora", fontWeight: 400, fontStyle: "italic" })
+    ]);
+    expect(fromElement.get("Lora")?.italics).toEqual([400]);
+
+    const fromMarkup = fontFacesUsed([
+      text({ id: "b", fontFamily: "Lora", fontWeight: 400, html: `<span style="font-style: italic">x</span>` })
+    ]);
+    expect(fromMarkup.get("Lora")?.italics).toEqual([400]);
+  });
+
+  it("attributes a weight to every family in the element, on purpose", () => {
+    // A span can set font-weight without naming a family, inheriting whatever is around it,
+    // so the weight cannot be tied to one family with certainty. Over-including embeds a
+    // face nobody uses; under-including means a word silently falls back in the export.
+    const faces = fontFacesUsed([
+      text({
+        id: "a",
+        fontFamily: "Montserrat",
+        fontWeight: 400,
+        html: `<span style="font-family: 'Lora', serif">a</span><span style="font-weight: 700">b</span>`
+      })
+    ]);
+    expect(faces.get("Montserrat")?.weights).toEqual([400, 700]);
+    expect(faces.get("'Lora', serif")?.weights).toEqual([400, 700]);
+  });
+
+  it("merges across elements and slides", () => {
+    const faces = fontFacesUsed([
+      text({ id: "a", fontFamily: "Inter", fontWeight: 400 }),
+      text({ id: "b", fontFamily: "Inter", fontWeight: 900 })
+    ]);
+    expect(faces.get("Inter")?.weights).toEqual([400, 900]);
+  });
+
+  it("ignores shapes and elements with no family", () => {
+    expect(fontFacesUsed([createShape([], "rect", { id: "a" })]).size).toBe(0);
+  });
+});
+
+describe("colorsUsed", () => {
+  // The picker offers these as "Document" colours. The important half is that it reads the
+  // MARKUP as well as the element fields: a colour applied to a range lives only inside
+  // `el.html`, and scanning the fields alone is exactly the mistake fontFamiliesUsed made —
+  // it reported a family nobody used and missed the ones they did.
+  const text = (patch: Partial<TextElement>) => createText([], { id: "el_1", ...patch });
+  const shape = (patch: Partial<ShapeElement>) => createShape([], "rect", { id: "el_2", ...patch });
+
+  it("finds the element's own colour and highlight", () => {
+    expect(colorsUsed([text({ color: "#111111", backgroundColor: "#eeeeee" })])).toEqual([
+      "#111111",
+      "#eeeeee"
+    ]);
+  });
+
+  it("finds a colour that only exists inside a styled range", () => {
+    const el = text({ color: "#111111", html: 'a <span style="color: #ff0000">b</span> c' });
+    expect(colorsUsed([el])).toContain("#ff0000");
+  });
+
+  it("finds a highlight that only exists inside a styled range", () => {
+    const el = text({ color: "#111111", html: '<span style="background-color: #ffe9a8">b</span>' });
+    expect(colorsUsed([el])).toContain("#ffe9a8");
+  });
+
+  it("reads a range colour with alpha, not just plain hex", () => {
+    const el = text({ color: "#111111", html: '<span style="color: rgba(1, 2, 3, 0.5)">b</span>' });
+    expect(colorsUsed([el])).toContain("rgba(1, 2, 3, 0.5)");
+  });
+
+  it("finds a shape's fill, stroke and every gradient stop", () => {
+    const el = shape({
+      fill: "#aaaaaa",
+      stroke: "#bbbbbb",
+      fillGradient: {
+        type: "linear",
+        angle: 90,
+        stops: [
+          { color: "#cccccc", at: 0 },
+          { color: "#dddddd", at: 100 }
+        ]
+      }
+    });
+    expect(colorsUsed([el])).toEqual(["#aaaaaa", "#bbbbbb", "#cccccc", "#dddddd"]);
+  });
+
+  it("does not offer `transparent` as a colour somebody chose", () => {
+    expect(colorsUsed([shape({ fill: "transparent", stroke: "transparent" })])).toEqual([]);
+  });
+
+  it("lists each colour once, however many places use it", () => {
+    const a = text({ id: "el_1", color: "#111111" });
+    const b = text({ id: "el_3", color: "#111111" });
+    expect(colorsUsed([a, b])).toEqual(["#111111"]);
+  });
+
+  it("is stable, so the swatch row does not reshuffle under the cursor", () => {
+    const els = [text({ color: "#222222" }), shape({ fill: "#111111" })];
+    expect(colorsUsed(els)).toEqual(colorsUsed([...els].reverse()));
+  });
+
+  it("copes with an element that has no markup at all", () => {
+    expect(() => colorsUsed([text({ color: "#111111", html: undefined })])).not.toThrow();
   });
 });

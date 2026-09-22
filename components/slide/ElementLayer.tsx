@@ -35,6 +35,8 @@ import {
 } from "@/lib/slideElements";
 import { normaliseSpans } from "@/lib/richText";
 import { pathFor } from "@/lib/shapeLibrary";
+import { isDrawableGradient, svgGradientCoords } from "@/lib/gradient";
+import { parseColor, toHex } from "@/lib/color";
 
 export interface EditCommit {
   id: string;
@@ -90,7 +92,19 @@ function textStyle(el: TextElement, editing: boolean): React.CSSProperties {
     lineHeight: el.lineHeight,
     // Newlines the person typed are content, not whitespace to collapse.
     whiteSpace: "pre-wrap",
-    overflowWrap: "break-word"
+    overflowWrap: "break-word",
+    // The optional half of the typography. Each one is omitted rather than defaulted, so a
+    // box that never set it emits no declaration and its markup is unchanged — which is what
+    // keeps every pre-existing deck byte-identical through the exporter.
+    fontStyle: el.fontStyle,
+    backgroundColor: el.backgroundColor,
+    textDecorationLine: el.textDecorationLine,
+    textTransform: el.textTransform,
+    letterSpacing: el.letterSpacing,
+    opacity: el.opacity,
+    textShadow: el.textShadow,
+    WebkitTextStroke: el.webkitTextStroke,
+    direction: el.direction
   };
 }
 
@@ -189,12 +203,45 @@ function TextView({
   );
 }
 
+/**
+ * A colour as the attributes an SVG paint actually takes.
+ *
+ * SVG wants the colour and its opacity as two separate attributes. Browsers do accept
+ * `fill="rgba(…)"`, but this markup is serialised, re-parsed as XML and rasterised by
+ * lib/exportPipeline.ts, and "the browser accepts it" is the assumption that produced the
+ * synthesised-font bug — so a translucent colour is split rather than trusted.
+ *
+ * Anything already opaque, and `transparent` itself, is passed through untouched. That
+ * keeps the exported markup for every deck saved before this byte-for-byte identical.
+ */
+function paint(kind: "fill" | "stroke", value: string): Record<string, string | number> {
+  const c = parseColor(value);
+  if (!c || c.a >= 1 || c.a <= 0) return { [kind]: value };
+  return { [kind]: toHex({ ...c, a: 1 }), [`${kind}Opacity`]: c.a };
+}
+
+/** The same split for a gradient stop, whose attributes are named differently again. */
+function stopPaint(value: string): Record<string, string | number> {
+  const c = parseColor(value);
+  if (!c) return { stopColor: value };
+  return c.a >= 1 ? { stopColor: toHex(c) } : { stopColor: toHex({ ...c, a: 1 }), stopOpacity: c.a };
+}
+
 function ShapeView({ el }: { el: ShapeElement }) {
   const sw = Math.max(0, el.strokeWidth);
   // A stroke straddles the path, so an un-inset rect loses half its border to the box edge.
   const inset = sw / 2;
   const w = Math.max(0, el.w - sw);
   const boxH = Math.max(el.h, sw, 1);
+
+  // A gradient fill is a <defs> entry plus a url() reference: an SVG `fill` attribute is a
+  // paint, and `linear-gradient(…)` is not one — handing it over would draw nothing at all.
+  // The id is keyed to the element id, which is already unique across the deck, so two
+  // shapes on one slide cannot reference each other's ramp.
+  const grad = isDrawableGradient(el.fillGradient) ? el.fillGradient : null;
+  const gradId = `kz-grad-${el.id}`;
+  const fillPaint = grad ? { fill: `url(#${gradId})` } : paint("fill", el.fill);
+  const strokePaint = paint("stroke", el.stroke);
 
   return (
     <div
@@ -216,6 +263,28 @@ function ShapeView({ el }: { el: ShapeElement }) {
         viewBox={`0 0 ${el.w} ${boxH}`}
         style={{ display: "block" }}
       >
+        {/* <stop> is not an HTML void element, so both React's serialiser and the browser's
+            write it with a closing tag. That matters more than it looks: lib/exportPipeline.ts
+            re-parses this markup as XML, and a self-closing tag it does not normalise throws
+            and takes the whole slide's export down. elementLayer.test.tsx parses the output
+            to prove it rather than trusting the reading. */}
+        {grad && (
+          <defs>
+            {grad.type === "radial" ? (
+              <radialGradient id={gradId}>
+                {grad.stops.map((s, i) => (
+                  <stop key={i} offset={`${s.at}%`} {...stopPaint(s.color)} />
+                ))}
+              </radialGradient>
+            ) : (
+              <linearGradient id={gradId} {...svgGradientCoords(grad.angle)}>
+                {grad.stops.map((s, i) => (
+                  <stop key={i} offset={`${s.at}%`} {...stopPaint(s.color)} />
+                ))}
+              </linearGradient>
+            )}
+          </defs>
+        )}
         {el.kind === "rect" && (
           <rect
             x={inset}
@@ -224,8 +293,8 @@ function ShapeView({ el }: { el: ShapeElement }) {
             height={Math.max(0, boxH - sw)}
             rx={el.radius}
             ry={el.radius}
-            fill={el.fill}
-            stroke={el.stroke}
+            {...fillPaint}
+            {...strokePaint}
             strokeWidth={sw}
             opacity={el.opacity}
           />
@@ -236,8 +305,8 @@ function ShapeView({ el }: { el: ShapeElement }) {
             cy={boxH / 2}
             rx={Math.max(0, w / 2)}
             ry={Math.max(0, (boxH - sw) / 2)}
-            fill={el.fill}
-            stroke={el.stroke}
+            {...fillPaint}
+            {...strokePaint}
             strokeWidth={sw}
             opacity={el.opacity}
           />
@@ -248,7 +317,7 @@ function ShapeView({ el }: { el: ShapeElement }) {
             y1={boxH / 2}
             x2={el.w}
             y2={boxH / 2}
-            stroke={el.stroke}
+            {...strokePaint}
             strokeWidth={sw}
             strokeLinecap="round"
             opacity={el.opacity}
@@ -265,8 +334,8 @@ function ShapeView({ el }: { el: ShapeElement }) {
           <path
             d={pathFor(el.kind, Math.max(0, el.w - sw), Math.max(0, boxH - sw))}
             transform={inset ? `translate(${inset},${inset})` : undefined}
-            fill={el.fill}
-            stroke={el.stroke}
+            {...fillPaint}
+            {...strokePaint}
             strokeWidth={sw}
             strokeLinejoin="round"
             opacity={el.opacity}

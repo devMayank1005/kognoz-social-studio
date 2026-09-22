@@ -14,7 +14,8 @@
 // already carries typed words.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { rgbToHex, runStyleToCss, type RunStyle } from "@/lib/richText";
+import { runStyleToCss, type RunStyle } from "@/lib/richText";
+import { parseColor, toHex, toRgbString } from "@/lib/color";
 
 export interface TextRangeSelection {
   /** Characters selected. Shown on the bar so it is obvious what a control is about to hit. */
@@ -29,19 +30,57 @@ function editableNode(editingId: string | null): HTMLElement | null {
   return document.querySelector<HTMLElement>(`#preview-slide [data-el-id="${editingId}"]`);
 }
 
-function styleOf(range: Range): RunStyle {
+/** A computed colour in the one spelling the rest of the app writes. Alpha is kept. */
+function readColour(value: string): string | undefined {
+  const c = parseColor(value);
+  if (!c) return value || undefined;
+  return c.a >= 1 ? toHex(c) : toRgbString(c);
+}
+
+/**
+ * The first ancestor between the caret and the text box that actually SETS this property.
+ *
+ * Needed because neither `background-color` nor `background-image` inherits. Reading the
+ * computed style of the node under the caret reports "no background" for a word sitting
+ * plainly on a highlight, which would make the highlight control claim nothing was there and
+ * then clear it. Climbing to the host answers the question that was actually being asked:
+ * what is behind this text.
+ */
+function climb(from: Element | null, host: Element, read: (cs: CSSStyleDeclaration) => string): string | undefined {
+  let el: Element | null = from;
+  while (el) {
+    const value = read(window.getComputedStyle(el));
+    if (value && value !== "none" && value !== "rgba(0, 0, 0, 0)" && value !== "transparent") return value;
+    if (el === host) break;
+    el = el.parentElement;
+  }
+  return undefined;
+}
+
+function styleOf(range: Range, host: Element): RunStyle {
   const node = range.startContainer;
   const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
   if (!el) return {};
   const cs = window.getComputedStyle(el);
   const size = Number.parseFloat(cs.fontSize);
   const weight = Number.parseInt(cs.fontWeight, 10);
+
+  const background = climb(el, host, (s) => s.backgroundColor);
+  const image = climb(el, host, (s) => s.backgroundImage);
+
   return {
     fontFamily: cs.fontFamily || undefined,
     fontSize: Number.isFinite(size) ? Math.round(size) : undefined,
     fontWeight: Number.isFinite(weight) ? weight : undefined,
-    // Computed colour is always an rgb() string; the swatch input only speaks hex.
-    color: rgbToHex(cs.color)
+    // Computed colour is always an rgb()/rgba() string; everything downstream speaks hex,
+    // or rgba() when there is alpha to keep.
+    color: readColour(cs.color),
+    // THESE TWO ARE WHY THE GRADIENT BUTTON NEVER WORKED. `isGradient` asks for
+    // backgroundImage and this function did not report it, so the toggle read false over
+    // text that was already a gradient: it showed un-pressed, and `clearGradient` was
+    // unreachable. You could apply a gradient and never take it off again.
+    backgroundColor: background ? readColour(background) : undefined,
+    backgroundImage: image
   };
 }
 
@@ -76,7 +115,7 @@ export function useTextRange(editingId: string | null) {
       }
 
       rangeRef.current = range.cloneRange();
-      setSelection({ length: range.toString().length, style: styleOf(range) });
+      setSelection({ length: range.toString().length, style: styleOf(range, host) });
     };
 
     read();
@@ -122,7 +161,7 @@ export function useTextRange(editingId: string | null) {
       sel?.removeAllRanges();
       sel?.addRange(next);
 
-      setSelection({ length: span.textContent?.length ?? 0, style: styleOf(next) });
+      setSelection({ length: span.textContent?.length ?? 0, style: styleOf(next, host) });
       return true;
     },
     [editingId]

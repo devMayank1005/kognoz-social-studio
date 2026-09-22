@@ -13,10 +13,8 @@
 // Everything it writes is a patch onto one element; the geometry (x/y/w/h/rot) belongs to
 // CanvasEditor and is deliberately not editable here.
 //
-// ONE CONTROL, TWO TARGETS. When characters are selected inside a live caret, Font / Size /
-// Weight / Colour act on THAT RANGE instead of the whole element — same controls, same
-// place, and a count beside them saying how many characters are in play. Align is the
-// exception: `text-align` is a block property, so it stays on the element even mid-selection.
+// It is a router now, not a control panel: text goes to TypographyToolbar, shapes stay here.
+// The typography vocabulary outgrew a file that also has to draw fill and stroke controls.
 //
 // The bar carries `data-keep-caret` because CanvasEditor's click-away listener would
 // otherwise end the edit the instant you pressed anything here. See that file.
@@ -24,6 +22,9 @@
 import { AlignCenter, AlignLeft, AlignRight } from "lucide-react";
 import type { ShapeElement, SlideElement, TextElement } from "@/lib/slideElements";
 import { sameFamily, type RunStyle } from "@/lib/richText";
+import type { FontEntry } from "@/lib/fontRegistry";
+import TypographyToolbar from "./TypographyToolbar";
+import ColorPicker from "./ColorPicker";
 import type { TextRangeSelection } from "./useTextRange";
 
 export interface FontChoice {
@@ -42,9 +43,15 @@ export interface FontChoice {
 
 export interface ElementInspectorProps {
   element: SlideElement;
-  fonts: FontChoice[];
-  /** Brand palette, offered as swatches beside the free colour picker. */
+  /** Every family this brand may use. The picker groups and searches them itself. */
+  fonts: FontEntry[];
+  /** Brand palette, offered as one of the picker's swatch rows. */
   swatches: string[];
+  /** Colours already used on this deck, from `colorsUsed` in lib/slideElements.ts. */
+  documentColors?: string[];
+  /** The deck's saved palette, and the setter that persists it. */
+  palette?: string[];
+  onPaletteChange?: (next: string[]) => void;
   onChange: (patch: Partial<TextElement> & Partial<ShapeElement>) => void;
   /** The live character selection, when there is one. Null means "act on the element". */
   selection?: TextRangeSelection | null;
@@ -60,6 +67,8 @@ export interface ElementInspectorProps {
    * found it.
    */
   caretLive?: boolean;
+  /** The deck's gradient, offered to the typography toolbar as the one-click option. */
+  gradient: string;
   font: string;
   ink: string;
   line: string;
@@ -71,10 +80,14 @@ export default function ElementInspector({
   element,
   fonts,
   swatches,
+  documentColors = [],
+  palette = [],
+  onPaletteChange,
   onChange,
   selection,
   onRunStyle,
   caretLive,
+  gradient,
   font,
   ink,
   line,
@@ -99,44 +112,19 @@ export default function ElementInspector({
   };
   const group: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
 
-  const text = element.kind === "text" ? element : null;
-  // What the controls should be SHOWING: the selection's resolved style when there is one,
-  // the element's own otherwise. Without this the colour swatch would sit on the element's
-  // colour while you are looking at a differently-coloured run you selected.
-  const run = text ? selection?.style : undefined;
-
-  // The computed family comes back re-serialised by the browser, so it is matched against
-  // the picker by family name rather than by string equality (lib/richText.ts).
-  const activeFamily = (run && fonts.find((f) => sameFamily(f.value, run.fontFamily))?.value) || text?.fontFamily || "";
-  const activeSize = run?.fontSize ?? text?.fontSize ?? 16;
-  const activeWeight = run?.fontWeight ?? text?.fontWeight ?? 400;
-  const activeColor = run?.color ?? text?.color ?? "#000000";
-
-  // Only the weights this family really has. A weight the deck already carries is kept in
-  // the list even if the family no longer offers it, so changing the colour cannot silently
-  // restyle the text. This guard matters MORE per-range, not less: a run set to a weight the
-  // family does not serve is synthesised on screen and embedded for real in the export.
-  const chosen = fonts.find((f) => f.value === activeFamily);
-  const weights = text ? [...new Set([...(chosen?.weights ?? [400, 700]), activeWeight])].sort((a, b) => a - b) : [];
-
-  /** Range if there is one and it is still usable, whole element otherwise. */
-  const styleText = (patch: RunStyle) => {
-    if (selection && onRunStyle && onRunStyle(patch)) return;
-    onChange(patch);
+  // The palette rows used to be a local Swatches component here and a near-identical one in
+  // TypographyToolbar. Both now live inside ColorPicker, which also knows about recent and
+  // document colours — things a bare swatch row could not offer.
+  const colourProps = {
+    brand: swatches,
+    documentColors,
+    palette,
+    onPaletteChange,
+    font,
+    ink,
+    line,
+    inkMute
   };
-
-  const Swatches = ({ onPick }: { onPick: (c: string) => void }) => (
-    <div style={{ display: "flex", gap: 3 }}>
-      {swatches.map((c) => (
-        <div
-          key={c}
-          onClick={() => onPick(c)}
-          title={c}
-          style={{ width: 18, height: 18, borderRadius: 4, background: c, border: `1px solid ${line}`, cursor: "pointer" }}
-        />
-      ))}
-    </div>
-  );
 
   return (
     <div
@@ -155,145 +143,51 @@ export default function ElementInspector({
       }}
     >
       {element.kind === "text" ? (
-        <>
-          <div style={group}>
-            <span style={label}>Font</span>
-            <select value={activeFamily} onChange={(e) => styleText({ fontFamily: e.target.value })} style={field}>
-              {/* A family the deck already uses but the picker does not offer — an older
-                  deck, or a font since removed — would otherwise vanish from the control
-                  and be silently rewritten on the next change. */}
-              {!fonts.some((f) => f.value === activeFamily) && (
-                <option value={activeFamily}>{activeFamily.split(",")[0].replace(/['"]/g, "")}</option>
-              )}
-              {fonts.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={group}>
-            <span style={label}>Size</span>
-            <input
-              type="number"
-              min={4}
-              max={400}
-              value={activeSize}
-              onChange={(e) => styleText({ fontSize: Math.max(4, Number(e.target.value) || 4) })}
-              style={{ ...field, width: 74 }}
-            />
-          </div>
-
-          <div style={group}>
-            <span style={label}>Weight</span>
-            <select
-              value={activeWeight}
-              onChange={(e) => styleText({ fontWeight: Number(e.target.value) })}
-              style={{ ...field, width: 78 }}
-            >
-              {weights.map((w) => (
-                <option key={w} value={w}>
-                  {w}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={group}>
-            <span style={label}>Colour</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="color"
-                value={activeColor}
-                onChange={(e) => styleText({ color: e.target.value })}
-                style={{ width: 34, height: 30, padding: 0, border: `1px solid ${line}`, borderRadius: 8, background: "#fff" }}
-              />
-              <Swatches onPick={(c) => styleText({ color: c })} />
-            </div>
-          </div>
-
-          <div style={group}>
-            <span style={label}>Align</span>
-            <div style={{ display: "flex", gap: 2 }}>
-              {([
-                ["left", AlignLeft],
-                ["center", AlignCenter],
-                ["right", AlignRight]
-              ] as const).map(([a, Icon]) => (
-                <button
-                  key={a}
-                  type="button"
-                  onClick={() => onChange({ align: a })}
-                  aria-label={`Align ${a}`}
-                  style={{
-                    width: 32,
-                    height: 30,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    border: `1px solid ${element.align === a ? ink : line}`,
-                    background: element.align === a ? ink : "#fff",
-                    color: element.align === a ? "#fff" : ink
-                  }}
-                >
-                  <Icon size={14} />
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {(selection || caretLive) && (
-            <div style={{ ...group, marginLeft: "auto" }}>
-              <span style={label}>Editing</span>
-              <span
-                style={{
-                  fontFamily: font,
-                  fontSize: 12.5,
-                  color: selection ? ink : inkMute,
-                  padding: "6px 0",
-                  whiteSpace: "nowrap"
-                }}
-              >
-                {selection
-                  ? `${selection.length} character${selection.length === 1 ? "" : "s"}`
-                  : "Select words to style just those"}
-              </span>
-            </div>
-          )}
-        </>
+        <TypographyToolbar
+          element={element}
+          fonts={fonts}
+          swatches={swatches}
+          documentColors={documentColors}
+          palette={palette}
+          onPaletteChange={onPaletteChange}
+          selection={selection}
+          onRunStyle={onRunStyle}
+          caretLive={caretLive}
+          // The toolbar only ever patches text fields; the shared handler is typed for both
+          // kinds, and a Partial<TextElement> is not assignable to a Partial<ShapeElement>.
+          onChange={onChange as (patch: Partial<TextElement>) => void}
+          gradient={gradient}
+          font={font}
+          ink={ink}
+          line={line}
+          inkMute={inkMute}
+        />
       ) : (
         <>
           <div style={group}>
             <span style={label}>Fill</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="color"
-                value={element.fill === "transparent" ? "#ffffff" : element.fill}
-                onChange={(e) => onChange({ fill: e.target.value })}
-                style={{ width: 34, height: 30, padding: 0, border: `1px solid ${line}`, borderRadius: 8, background: "#fff" }}
-              />
-              <Swatches onPick={(c) => onChange({ fill: c })} />
-              <button
-                type="button"
-                onClick={() => onChange({ fill: "transparent" })}
-                style={{ ...field, cursor: "pointer", padding: "6px 9px" }}
-              >
-                None
-              </button>
-            </div>
+            <ColorPicker
+              title="Shape fill"
+              value={element.fill}
+              onChange={(c) => onChange({ fill: c })}
+              // Only the fill takes a gradient. A stroke could, but it would double the
+              // <defs> surface for something nobody asked for — see the plan's exclusions.
+              gradient={element.fillGradient ?? null}
+              onGradientChange={(g) => onChange({ fillGradient: g ?? undefined })}
+              onClear={() => onChange({ fill: "transparent", fillGradient: undefined })}
+              {...colourProps}
+            />
           </div>
 
           <div style={group}>
             <span style={label}>Border</span>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <input
-                type="color"
-                value={element.stroke === "transparent" ? "#000000" : element.stroke}
-                onChange={(e) => onChange({ stroke: e.target.value })}
-                style={{ width: 34, height: 30, padding: 0, border: `1px solid ${line}`, borderRadius: 8, background: "#fff" }}
+              <ColorPicker
+                title="Border colour"
+                value={element.stroke}
+                onChange={(c) => onChange({ stroke: c })}
+                onClear={() => onChange({ stroke: "transparent" })}
+                {...colourProps}
               />
               <input
                 type="number"
