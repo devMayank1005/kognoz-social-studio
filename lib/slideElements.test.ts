@@ -36,7 +36,9 @@ import {
   type Handle,
   fontFacesUsed,
   colorsUsed,
-  type ShapeElement
+  type ShapeElement,
+  slotIdentity,
+  type TemplateSlot
 } from "./slideElements";
 
 const text = (patch: Partial<TextElement> = {}): TextElement => ({
@@ -583,5 +585,55 @@ describe("colorsUsed", () => {
 
   it("copes with an element that has no markup at all", () => {
     expect(() => colorsUsed([text({ color: "#111111", html: undefined })])).not.toThrow();
+  });
+});
+
+describe("a slot is identified per instance, not per kind", () => {
+  // THE BUG THIS PREVENTS. `from` is the slot's KIND — headline, body, number — and that
+  // was enough while only the cover, the content slide and the CTA could be unlocked,
+  // because each had one of each. The single formats do not work that way: a Journey Map
+  // has three stage titles, a Numbers Wall four figures, a Dialogue a turn per line. All
+  // of them are `headline`, and components/studio/SlideCanvas.tsx hides by matching the
+  // name — so unlocking one stage title would blank all three at once.
+  const ejected = (id: string, from: TemplateSlot, slotKey?: string) =>
+    createText([], { id, from, ...(slotKey ? { slotKey } : {}) });
+
+  it("names an instance by its key when the template gave one", () => {
+    expect(slotIdentity("headline", "journey-title-1")).toBe("journey-title-1");
+  });
+
+  it("falls back to the kind, which is what every older deck says", () => {
+    // Decks written before slotKey existed carry `from` alone. They must keep hiding the
+    // right node with no migration.
+    expect(slotIdentity("headline")).toBe("headline");
+    expect(slotIdentity("headline", "")).toBe("headline");
+  });
+
+  it("hides each ejected instance separately", () => {
+    const hidden = hiddenSlots([
+      ejected("el_1", "headline", "journey-title-0"),
+      ejected("el_2", "headline", "journey-title-2")
+    ]);
+    expect([...hidden].sort()).toEqual(["journey-title-0", "journey-title-2"]);
+  });
+
+  it("resets only the instance asked for, leaving its siblings ejected", () => {
+    const els = [
+      ejected("el_1", "headline", "journey-title-0"),
+      ejected("el_2", "headline", "journey-title-1"),
+      createText([], { id: "el_3" })
+    ];
+    const left = resetSlot(els, "journey-title-0");
+    expect(left.map((e) => e.id)).toEqual(["el_2", "el_3"]);
+  });
+
+  it("still resets a keyless slot by its kind", () => {
+    const els = [ejected("el_1", "headline"), ejected("el_2", "body")];
+    expect(resetSlot(els, "headline").map((e) => e.id)).toEqual(["el_2"]);
+  });
+
+  it("never treats a hand-made text box as an ejected slot", () => {
+    // No `from` means nobody's template text is hiding behind it.
+    expect(hiddenSlots([createText([], { id: "el_1" })]).size).toBe(0);
   });
 });

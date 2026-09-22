@@ -32,7 +32,11 @@ export default function SlideCanvas({ id, hidden, width, height, children }: Sli
     const root = ref.current;
     if (!root) return;
     for (const node of Array.from(root.querySelectorAll<HTMLElement>("[data-slot]"))) {
-      node.style.visibility = hidden.includes(node.dataset.slot ?? "") ? "hidden" : "";
+      // By instance, not by kind. A Journey Map has three stage titles and a Numbers Wall
+      // four figures, all marked `headline`; matching on the name alone would blank every
+      // one of them the moment somebody unlocked a single stage.
+      const identity = node.dataset.slotKey || node.dataset.slot || "";
+      node.style.visibility = hidden.includes(identity) ? "hidden" : "";
     }
   });
 

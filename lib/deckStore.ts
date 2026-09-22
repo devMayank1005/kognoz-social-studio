@@ -132,6 +132,9 @@ export function coerceElement(raw: unknown): SlideElement | null {
       ...pick(o, "webkitTextStroke", (v) => str(v, 64) || undefined),
       ...pick(o, "direction", (v) => (v === "rtl" || v === "ltr" ? v : undefined)),
       ...(from ? { from } : {}),
+      // Same guard as every other optional field: uncoerced means dropped on reload, and a
+      // dropped slotKey un-hides the template text under an ejected element.
+      ...(from ? pick(o, "slotKey", (v) => str(v, 64) || undefined) : {}),
       // Re-sanitised on the way in, not just on the way out: this row is JSON in a database
       // and the markup ends up inside the node the exporter rasterises.
       ...(typeof o.html === "string" && o.html ? { html: sanitiseHtml(o.html) } : {})

@@ -40,6 +40,7 @@ import {
   moveTo,
   removeElement,
   resetSlot,
+  slotIdentity,
   resizeElement,
   rotateTo,
   sameBox,
@@ -195,7 +196,8 @@ export default function CanvasEditor({
         color: slot.color,
         align: slot.align,
         lineHeight: slot.lineHeight,
-        from: slot.slot
+        from: slot.slot,
+        ...(slot.key ? { slotKey: slot.key } : {})
       });
       onCommit([...elements, made]);
       onSelect(made.id);
@@ -446,7 +448,7 @@ export default function CanvasEditor({
                 Icon: RotateCcw,
                 label: "Reset to template",
                 run: () => {
-                  onCommit(resetSlot(elements, shownEl.from!));
+                  onCommit(resetSlot(elements, slotIdentity(shownEl.from!, shownEl.slotKey)));
                   onSelect(null);
                 }
               }

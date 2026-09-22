@@ -447,3 +447,63 @@ describe("Journey Map columns are sized to the page", () => {
     expect(html).toContain("overflow-wrap:break-word");
   });
 });
+
+describe("every format offers its generated text to the canvas editor", () => {
+  // "Edit canvas" can only reach text the template marked. lib/templateSlots.ts finds
+  // `[data-slot]` nodes and nothing else, so an unmarked headline is simply not editable —
+  // double-clicking it does nothing at all, with no message saying why.
+  //
+  // Before this, the marks lived on the cover, the CTA and the deck content slide. Every
+  // single format — the stat figure, the journey stages, the numbers wall, the quote —
+  // rendered generated copy that could not be touched.
+  //
+  // The second assertion is the one that needs the per-instance key: a Journey Map has
+  // three stage titles and a Numbers Wall four figures, all of kind `headline`, and
+  // components/studio/SlideCanvas.tsx hides by identity. Two nodes sharing an identity
+  // means unlocking one blanks the others.
+  const SLOT_KINDS = ["eyebrow", "headline", "body", "cta", "kicker", "number"];
+
+  const marks = (html: string) => {
+    const slots = [...html.matchAll(/data-slot="([^"]+)"/g)].map((m) => m[1]);
+    const keys = [...html.matchAll(/data-slot-key="([^"]+)"/g)].map((m) => m[1]);
+    return { slots, keys };
+  };
+
+  /** Every node's identity, the way SlideCanvas computes it: the key, or the slot kind. */
+  const identities = (html: string) =>
+    [...html.matchAll(/data-slot="([^"]+)"(?:\s+data-slot-key="([^"]+)")?/g)].map((m) => m[2] || m[1]);
+
+  const RICH: CoercedSlide[] = [
+    { title: "Stage one", body: "First capability\nSecond capability\nThird capability" },
+    { title: "Stage two", body: "Fourth capability\nFifth capability" },
+    { title: "Stage three", body: "Sixth capability\nSeventh capability" },
+    { title: "Stage four", body: "Eighth capability" }
+  ];
+
+  for (const format of STUDIO_FORMATS) {
+    const spec = FORMATS[format];
+    const kind = (spec.single ?? "content") as SlideKind;
+
+    it(`${format} marks text the editor can reach`, () => {
+      for (const brand of Object.values(BRANDS)) {
+        const html = renderSlide(brand, format, kind, { slides: RICH });
+        const { slots } = marks(html);
+        for (const s of slots) {
+          expect(SLOT_KINDS, `${format} used an unknown slot kind "${s}"`).toContain(s);
+        }
+        // NOT just any slot: the shared Eyebrow carries one on every format, so counting
+        // marks alone passes while every word of generated copy stays untouchable.
+        const content = slots.filter((s) => s !== "eyebrow");
+        expect(content.length, `${brand.id} / ${format} marks only its eyebrow`).toBeGreaterThan(0);
+      }
+    });
+
+    it(`${format} gives every marked node its own identity`, () => {
+      for (const brand of Object.values(BRANDS)) {
+        const ids = identities(renderSlide(brand, format, kind, { slides: RICH }));
+        const dupes = ids.filter((v, i) => ids.indexOf(v) !== i);
+        expect(dupes, `${brand.id} / ${format} would blank ${dupes.join(", ")} together`).toEqual([]);
+      }
+    });
+  }
+});

@@ -83,6 +83,20 @@ export interface TextElement extends BaseElement {
   direction?: "ltr" | "rtl";
   from?: TemplateSlot;
   /**
+   * Which INSTANCE of that slot this came from, when a slide has more than one.
+   *
+   * `from` is the slot's kind — headline, body, number — and that was enough while only
+   * the cover, the content slide and the CTA were unlockable, because each had one of
+   * each. It is not enough for the single formats: a Journey Map has three stage titles,
+   * a Numbers Wall four figures, a Dialogue a turn per line. They are all `headline`, and
+   * components/studio/SlideCanvas.tsx hides by slot name — so ejecting one stage title
+   * would blank all three.
+   *
+   * So the identity of a slot is `slotKey ?? from`. Absent means "the only one", which is
+   * exactly what every deck saved before this says, and they keep working untouched.
+   */
+  slotKey?: string;
+  /**
    * The element's rendered markup, when it came from the template.
    *
    * The template does not draw plain strings: a starred word becomes a `<span>` carrying a
@@ -478,15 +492,27 @@ export function snapPosition(
 // --- template ejection -----------------------------------------------------
 
 /** Which template slots are currently ejected, and so must not be drawn by the renderer. */
-export function hiddenSlots(elements: readonly SlideElement[]): Set<TemplateSlot> {
-  const out = new Set<TemplateSlot>();
-  for (const el of elements) if (el.kind === "text" && el.from) out.add(el.from);
+export function hiddenSlots(elements: readonly SlideElement[]): Set<string> {
+  const out = new Set<string>();
+  for (const el of elements) if (el.kind === "text" && el.from) out.add(slotIdentity(el.from, el.slotKey));
   return out;
 }
 
+/**
+ * What names one slot on one slide.
+ *
+ * The key when the template gave it one, the slot kind otherwise. Keeping the fallback is
+ * what lets every deck written before `slotKey` existed go on hiding the right node.
+ */
+export function slotIdentity(from: TemplateSlot, key?: string): string {
+  return key || from;
+}
+
 /** Put an ejected element back under template control. */
-export function resetSlot(elements: readonly SlideElement[], slot: TemplateSlot): SlideElement[] {
-  return elements.filter((el) => !(el.kind === "text" && el.from === slot));
+export function resetSlot(elements: readonly SlideElement[], identity: string): SlideElement[] {
+  return elements.filter(
+    (el) => !(el.kind === "text" && el.from && slotIdentity(el.from, el.slotKey) === identity)
+  );
 }
 
 /**

@@ -26,6 +26,8 @@ import { sanitiseHtml, textOfHtml, type TemplateSlot } from "./slideElements";
 
 export interface SlotHit {
   slot: TemplateSlot;
+  /** Which instance of that slot, when the template marked one. See TextElement.slotKey. */
+  key?: string;
   /** Slide pixels, relative to the export root. */
   x: number;
   y: number;
@@ -76,6 +78,7 @@ export function slotAt(root: HTMLElement, bx: number, by: number): SlotHit | nul
     if (!name || !SLOTS.includes(name)) continue;
     // Already ejected: SlideCanvas has hidden it, and its copy is on the canvas instead.
     if (node.style.visibility === "hidden") continue;
+    const key = node.dataset.slotKey || undefined;
 
     const r = node.getBoundingClientRect();
     const x = r.left - rootRect.left;
@@ -93,6 +96,7 @@ export function slotAt(root: HTMLElement, bx: number, by: number): SlotHit | nul
     bestArea = area;
     best = {
       slot: name,
+      ...(key ? { key } : {}),
       x,
       y,
       w: r.width,

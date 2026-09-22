@@ -315,3 +315,42 @@ describe("the deck palette", () => {
     expect(withPalette([])).toBeUndefined();
   });
 });
+
+describe("slotKey survives storage", () => {
+  // The same guard as every other optional field. A dropped slotKey does not throw — the
+  // ejected element loads fine and the template text UNDER it stops hiding, so the slide
+  // shows the old wording and the new copy stacked on top of each other, on reload only.
+  const read = (patch: Record<string, unknown>) => {
+    const el = coerceElement({ id: "el_1", kind: "text", w: 100, h: 40, ...patch });
+    return el && el.kind === "text" ? el : null;
+  };
+
+  it("round-trips the key beside the slot kind", () => {
+    const el = read({ from: "headline", slotKey: "journey-title-1" })!;
+    expect(el.from).toBe("headline");
+    expect(el.slotKey).toBe("journey-title-1");
+  });
+
+  it("survives the JSON round trip the database performs", () => {
+    const raw = JSON.parse(JSON.stringify({ id: "el_1", kind: "text", w: 100, h: 40, from: "body", slotKey: "chip-2" }));
+    const el = coerceElement(raw);
+    expect(el && el.kind === "text" ? el.slotKey : null).toBe("chip-2");
+  });
+
+  it("loads a deck written before slotKey existed, unchanged", () => {
+    const el = read({ from: "headline" })!;
+    expect(el.from).toBe("headline");
+    expect("slotKey" in el).toBe(false);
+  });
+
+  it("refuses a key on an element that is not an ejected slot", () => {
+    // Without `from` there is no template text to hide, so a stray key means nothing and
+    // would only be one more field to coerce wrongly later.
+    const el = read({ slotKey: "orphan" })!;
+    expect("slotKey" in el).toBe(false);
+  });
+
+  it("drops a key that is not a string rather than storing rubbish", () => {
+    expect("slotKey" in read({ from: "headline", slotKey: 42 })!).toBe(false);
+  });
+});
