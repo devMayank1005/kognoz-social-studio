@@ -86,6 +86,7 @@ import { slotAt, type SlotHit } from "@/lib/templateSlots";
 import { exportFontsUrl, extraFonts, familyOf, fontsUrlFor, slideFonts, weightsFor, pickerFonts } from "@/lib/fontRegistry";
 import { coerceStoredDeck, deckChanged, serialiseDeck, type StoredDeck } from "@/lib/deckStore";
 import { exportPdf, exportFramesPdf, exportPanorama, exportStrip, exportPNG } from "@/lib/exportPipeline";
+import { recordKineticWebm } from "@/lib/kineticVideo";
 import { SocialPreview, type PreviewPage } from "@/components/SocialPreview";
 import { Slide, type SlideDesign, type SlideKind } from "./Slide";
 
@@ -955,11 +956,39 @@ export default function Studio() {
    * offering them elsewhere would produce an empty file rather than an error, which is
    * the worst of both.
    */
+  /**
+   * Record the Kinetic Video format as a .webm.
+   *
+   * The only export in the app that is not a rasterised still, and the one the README has
+   * carried as "not ported" since the v3 port. It reads the same hidden `exp-N` node every
+   * other export reads.
+   */
+  async function handleRecordWebm() {
+    setExportBusy(true);
+    setError("");
+    try {
+      await recordKineticWebm({
+        elId: `exp-${current}`,
+        baseW,
+        baseH,
+        filename: `${filenameBase(current)}.webm`,
+        fontsUrl: exportFontsHref
+      });
+    } catch (e) {
+      // Says which browser can do it rather than failing blank — Safari records MP4 only.
+      setError(e instanceof Error ? e.message : String(e));
+      throw e;
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   const exportActions: ExportAction[] = [
     { kind: "pdf", available: Boolean(fmt.deck || fmt.frames), run: async () => { await (fmt.frames ? handleExportDocPdf() : handleExportPdf()); } },
     { kind: "png", available: true, run: async () => { await handleExportPngSet(); } },
     { kind: "strip", available: Boolean(fmt.deck), run: async () => { await handleExportStrip(); } },
-    { kind: "panorama", available: Boolean(fmt.frames), run: async () => { await handleExportPanorama(); } }
+    { kind: "panorama", available: Boolean(fmt.frames), run: async () => { await handleExportPanorama(); } },
+    { kind: "webm", available: Boolean(fmt.motion), run: async () => { await handleRecordWebm(); } }
   ];
 
   const stripSlides = deck.map((d, i) => ({

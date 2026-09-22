@@ -45,6 +45,8 @@ export interface FormatSpec {
   idea?: true;
   frames?: number;
   single?: SingleKind;
+  /** The format plays a sequence, so it can be recorded as a video as well as posed. */
+  motion?: true;
   hint: string;
 }
 
@@ -66,7 +68,7 @@ export const FORMATS: Record<FormatId, FormatSpec> = {
   Dialogue: { w: 1080, h: 1350, single: "dialogue", hint: "Chat · 4:5" },
   Montage: { w: 3240, h: 1350, single: "montage", frames: 3, hint: "Montage · 3 frames" },
   Story: { w: 1080, h: 1920, single: "story", hint: "Story · 9:16" },
-  Video: { w: 1080, h: 1350, single: "video", hint: "Video · Kinetic" },
+  Video: { w: 1080, h: 1350, single: "video", motion: true, hint: "Video · Kinetic" },
   "Founder Video": { w: 1080, h: 1350, single: "script", hint: "Founder Video · Script" }
 };
 

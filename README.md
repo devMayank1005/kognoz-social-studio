@@ -155,14 +155,24 @@ Two are worth a note:
 
 ## What's NOT ported (scoped out, not guessed at)
 
-- **Video recording** (`recordVideo` / `MediaRecorder` / `wrapCanvasText`) — the
-  Kinetic Video format's preview and poster-PNG export work; the "Record video
-  (.webm)" capture button does not. Flagged rather than rushed.
 - **`/calendar`'s own visual layout** — functional (real data, real actions) but its
   UI is my own construction, not a port, since I didn't have the original App's
   `view === "calendar"` JSX branch in view when I built it.
 
 ## Open items
+
+- **Kinetic video records WebM, not MP4.** `lib/kineticVideo.ts` composites the sequence on
+  a canvas and encodes it with `MediaRecorder`. LinkedIn accepts WebM but prefers MP4, and
+  Safari's MediaRecorder cannot produce WebM at all — the button detects that and names the
+  browsers that can rather than downloading an empty file. An MP4 path means either
+  Safari-only `video/mp4` recording or a server-side transcode; neither is built.
+- **Record with the tab in front.** Browsers throttle timers in a hidden tab, so exporting
+  the video while looking at another tab still produces a clip of the right length but with
+  far fewer distinct frames. It completes either way; it is just choppier.
+- **The motif is still in the recording.** `kvDrift` and `kzBreathe` are infinite ambient
+  loops with no rest state, so the petal is captured in the background layer and holds its
+  pose for the length of the clip rather than drifting. Every element with a timeline — the
+  eyebrow, each headline word, each beat, the footer — animates.
 
 - **Poppins is an assumption.** `Konverz_Website_Inputs.md` §9 lists it as observed
   across the deck and the site, not confirmed as the official brand font. It is one pair

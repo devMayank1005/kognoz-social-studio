@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { FileText, Image as ImageIcon, LayoutGrid, Columns, ArrowRight, Check, AlertTriangle, type LucideIcon } from "lucide-react";
+import { FileText, Image as ImageIcon, LayoutGrid, Columns, Clapperboard, ArrowRight, Check, AlertTriangle, type LucideIcon } from "lucide-react";
 import { Drawer, Button, EmptyState } from "@/components/ui";
 
 // The export drawer, ported from the reference UI — with the exports made real.
@@ -25,7 +25,7 @@ import { Drawer, Button, EmptyState } from "@/components/ui";
 // its footer claims "Target DPI: 300", which is not a property our pipeline sets; the
 // export is a pixel size. Both now say what is true.
 
-export type ExportKind = "pdf" | "png" | "strip" | "panorama";
+export type ExportKind = "pdf" | "png" | "strip" | "panorama" | "webm";
 
 export interface ExportAction {
   kind: ExportKind;
@@ -57,6 +57,13 @@ const META: Record<ExportKind, { title: string; subtitle: string; icon: LucideIc
     title: "Panorama",
     subtitle: "The continuous wide image, before it is sliced into frames",
     icon: Columns
+  },
+  webm: {
+    // Named for what it is rather than "Export video": LinkedIn takes WebM but prefers
+    // MP4, and somebody choosing this should know which one they are getting.
+    title: "Kinetic video",
+    subtitle: "WebM · the sequence as it plays · Chrome, Edge and Firefox",
+    icon: Clapperboard
   }
 };
 

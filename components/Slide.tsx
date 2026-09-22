@@ -10,6 +10,7 @@ import { C, GRAD, GRAD_DARK, FONT, DISPLAY_FONT, GLASS_DARKBG, GLASS_LIGHTBG } f
 import { setSpec, isDarkSurface, surfaceFor, type DesignSetId, type SurfaceId } from "@/lib/designSets";
 import { KOGNOZ, type Brand } from "@/lib/brands";
 import { plainWords, type CoercedSlide } from "@/lib/coerce";
+import { animationCss, kineticTimeline } from "@/lib/kinetic";
 import { splitAcrossFrames, frameRoles, headlineAlign, longestPhrase } from "@/lib/montage";
 import { Logo } from "./Logo";
 
@@ -1661,7 +1662,6 @@ export const Slide = React.memo(function Slide({
   /* ====================== VIDEO (kinetic headline) ====================== */
   if (kind === "video") {
     const words = plainWords(cover);
-    const bodyDelay = 0.7 + words.length * 0.14 + 0.4;
     // Every beat that carries copy. The canvas cannot scroll, so type steps down as
     // beats are added rather than any beat being dropped — losing the final turn
     // would break the sequence.
@@ -1671,6 +1671,13 @@ export const Slide = React.memo(function Slide({
     // and collided with the logo, so the headline yields space as beats are added.
     const beatScale = beats.length <= 2 ? 1 : beats.length === 3 ? 0.8 : 0.62;
     const headScale = beats.length >= 4 ? 0.78 : beats.length === 3 ? 0.88 : 1;
+    // The timing comes from lib/kinetic.ts rather than being written out here, so the
+    // recorder that exports this format as a .webm resolves the very same numbers. Two
+    // copies would let the file drift from the preview with nothing failing. The CSS it
+    // formats is byte-for-byte what these four lines used to say.
+    const tl = kineticTimeline(words.length, beats.length);
+    // `data-kv` is the recorder's handle on the animated nodes, the same idea as
+    // `data-slot`. Inert everywhere else.
     // The keyframes live in app/globals.css, NOT in an inline <style> here:
     // lib/exportPipeline.ts strips <style> blocks from the cloned node, and the
     // SVG it rebuilds carries only the font CSS. Every animation below therefore
@@ -1682,17 +1689,18 @@ export const Slide = React.memo(function Slide({
           {dz.petals && <Petal w={600} o={S.petal} brand={brand} />}
         </div>
         <div key={`kv-${replay}`} style={{ position: "absolute", inset: 0, padding: "96px 96px 196px", display: "flex", flexDirection: "column" }}>
-          <div style={{ animation: "kvFade .6s ease .25s backwards" }}>
+          <div data-kv="eyebrow" style={{ animation: animationCss(tl.eyebrow) }}>
             <Eyebrow dark={onDark} />
           </div>
           <h1 data-slot="headline" style={{ fontFamily: displayFont, fontSize: fit(Math.round(94 * headScale), cover, 46), fontWeight: 600, lineHeight: 1.08, letterSpacing: "-0.015em", color: S.heading, margin: `${Math.round(50 * headScale)}px 0 ${Math.round(46 * headScale)}px` }}>
             {words.map((w, i) => (
               <span
                 key={i}
+                data-kv="word"
                 style={{
                   display: "inline-block",
                   marginRight: "0.26em",
-                  animation: `kvRise .8s cubic-bezier(.2,.75,.2,1) ${0.7 + i * 0.14}s backwards`,
+                  animation: animationCss(tl.words[i]),
                   // EM_STYLE is the brand gradient clipped to text, built from
                   // C.blue — invisible on a dark page, same as the stat card.
                   ...(w.em ? (onDark ? { color: accentOnDark } : EM_STYLE) : {})
@@ -1709,6 +1717,7 @@ export const Slide = React.memo(function Slide({
             {beats.map((b, i) => (
               <p
                 key={i}
+                data-kv="beat"
                 data-slot="body"
                 data-slot-key={`video-beat-${i}`}
                 style={{
@@ -1718,7 +1727,7 @@ export const Slide = React.memo(function Slide({
                   color: i === 0 ? S.heading : S.body,
                   fontWeight: i === 0 ? 600 : 400,
                   margin: 0,
-                  animation: `kvFade .9s ease ${bodyDelay + i * 0.5}s backwards`
+                  animation: animationCss(tl.beats[i])
                 }}
               >
                 {renderLines(b.body)}
@@ -1726,7 +1735,7 @@ export const Slide = React.memo(function Slide({
             ))}
           </div>
         </div>
-        <div key={`kv-foot-${replay}`} style={{ animation: `kvFade .8s ease ${bodyDelay + 1.2}s backwards` }}>
+        <div key={`kv-foot-${replay}`} data-kv="foot" style={{ animation: animationCss(tl.foot) }}>
           <Foot dark={onDark} right={SINGLE_R} />
         </div>
       </div>

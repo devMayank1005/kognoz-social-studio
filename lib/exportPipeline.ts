@@ -15,6 +15,19 @@ import { frameWidth } from "./slideIndex";
 import { logDownload } from "@/lib/activityClient";
 
 export async function buildSlideSvg(elId: string, baseW: number, baseH: number, fontFaceCss: string): Promise<string | null> {
+  const clone = await exportClone(elId);
+  return clone ? wrapAsSvg(clone.outerHTML, baseW, baseH, fontFaceCss) : null;
+}
+
+/**
+ * The slide, cloned and made self-contained — every image inlined as a data URL.
+ *
+ * Split out of buildSlideSvg so the .webm recorder can prepare the node ONCE and then
+ * re-serialise it per frame. Inlining the images again for each of a few hundred frames
+ * would dominate the recording, and re-reading the live DOM would defeat the point of a
+ * clone the recorder is free to mutate.
+ */
+export async function exportClone(elId: string): Promise<HTMLElement | null> {
   const node = document.getElementById(elId);
   if (!node) return null;
 
@@ -67,7 +80,22 @@ export async function buildSlideSvg(elId: string, baseW: number, baseH: number, 
     }
   }
 
-  const html = clone.outerHTML
+  return clone;
+}
+
+/**
+ * Markup → the SVG the rasteriser is handed.
+ *
+ * The five substitutions are the whole XHTML contract: `<input>` goes (the sanitiser
+ * deletes it anyway), `<img>` and `<br>` are XML-normalised because they are void,
+ * `<style>` is stripped — which is why only inline styles survive, and why the Kinetic
+ * Video's keyframes cannot come along — and `&nbsp;` becomes a numeric entity XML knows.
+ *
+ * Exported so the .webm recorder wraps its frames by the same rules rather than keeping a
+ * second copy of them.
+ */
+export function wrapAsSvg(markup: string, baseW: number, baseH: number, fontFaceCss: string): string {
+  const html = markup
     .replace(/<input[^>]*>/g, "")
     .replace(/<img([^>]*?)\s*\/?>/g, "<img$1/>")
     .replace(/<br\s*>/g, "<br/>")
