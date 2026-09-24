@@ -17,7 +17,7 @@ import {
   RUN_KEYS,
   familiesInHtml
 } from "./richText";
-import { sanitiseHtml } from "./slideElements";
+import { sanitiseHtml, textOfHtml } from "./slideElements";
 
 describe("runStyleToCss", () => {
   it("writes px on the size and leaves the rest alone", () => {
@@ -176,6 +176,22 @@ describe("normaliseSpans", () => {
 
   it("survives empty input", () => {
     expect(normaliseSpans("")).toBe("");
+  });
+
+  it("never merges block spans — each one is a separate line from renderLines", () => {
+    // renderLines gives lines 2..N byte-identical styles. Merging them joined the lines on
+    // every blur: "A / B / C" was stored as "A / BC".
+    const line1 = '<span style="display: block; margin-top: 0px;">A</span>';
+    const rest = (t: string) => `<span style="display: block; margin-top: 0.55em;">${t}</span>`;
+    const html = line1 + rest("B") + rest("C");
+    const out = normaliseSpans(sanitiseHtml(html));
+    expect(out.match(/display:\s*block/g)).toHaveLength(3);
+    expect(textOfHtml(out).split("\n").filter(Boolean)).toEqual(["A", "B", "C"]);
+  });
+
+  it("does not collapse a block span wrapping an identical block span", () => {
+    const html = '<span style="display: block"><span style="display: block">a</span></span>';
+    expect(normaliseSpans(html)).toBe(html);
   });
 });
 

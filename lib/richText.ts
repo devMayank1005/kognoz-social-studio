@@ -220,7 +220,13 @@ export function sameRunStyle(a: RunStyle, b: RunStyle): boolean {
  * is what the browser produces when you restyle a range you already styled the same way —
  * `<span style="color:#B52879"><span style="color:#B52879">Culture</span></span>` after
  * pressing the same swatch twice. Observed in the running app, which is why it is here.
+ *
+ * BLOCK SPANS ARE NEVER MERGED. `renderLines` draws each body line as its own
+ * `display:block` span, and every line after the first carries the same style string. Those
+ * are separate lines, not duplicates: merging them joined lines 2..N into one on every commit.
  */
+const isBlockSpan = (attrs: string) => /display\s*:\s*block/i.test(attrs);
+
 export function normaliseSpans(html: string): string {
   if (!html) return "";
   let out = html;
@@ -233,12 +239,13 @@ export function normaliseSpans(html: string): string {
       // A span whose only child is a byte-identical span is one span.
       .replace(
         /<span([^>]*)>\s*<span\1>([\s\S]*?)<\/span>\s*<\/span>/gi,
-        (_full, attrs: string, inner: string) => `<span${attrs}>${inner}</span>`
+        (full, attrs: string, inner: string) => (isBlockSpan(attrs) ? full : `<span${attrs}>${inner}</span>`)
       )
       // Two adjacent spans with byte-identical attributes are one span.
       .replace(
         /<span([^>]*)>([\s\S]*?)<\/span><span\1>([\s\S]*?)<\/span>/gi,
-        (_full, attrs: string, first: string, second: string) => `<span${attrs}>${first}${second}</span>`
+        (full, attrs: string, first: string, second: string) =>
+          isBlockSpan(attrs) ? full : `<span${attrs}>${first}${second}</span>`
       );
   } while (out !== before);
   return out;
