@@ -35,6 +35,11 @@ describe("resolveSessionSecret", () => {
     expect(() => resolveSessionSecret({ NEXTAUTH_SECRET: "   " }, "production")).toThrow();
   });
 
+  it("says when the variable exists but is blank, so nobody hunts for a missing one", () => {
+    expect(() => resolveSessionSecret({ NEXTAUTH_SECRET: "" }, "production")).toThrow(/exists but its value is empty/);
+    expect(() => resolveSessionSecret({}, "production")).not.toThrow(/exists but/);
+  });
+
   it("lets development run, but says so", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(resolveSessionSecret({}, "development")).toBe(DEV_SECRET);

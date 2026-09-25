@@ -34,10 +34,18 @@ export function resolveSessionSecret(
 
   if (nodeEnv === "production") {
     // Loud and fatal. A deployment that cannot sign sessions safely should not serve them.
+    //
+    // "Present but blank" gets its own wording: a Vercel variable saved with an empty value
+    // still shows up in the dashboard, and "is not set" sent the first person to hit it
+    // looking for a variable that was plainly there.
+    const blank = env.NEXTAUTH_SECRET !== undefined || env.AUTH_SECRET !== undefined;
     throw new Error(
-      "NEXTAUTH_SECRET is not set. Sessions cannot be signed safely, so the app refuses to " +
-        "start rather than fall back to a shared secret. Set NEXTAUTH_SECRET in the deployment's " +
-        "environment variables."
+      (blank
+        ? "NEXTAUTH_SECRET is not set: the variable exists but its value is empty or whitespace. "
+        : "NEXTAUTH_SECRET is not set. ") +
+        "Sessions cannot be signed safely, so the app refuses to start rather than fall back " +
+        "to a shared secret. Set NEXTAUTH_SECRET to a real value (e.g. `openssl rand -base64 32`) " +
+        "in the deployment's environment variables and redeploy."
     );
   }
 
