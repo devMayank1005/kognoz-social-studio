@@ -1,5 +1,5 @@
 import NextAuth from "next-auth";
-import type { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { authOptions } from "@/lib/auth";
 import { withRequestOrigin } from "@/lib/requestContext";
 import { clientIp } from "@/lib/activityEvents";
@@ -38,10 +38,24 @@ const handler = NextAuth(authOptions);
  */
 type AuthHandler = (req: NextRequest, ctx: unknown) => Promise<Response>;
 
-function withOrigin(req: NextRequest, ctx: unknown): Promise<Response> {
-  return withRequestOrigin({ ip: clientIp(req.headers), userAgent: req.headers.get("user-agent") }, () =>
-    (handler as unknown as AuthHandler)(req, ctx)
-  );
+async function withOrigin(req: NextRequest, ctx: unknown): Promise<Response> {
+  try {
+    return await withRequestOrigin({ ip: clientIp(req.headers), userAgent: req.headers.get("user-agent") }, () =>
+      (handler as unknown as AuthHandler)(req, ctx)
+    );
+  } catch (e) {
+    // Still fails closed — no session is issued — but in a form the caller can read.
+    //
+    // An unhandled throw here (e.g. lib/sessionSecret.ts refusing a blank NEXTAUTH_SECRET)
+    // became a 500 with an EMPTY body: next-auth/react logged "Unexpected end of JSON input",
+    // then signIn() navigated the whole tab to /api/auth/error, which 500'd too and left
+    // people on chrome-error://. "Configuration" is next-auth's own name for this failure.
+    console.error("[auth] handler failed:", e);
+    if (req.method === "GET" && (req.headers.get("accept") || "").includes("text/html")) {
+      return NextResponse.redirect(new URL("/login?error=Configuration", req.url));
+    }
+    return NextResponse.json({ error: "Configuration" }, { status: 500 });
+  }
 }
 
 export { withOrigin as GET, withOrigin as POST };

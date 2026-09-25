@@ -22,6 +22,8 @@ function LoginForm() {
   if (!displayError && oauthError) {
     if (oauthError === "AccessDenied") {
       displayError = "Access denied: Only @kognozconsulting.com, @kognoz.com and @konverz.ai company accounts are permitted to sign in.";
+    } else if (oauthError === "Configuration") {
+      displayError = "Sign-in is temporarily unavailable due to a server configuration problem. Please contact the administrator.";
     } else {
       displayError = "Authentication failed. Please try again or sign in with your password.";
     }
