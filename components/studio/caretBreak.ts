@@ -64,3 +64,114 @@ export function insertLineBreak(host: HTMLElement): boolean {
   sel.addRange(after);
   return true;
 }
+
+/** Is there anything before this node that would actually draw? Mirror of rendersAfter. */
+function rendersBefore(node: Node): boolean {
+  for (let n: Node | null = node.previousSibling; n; n = n.previousSibling) {
+    if (n.nodeType === Node.TEXT_NODE) {
+      if ((n.textContent ?? "") !== "") return true;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
+const isBr = (n: Node | null): boolean => n?.nodeName === "BR";
+
+const BLOCK_SELECTOR = "div, p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol";
+
+/**
+ * Turn every block element under `host` into `<br>`-separated inline content, in place.
+ *
+ * WHY. Enter is intercepted (insertLineBreak above), but it is not the only way a browser
+ * makes a line. Pasting multi-line text, IME/autocorrect paragraph inserts and mobile
+ * keyboards all still produce `<div>`/`<p>` blocks — one per line, `<div><br></div>` for a
+ * blank one. They LOOK right while editing, then `sanitiseHtml` strips them on commit and
+ * rejoins the text with nothing between it: blank lines vanish and lines run together the
+ * moment you click out of the box. Doing this on the live DOM before reading `innerHTML` is
+ * what makes the commit keep what the person saw, whatever produced the markup.
+ *
+ * The rules follow the browser's own line semantics (innerText):
+ *   - a block starts a new line if anything renders before it;
+ *   - a trailing `<br>` inside a block is a placeholder, not a line;
+ *   - an empty block (`<div><br></div>`) is one empty line;
+ *   - anything that renders after a block starts on a new line.
+ */
+export function flattenBlocks(host: HTMLElement): void {
+  // Document order. Each block decides "is there already a break before me?" by looking at
+  // what the PREVIOUS block left behind, so earlier blocks must be flattened first. A nested
+  // block is still in the tree after its ancestor dissolves, so the static list stays valid.
+  const blocks = Array.from(host.querySelectorAll(BLOCK_SELECTOR));
+  for (const block of blocks) {
+    const parent = block.parentNode;
+    if (!parent) continue;
+
+    // The placeholder <br> the browser leaves at the end of a block renders no line of its
+    // own. Only ONE is a placeholder: `A<br><br>` is A plus an empty line.
+    const last = block.lastChild;
+    if (last && isBr(last) && rendersBefore(last)) block.removeChild(last);
+    // `<div><br></div>`: the <br> IS the line, and it is an empty one.
+    const empty = !block.hasChildNodes() || (block.childNodes.length === 1 && isBr(block.firstChild));
+    if (empty) block.textContent = "";
+
+    const frag = document.createDocumentFragment();
+    if (rendersBefore(block) && !isBr(lastRendered(block.previousSibling))) {
+      frag.appendChild(document.createElement("br"));
+    }
+    while (block.firstChild) frag.appendChild(block.firstChild);
+    if (rendersAfter(block)) {
+      frag.appendChild(document.createElement("br"));
+    } else if (frag.lastChild && (empty || isBr(frag.lastChild))) {
+      // Last thing in the element and ending on a break: that break needs a second one to
+      // give its line somewhere to exist — the same trailing rule as insertLineBreak.
+      frag.appendChild(document.createElement("br"));
+    }
+    parent.replaceChild(frag, block);
+  }
+}
+
+/** The nearest preceding sibling that is not an empty text node. */
+function lastRendered(node: Node | null): Node | null {
+  for (let n = node; n; n = n.previousSibling) {
+    if (n.nodeType === Node.TEXT_NODE && (n.textContent ?? "") === "") continue;
+    return n;
+  }
+  return null;
+}
+
+/**
+ * Paste as plain text, newlines as `<br>`.
+ *
+ * Left to itself the browser pastes the clipboard's HTML — `<p>`, `<div>`, foreign styles,
+ * whatever the source app wrote. flattenBlocks would rescue the lines on commit, but the
+ * pasted fonts and colours would still fight the element's own. Plain text is what every
+ * design tool does on a paste into a text box.
+ */
+export function insertPlainText(host: HTMLElement, text: string): boolean {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return false;
+  const range = sel.getRangeAt(0);
+  if (!host.contains(range.commonAncestorContainer)) return false;
+
+  range.deleteContents();
+  const frag = document.createDocumentFragment();
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  lines.forEach((line, i) => {
+    if (i > 0) frag.appendChild(document.createElement("br"));
+    if (line) frag.appendChild(document.createTextNode(line));
+  });
+  const last = frag.lastChild;
+  if (!last) return true;
+  range.insertNode(frag);
+
+  // Same trailing-break rule as insertLineBreak: a final <br> needs something after it.
+  if (isBr(last) && !rendersAfter(last)) last.parentNode?.insertBefore(document.createElement("br"), last.nextSibling);
+
+  const after = document.createRange();
+  after.setStartAfter(last);
+  after.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(after);
+  return true;
+}

@@ -224,6 +224,9 @@ export function sameRunStyle(a: RunStyle, b: RunStyle): boolean {
  * BLOCK SPANS ARE NEVER MERGED. `renderLines` draws each body line as its own
  * `display:block` span, and every line after the first carries the same style string. Those
  * are separate lines, not duplicates: merging them joined lines 2..N into one on every commit.
+ *
+ * WHITESPACE IS NEVER DROPPED. Text elements render with `white-space: pre-wrap`, so a span
+ * holding only spaces, or spaces between two spans, is visible spacing the person typed.
  */
 const isBlockSpan = (attrs: string) => /display\s*:\s*block/i.test(attrs);
 
@@ -234,11 +237,13 @@ export function normaliseSpans(html: string): string {
   do {
     before = out;
     out = out
-      // An empty span renders nothing at all.
-      .replace(/<span\b[^>]*>\s*<\/span>/gi, "")
-      // A span whose only child is a byte-identical span is one span.
+      // An empty span renders nothing at all. EMPTY, not whitespace-only: the editor is
+      // `white-space: pre-wrap`, so spaces and newlines are content somebody typed.
+      .replace(/<span\b[^>]*><\/span>/gi, "")
+      // A span whose only child is a byte-identical span is one span. No `\s*` around the
+      // inner span for the same reason — whitespace there is text, and it renders.
       .replace(
-        /<span([^>]*)>\s*<span\1>([\s\S]*?)<\/span>\s*<\/span>/gi,
+        /<span([^>]*)><span\1>([\s\S]*?)<\/span><\/span>/gi,
         (full, attrs: string, inner: string) => (isBlockSpan(attrs) ? full : `<span${attrs}>${inner}</span>`)
       )
       // Two adjacent spans with byte-identical attributes are one span.

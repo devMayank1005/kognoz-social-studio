@@ -363,6 +363,12 @@ describe("geometry for chrome", () => {
 });
 
 describe("sanitiseHtml", () => {
+  it("turns block boundaries into breaks instead of running lines together", () => {
+    expect(sanitiseHtml("A<div>B</div>")).toBe("A<br/>B");
+    expect(sanitiseHtml("<p>A</p><p>B</p>")).toBe("A<br/>B");
+    expect(sanitiseHtml("<div>A</div>")).toBe("A");
+  });
+
   const GRADIENT =
     'background:linear-gradient(120deg, #009bdd, #75a02f);-webkit-background-clip:text;background-clip:text;color:transparent';
 

@@ -34,7 +34,7 @@ import {
   type TextElement
 } from "@/lib/slideElements";
 import { normaliseSpans } from "@/lib/richText";
-import { insertLineBreak } from "@/components/studio/caretBreak";
+import { flattenBlocks, insertLineBreak, insertPlainText } from "@/components/studio/caretBreak";
 import { pathFor } from "@/lib/shapeLibrary";
 import { isDrawableGradient, svgGradientCoords } from "@/lib/gradient";
 import { parseColor, toHex } from "@/lib/color";
@@ -145,9 +145,28 @@ function TextView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
 
+  // Line breaks that never arrive as a keydown Enter — IME, autocorrect, mobile keyboards —
+  // still reach the NATIVE beforeinput. React 18's onBeforeInput is synthesised from
+  // keypress/textInput and never sees `insertParagraph`, so this listens directly.
+  useEffect(() => {
+    if (!editing) return;
+    const node = ref.current;
+    if (!node) return;
+    const onBeforeInput = (e: InputEvent) => {
+      if (e.inputType !== "insertParagraph" && e.inputType !== "insertLineBreak") return;
+      if (insertLineBreak(node)) e.preventDefault();
+    };
+    node.addEventListener("beforeinput", onBeforeInput);
+    return () => node.removeEventListener("beforeinput", onBeforeInput);
+  }, [editing]);
+
   function commit() {
     const node = ref.current;
     if (!node || !onEditCommit) return;
+    // Blocks to <br> BEFORE reading the markup. Paste, IME and mobile keyboards still make
+    // <div>/<p> lines that sanitiseHtml would strip with no separator — the blank lines and
+    // line breaks the person saw would vanish the moment they clicked out.
+    flattenBlocks(node);
     // Sanitise first, then tidy: dropping a disallowed tag can leave two spans adjacent that
     // were not before. Styling a range wraps it in a span, so without the tidy pass the
     // stored markup grows a layer every time somebody restyles the same words.
@@ -171,6 +190,13 @@ function TextView({
         contentEditable
         suppressContentEditableWarning
         onBlur={commit}
+        onPaste={(e) => {
+          // Plain text, newlines as <br>: the clipboard's own HTML brings <p>/<div> lines and
+          // foreign styling with it.
+          const node = ref.current;
+          const text = e.clipboardData?.getData("text/plain");
+          if (node && typeof text === "string" && insertPlainText(node, text)) e.preventDefault();
+        }}
         onKeyDown={(e) => {
           // ENTER. Without this the browser picks the separator: Chrome and Safari insert a
           // <div>, which sanitiseHtml strips on commit while rejoining the text with nothing

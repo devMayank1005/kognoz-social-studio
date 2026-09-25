@@ -123,6 +123,16 @@ describe("normaliseSpans", () => {
     expect(normaliseSpans('a<span style="color: #fff"></span>b')).toBe("ab");
   });
 
+  it("keeps a span of nothing but spaces — under pre-wrap that is visible spacing", () => {
+    const html = 'a<span style="color: #fff">   </span>b';
+    expect(normaliseSpans(html)).toBe(html);
+  });
+
+  it("keeps whitespace sitting between an outer and an identical inner span", () => {
+    const html = '<span style="color: #fff"> <span style="color: #fff">x</span> </span>';
+    expect(normaliseSpans(html)).toBe(html);
+  });
+
   it("merges two adjacent spans that say the same thing", () => {
     const html = '<span style="color: #fff">Cul</span><span style="color: #fff">ture</span>';
     expect(normaliseSpans(html)).toBe('<span style="color: #fff">Culture</span>');

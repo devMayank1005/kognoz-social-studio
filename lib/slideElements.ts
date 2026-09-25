@@ -554,6 +554,15 @@ export function sanitiseHtml(html: string): string {
     .replace(/<!--[\s\S]*?-->/g, "")
     // Drop these with their contents, not just their tags.
     .replace(/<(script|style|iframe|object|embed)[\s\S]*?<\/\1\s*>/gi, "")
+    // A block boundary is a line break. The editor flattens blocks on the live DOM before it
+    // commits (components/studio/caretBreak.ts flattenBlocks); this is the safety net for
+    // markup that did not come through it, so lines degrade to breaks instead of being
+    // stripped below and run together as one word. Every block edge becomes a marker, a run
+    // of markers is one break, and edges at the very start or end are nothing.
+    .replace(/<\/?(?:div|p|li|h[1-6]|blockquote|pre)\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, "\u0001")
+    .replace(/\u0001+/g, "\u0001")
+    .replace(/^\u0001|\u0001$/g, "")
+    .replace(/\u0001/g, "<br/>")
     .replace(/<\/?([a-zA-Z][a-zA-Z0-9-]*)((?:[^>"']|"[^"]*"|'[^']*')*)\/?>/g, (full, rawTag: string, attrs: string) => {
       const tag = rawTag.toLowerCase();
       if (!ALLOWED_TAGS.has(tag)) return "";
